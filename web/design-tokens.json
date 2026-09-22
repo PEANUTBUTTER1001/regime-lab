@@ -1,0 +1,30 @@
+{
+  "$comment": "디자인 토큰 원본 (design.md §2, docs/regime-lab_prototype.html). 웹(css/app.css :root)과 추후 Unity(T-8)가 같은 값을 쓴다. 값을 바꾸면 css/app.css :root 도 함께 바꾼다.",
+  "color": {
+    "bg-canvas": "#0C1114",
+    "bg-surface": "#12191D",
+    "bg-control": "#1B2429",
+    "line": "#2A383B",
+    "text-primary": "#E8F0ED",
+    "text-secondary": "#97A9A3",
+    "accent-mint": "#88E6BC",
+    "text-on-mint": "#0C2B20",
+    "accent-amber": "#EAC07A",
+    "state-negative": "#EF8F8F",
+    "state-info": "#8AC4E8"
+  },
+  "layout": {
+    "header-height": 78,
+    "sidebar-width": 260,
+    "single-column-breakpoint": 1050,
+    "mobile-breakpoint": 680,
+    "min-hit-target": 44
+  },
+  "type": {
+    "page-title": 34,
+    "card-title": 19,
+    "body": 14,
+    "label": 12,
+    "meta": 11
+  }
+}

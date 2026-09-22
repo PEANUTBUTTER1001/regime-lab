@@ -1,0 +1,6 @@
+# 이 파일을 paths.local.yaml로 복사해 로컬 경로를 지정한다 (paths.local.yaml은 Git 제외).
+# 상대 경로는 저장소 루트(regime-lab/) 기준이다.
+store: store
+sql_dump: multi_tables_db/multi_tables_backup.sql
+cache: cache
+runs: runs

@@ -1,0 +1,30 @@
+[project]
+name = "regime-api"
+version = "0.1.0"
+description = "regime-lab 2단계 실행·결과 API와 LLM 보고서 — 과거 데이터 분석 도구이며 투자 권유가 아닙니다."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "regime-lab",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "openai>=1.40",
+]
+
+[project.scripts]
+regime-api = "regime_api.main:run"
+
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[tool.uv.sources]
+regime-lab = { path = "../engine", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/regime_api"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,24 @@
+# 원본 데이터 (C5, NFR-8) — 읽기 전용, 커밋 금지
+store/
+multi_tables_db/
+
+# 실행 결과·파생 데이터 캐시
+runs/
+cache/
+
+# 로컬 설정·비밀
+engine/config/paths.local.yaml
+.env
+.env.*
+
+# Python·도구
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# 에이전트·에디터 로컬 상태
+.idea/
+.omc/
+.claude/

@@ -1,0 +1,4 @@
+# 핵심 패턴 단일 전략. 청산 규칙을 생략하면 config/default.yaml 의 exit 기본값(A8)을 쓴다.
+name: breakout_vol
+patterns: [breakout_vol]
+combine: or
