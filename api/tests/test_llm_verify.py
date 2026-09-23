@@ -140,3 +140,36 @@ def test_openai_adapter_with_stub_client():
 
     with pytest.raises(LLMError):
         OpenAIProvider("k", "m", client=Boom).generate("s", "u")
+
+
+def test_facts_carry_korean_labels(done):
+    """report-v2: 본문에 코드값 대신 쓸 한국어 이름을 함께 넘긴다."""
+    _, _, _, facts = done
+    assert facts["strategy"]["patterns_ko"] == ["20일 고가 돌파"]
+    v = facts["validation"]
+    assert v["fdr_pass_ko"] in ("통과", "미통과") and v["random_pass_ko"] in ("통과", "미통과")
+    assert v["analysis_target_ko"] in ("분석 대상", "분석 대상 아님")
+    c = facts["cells"]
+    assert c["sufficient_cells"] == len(c["sufficient"])
+    assert c["sufficient_positive_cells"] + c["sufficient_negative_cells"] <= c["sufficient_cells"]
+    for cell in c["sufficient"]:
+        assert cell["regime_ko"] in ("상승장", "횡보장", "하락장", "국면 없음")
+        assert cell["market_ko"] in ("코스피", "코스닥") and cell["cap_group_ko"] in ("대형주", "중형주", "소형주")
+
+
+@pytest.mark.parametrize("with_cells", [True, False])
+def test_template_explains_regime_cells(done, with_cells):
+    import copy
+
+    _, _, _, facts = done
+    f = copy.deepcopy(facts)
+    if with_cells:
+        f["cells"]["sufficient"] = [{"regime": "bull", "market": "KOSDAQ", "cap_group": "mid", "regime_ko": "상승장",
+                                     "market_ko": "코스닥", "cap_group_ko": "중형주", "trades": 415, "mean_excess_pct": -3.33}]
+        f["cells"].update(sufficient_cells=1, sufficient_positive_cells=0, sufficient_negative_cells=1)
+    else:
+        f["cells"].update(sufficient=[], sufficient_cells=0, sufficient_positive_cells=0, sufficient_negative_cells=0)
+    text = render(f)
+    assert ("상승장·코스닥·중형주 -3.33%" in text) if with_cells else ("셀이 없어" in text)
+    assert "`" not in text and "negative_both" not in text
+    assert verify(text, f).ok

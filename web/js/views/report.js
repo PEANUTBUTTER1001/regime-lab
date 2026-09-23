@@ -14,7 +14,8 @@ function renderText(text) {
     const s = line.trim();
     if (!s) { flush(); continue; }
     const m = s.match(/^#{1,4}\s*(.+)$/);
-    if (m) { flush(); out.push(h('h3', {}, m[1])); } else para.push(s.replace(/\*\*/g, ''));
+    // AI 가 가끔 쓰는 마크다운 강조(굵게·백틱)와 목록 기호는 글자로 보이지 않게 지운다
+    if (m) { flush(); out.push(h('h3', {}, m[1].replace(/\*\*|`/g, ''))); } else para.push(s.replace(/\*\*|`/g, '').replace(/^[-*•]\s+/, ''));
   }
   flush();
   return out;

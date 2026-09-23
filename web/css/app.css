@@ -25,7 +25,7 @@ header { grid-column:1/-1; display:flex; align-items:center; justify-content:spa
 .badge { border:1px solid #315344; color:var(--mint); background:rgba(136,230,188,.07); border-radius:999px; padding:7px 11px; font-size:12px; }
 .badge.warn { border-color:#664f2a; color:var(--amber); background:rgba(234,192,122,.06); }
 .link-btn { background:none; border:0; color:var(--muted); text-decoration:underline; font-size:12px; min-height:44px; }
-aside.nav-panel { padding:25px 18px; background:var(--surface); border-right:1px solid var(--line); display:flex; flex-direction:column; gap:8px; }
+aside.nav-panel { padding:25px 18px; background:var(--surface); border-right:1px solid var(--line); display:flex; flex-direction:column; gap:8px; position:sticky; top:78px; height:calc(100vh - 78px); overflow-y:auto; align-self:start; }
 .nav-title { color:var(--muted); font-size:11px; letter-spacing:.13em; padding:0 13px 9px; text-transform:uppercase; }
 .nav { border:0; background:transparent; color:var(--muted); display:flex; gap:12px; align-items:center; text-align:left; padding:13px 14px; border-radius:10px; transition:.2s; text-decoration:none; min-height:44px; }
 .nav:hover { background:var(--control); color:var(--text); }
@@ -38,6 +38,11 @@ aside.nav-panel { padding:25px 18px; background:var(--surface); border-right:1px
 .lang-options .check input { width:17px; height:17px; }
 dl.info { display:grid; grid-template-columns:max-content 1fr; gap:10px 18px; font-size:13px; margin:0; }
 dl.info dt { color:var(--muted); } dl.info dd { margin:0; }
+.ai-card { margin-top:18px; }
+.ai-card h3.label { margin-top:0; }
+.ai-form label:first-child { margin-top:0; }
+.ai-actions { display:flex; gap:10px; align-items:center; margin-top:16px; }
+.ai-note { margin:16px 0 0; }
 main { min-width:0; padding:34px 38px 76px; overflow:hidden; }
 main:focus { outline:none; }
 .view { animation:fade .25s ease; }
@@ -175,7 +180,7 @@ footer.disclaimer { position:fixed; left:260px; right:0; bottom:0; background:rg
 
 @media(max-width:1050px) {
   .app { grid-template-columns:1fr; }
-  aside.nav-panel { grid-row:2; flex-direction:row; overflow:auto; padding:10px 14px; border-right:0; border-bottom:1px solid var(--line); }
+  aside.nav-panel { grid-row:2; flex-direction:row; overflow:auto; padding:10px 14px; border-right:0; border-bottom:1px solid var(--line); position:static; height:auto; }
   .nav-title,.sidebar-foot{display:none} .nav{white-space:nowrap;padding:9px 12px}
   main{padding:28px 20px 70px}
   .grid-three,.metrics,.detail-layout,.result-grid,.gates{grid-template-columns:1fr 1fr} .grid-three .card:last-child{grid-column:1/-1}

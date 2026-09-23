@@ -69,7 +69,7 @@ regime-lab/
 │  └─ tests/              pytest
 ├─ api/                   2단계 FastAPI (engine 을 경로 의존성으로 사용)
 │  ├─ src/regime_api/     main.py(앱·정적 서빙), jobs.py(실행 관리), schemas.py(입력 검증), routes/, llm/
-│  └─ tests/              test_run_contract, test_disclaimer, test_llm_verify
+│  └─ tests/              test_run_contract, test_disclaimer, test_llm_verify, test_llm_config
 ├─ web/                   3단계 HTML/JS Web UI (빌드 없음, API 서버가 같은 주소로 서빙)
 │  ├─ index.html, css/app.css, design-tokens.json
 │  ├─ js/                 app.js(라우터), api.js, charts.js(ECharts), views/, components/
@@ -203,21 +203,22 @@ uv run --project api regime-api
 | Stock Detail | 가격·이동평균·국면 배경·매매 마커, 종목 자산곡선과 단순 보유 비교, 거래 표 |
 | AI Report | 검증을 통과한 AI 해설(`verified`) 또는 템플릿(`fallback`), 근거 수치, 데이터 한계 |
 | Morning Briefing | 야간·뉴스 입력이 없어 `Data unavailable`과 사유만 표시합니다(추후 과제 T-2) |
-| 설정 (⚙) | 화면 언어(한국어 기본 / English), 데이터 기준일·범위 등 서버 데이터 정보 |
+| 설정 (⚙) | 화면 언어(한국어 기본 / English), **AI 보고서 모델명·API 키 입력**(서버 메모리에만 보관, 서버 종료 시 소멸 — 결정 E10 잠정, 추후 T-9 재논의), 데이터 기준일·범위 등 서버 데이터 정보 |
 
 **환경변수** (모두 선택)
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `REGIME_SAMPLE` | 0 | 1이면 30종목만 읽습니다(빠른 개발용) |
-| `REGIME_LLM_MODEL` | 없음 | OpenAI 모델명. 없으면 템플릿 보고서로 동작합니다 |
-| `OPENAI_API_KEY` | 없음 | OpenAI 키. 없으면 템플릿 보고서로 동작합니다 |
+| `REGIME_LLM_MODEL` | 없음 | OpenAI 모델명. 없으면 템플릿 보고서로 동작합니다. ⚙ 설정 화면 입력 값이 우선합니다 |
+| `OPENAI_API_KEY` | 없음 | OpenAI 키. 없으면 템플릿 보고서로 동작합니다. ⚙ 설정 화면 입력 값이 우선합니다 |
 | `REGIME_LLM_TIMEOUT` | 30 | LLM 호출 제한 시간(초) |
 | `REGIME_RUNS_DIR` | `runs/` | 실행 결과 폴더 |
 | `REGIME_CORS_ORIGINS` | 없음 | 개발용 추가 허용 출처(쉼표 구분). 기본은 같은 출처만 허용합니다 |
 | `REGIME_HOST` / `REGIME_PORT` | 127.0.0.1 / 8000 | 서버 주소 |
 
 - API 명세는 `http://127.0.0.1:8000/docs`(OpenAPI)에서 볼 수 있습니다. 오류 응답은 모두 `{code, message, detail, retryable}` 형식입니다.
+- `GET/PUT/DELETE /api/llm/config`: AI 보고서 모델명·키 조회·적용·지우기. 응답에는 키 마지막 4자리만 담고, PUT·DELETE는 이 PC(루프백) 요청만 받습니다(`403 local_only`). 적용한 값은 서버 메모리에만 있고 재시작하면 환경변수 값으로 돌아갑니다. 보고서 캐시(`cache/llm_reports/`)는 유지되며 키를 담지 않습니다.
 - 실행은 한 번에 1개만 할 수 있습니다. 실행 중 새 요청은 `409 busy`와 현재 `run_id`를 받습니다.
 - 서버는 기본적으로 `127.0.0.1`에만 열립니다. 로그인이 실제 인증이 아니므로 외부에 공개하지 마세요.
 - 제품명 표기(`regime-lab`)는 `web/js/config.js` 한 곳에서 관리합니다.
@@ -310,14 +311,14 @@ cap_groups: [mid, small]                 # large, mid, small
 ## 테스트
 
 ```bash
-cd engine
-uv run pytest
+uv run --project engine python -m pytest engine
 ```
 
 ```bash
-cd api
-uv run pytest
+uv run --project api python -m pytest api
 ```
+
+> 저장소 폴더를 옮긴 뒤에는 `uv run pytest`가 `trampoline failed to canonicalize script path`로 실패할 수 있어 `python -m pytest` 형식을 씁니다.
 
 API 테스트는 30종목 준비 프레임과 임시 폴더로 서버를 띄우고, LLM은 가짜 공급사로 대신합니다(키 불필요).
 
@@ -331,6 +332,7 @@ API 테스트는 30종목 준비 프레임과 임시 폴더로 서버를 띄우�
 | `test_run_contract` (api) | `run_id` 일관성, 상태·취소·결과, 입력 단위·필드별 422, busy, 재시작 복구, 예상 종목 수 |
 | `test_disclaimer` (api) | 모든 결과 응답의 고지·거래 수, 브리핑 `data_unavailable` |
 | `test_llm_verify` (api) | 입력에 없는 숫자·권유 표현 거부, 템플릿 대체, 캐시, OpenAI 어댑터 |
+| `test_llm_config` (api) | 설정 화면 모델명·키 적용·조회·지우기, 키 원문 비노출(응답·캐시·오류 문구), 재시작 시 소멸, 422·403 |
 | 그 외 | 로더, 워밍업, 유니버스·그룹, 국면, 패턴, 집계, 실행 저장·재현성 |
 
 - `store/`가 없으면 데이터가 필요한 테스트는 skip되고 합성 데이터 테스트만 실행됩니다.
