@@ -14,8 +14,8 @@ from regime_api.llm.verify import verify
 from regime_lab.runs import DISCLAIMER
 
 REASONS = {
-    "llm_model_not_configured": "LLM 모델명이 설정되지 않아 템플릿 보고서를 표시합니다 (REGIME_LLM_MODEL).",
-    "llm_key_not_configured": "LLM API 키가 없어 템플릿 보고서를 표시합니다 (OPENAI_API_KEY).",
+    "llm_model_not_configured": "LLM 모델명이 설정되지 않아 템플릿 보고서를 표시합니다. ⚙ 설정에서 입력하거나 REGIME_LLM_MODEL 을 설정하세요.",
+    "llm_key_not_configured": "LLM API 키가 없어 템플릿 보고서를 표시합니다. ⚙ 설정에서 입력하거나 OPENAI_API_KEY 를 설정하세요.",
     "gemini_not_implemented": "Gemini 어댑터가 아직 구현되지 않아 템플릿 보고서를 표시합니다.",
     "anthropic_not_implemented": "Anthropic 어댑터가 아직 구현되지 않아 템플릿 보고서를 표시합니다.",
     "llm_provider_unknown": "알 수 없는 LLM 공급사라 템플릿 보고서를 표시합니다.",

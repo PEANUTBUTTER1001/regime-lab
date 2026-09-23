@@ -40,4 +40,7 @@ export const api = {
   report: (id, strategy) =>
     request('POST', `/runs/${encodeURIComponent(id)}/report${strategy ? `?strategy=${encodeURIComponent(strategy)}` : ''}`),
   briefing: () => request('GET', '/briefing'),
+  llmConfig: () => request('GET', '/llm/config'),
+  setLlmConfig: (body) => request('PUT', '/llm/config', body),
+  clearLlmConfig: () => request('DELETE', '/llm/config'),
 };

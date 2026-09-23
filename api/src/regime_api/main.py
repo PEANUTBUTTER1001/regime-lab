@@ -48,6 +48,9 @@ class AppState:
             self.tickers = load_sample_tickers(self.paths.store)
         self.jobs = JobManager(self.paths.runs, self.require_prep, self.cfg, self.paths, self.tickers)
         self.reports = ReportService(settings, self.cfg, self.paths)
+        # 설정 화면에서 바꾼 LLM 값은 메모리에만 둔다. 지우기 시 시작 시점의 환경변수 값으로 돌아간다 (E10).
+        self.llm_env = (settings.llm_model, settings.llm_api_key)
+        self.llm_source = "env"
 
     def load(self) -> None:
         try:
@@ -82,9 +85,9 @@ def create_app(settings: Settings | None = None, prep: Prepared | None = None, s
         app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"],
                            allow_headers=["*"])
 
-    from regime_api.routes import briefing, meta, report, results, runs
+    from regime_api.routes import briefing, llm, meta, report, results, runs
 
-    for r in (meta.router, runs.router, results.router, report.router, briefing.router):
+    for r in (meta.router, runs.router, results.router, report.router, briefing.router, llm.router):
         app.include_router(r, prefix="/api")
     if serve_web and settings.web_dir.exists():
         app.mount("/", RevalidatingStaticFiles(directory=settings.web_dir, html=True), name="web")
