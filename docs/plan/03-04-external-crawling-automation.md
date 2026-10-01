@@ -176,7 +176,7 @@
   state.sqlite                                         ingest_runs·coverage·cursors·seen_keys
 ```
 
-- 원본 시세 데이터(`store/`, `multi_tables_db/`)와 **다른 폴더**에 둔다. `regime.duckdb`는 쓰지 않는다.
+- 원본 시세 데이터 (`data/`, `multi_tables_db/`)와 **다른 폴더**에 둔다. `regime.duckdb`는 쓰지 않는다.
 - 보관 만료·삭제 요청이 오면 `docs`에서 해당 버전을 `deleted` 처리하고, RAG 색인·브리핑 캐시에 삭제를 전파하는 목록을 남긴다.
 
 ## 8. 코드 배치 (제안, §9 승인 대상)

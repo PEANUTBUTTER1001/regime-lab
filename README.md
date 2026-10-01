@@ -44,7 +44,7 @@ regime-lab은 **코스피·코스닥 일봉 데이터로 기술적 매매 패턴
 
 - Windows / macOS / Linux, **Python 3.12**, [uv](https://docs.astral.sh/uv/)
 - 메모리 8GB 이상 (실행 중 최대 약 2.4GB 사용)
-- 원본 데이터: 저장소 루트에 `store/`(시세 데이터)와 `multi_tables_db/`(SQL 덤프). **저장소에는 포함되지 않습니다.**
+- 원본 데이터: 저장소 루트에 `data`(시세 데이터)와 `multi_tables_db/`(SQL 덤프). **저장소에는 포함되지 않습니다.**
 
 ### 처음 한 번
 
