@@ -1,5 +1,4 @@
 # 원본 데이터 (C5, NFR-8) — 읽기 전용, 커밋 금지
-store/
 multi_tables_db/
 
 # 실행 결과·파생 데이터 캐시
@@ -22,3 +21,6 @@ __pycache__/
 .idea/
 .omc/
 .claude/
+
+#DB
+data/
