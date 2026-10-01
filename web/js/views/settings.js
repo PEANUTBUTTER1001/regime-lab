@@ -36,7 +36,8 @@ export async function renderSettings(el) {
     ...row(t('set.asOf'), meta?.data_as_of),
     ...row(t('set.start'), meta?.backtest_start),
     ...row(t('set.scope'), meta ? t(meta.scope === 'sample30' ? 'set.scopeSample' : 'set.scopeAll') : null),
-    ...row(t('set.status'), meta?.status && has(`set.st.${meta.status}`) ? t(`set.st.${meta.status}`) : meta?.status));
+    ...row(t('set.status'), meta?.status && has(`set.st.${meta.status}`) ? t(`set.st.${meta.status}`) : meta?.status),
+    ...row(t('set.limits'), t('set.limitU3')));  // U3-1 한계 고지 (2026-10-01 확정, 구현_전_결정사항 §2.2)
 }
 
 // AI 보고서 공급사 설정 (결정 E10 잠정). 키는 서버 메모리에만 두며 서버를 끄면 사라진다.

@@ -381,6 +381,8 @@ const D = {
   'set.st.ready': ['준비됨', 'Ready'],
   'set.st.warming_up': ['데이터 불러오는 중', 'Loading data'],
   'set.st.failed': ['데이터 불러오기 실패', 'Data load failed'],
+  'set.limits': ['알려진 제한', 'Known limitation'],
+  'set.limitU3': ['코스피는 원본에 소속부 값이 없어 관리종목·투자주의환기 제외가 코스닥에만 적용됩니다.', 'KOSPI source data has no listing-section field, so the exclusion of administrative-issue and investment-caution stocks applies to KOSDAQ only.'],
   'set.ai.title': ['AI 보고서', 'AI report'],
   'set.ai.sub': ['AI 보고서에 쓸 OpenAI 모델명과 API 키를 입력합니다. 적용하면 다음 보고서부터 바로 쓰입니다.', 'Enter the OpenAI model name and API key for the AI report. Once applied, they are used from the next report.'],
   'set.ai.model': ['모델명', 'Model name'],
