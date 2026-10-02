@@ -13,8 +13,8 @@ const STATUS_KIND = { both: '', explore_only: 'warn', not_evaluated: 'neutral', 
 function loadDraft() { try { return JSON.parse(sessionStorage.getItem(DRAFT) || 'null'); } catch { return null; } }
 function saveDraft(f) { try { sessionStorage.setItem(DRAFT, JSON.stringify(f)); } catch { /* 저장 불가 */ } }
 const dayAfter = (d) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); };
-const duration = (sec) => (sec >= 90 ? t('s.minutes', { m: Math.round(sec / 60) }) : t('s.seconds', { s: Math.round(sec) }));
-const pctLabel = (v) => (v == null ? t('s.none') : `${v > 0 ? '+' : ''}${v}%`);
+const duration = (sec) => (sec >= 90 ? t('sx.minutes', { m: Math.round(sec / 60) }) : t('sx.seconds', { s: Math.round(sec) }));
+const pctLabel = (v) => (v == null ? t('sx.none') : `${v > 0 ? '+' : ''}${v}%`);
 
 function defaults(meta, opt) {
   return {
@@ -29,20 +29,20 @@ function defaults(meta, opt) {
 function validate(f, meta, opt) {
   const e = {};
   const w = Number(f.target);
-  if (f.target === '' || Number.isNaN(w) || w < 0 || w > 100) e.target_win_rate = t('s.v.target');
+  if (f.target === '' || Number.isNaN(w) || w < 0 || w > 100) e.target_win_rate = t('sx.v.target');
   const mt = Number(f.minTrades);
   if (!Number.isInteger(mt) || mt < opt.min_trades.min || mt > opt.min_trades.max) {
-    e.min_trades = t('s.minTradesHint', { a: opt.min_trades.min, b: opt.min_trades.max, d: opt.min_trades.default });
+    e.min_trades = t('sx.minTradesHint', { a: opt.min_trades.min, b: opt.min_trades.max, d: opt.min_trades.default });
   }
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(f.name)) e.name = t('v.name');
-  for (const k of ['patterns', 'combine', 'stop', 'profit', 'hold']) if (!f[k].length) e[`axes.${k}`] = t('s.v.axis');
+  for (const k of ['patterns', 'combine', 'stop', 'profit', 'hold']) if (!f[k].length) e[`axes.${k}`] = t('sx.v.axis');
   if (!f.markets.length) e['filters.markets'] = t('v.markets');
   if (!f.caps.length) e['filters.cap_groups'] = t('v.caps');
   const mv = Number(f.minValue);
   if (!Number.isInteger(mv) || mv < meta.min_avg_value_krw) e['filters.min_avg_value_krw'] = t('v.value', { v: fmt.int(meta.min_avg_value_krw) });
   if (!DATE_RE.test(f.start) || !DATE_RE.test(f.end)) e['filters.period'] = t('v.date');
   else if (f.start < meta.backtest_start || f.end > meta.data_as_of || !(f.start <= opt.split_date && opt.split_date < f.end)) {
-    e['filters.period'] = t('s.v.period', { d: opt.split_date });
+    e['filters.period'] = t('sx.v.period', { d: opt.split_date });
   }
   return e;
 }
@@ -60,14 +60,14 @@ const SERVER_KEY = { 'axes.stop_loss_pct': 'axes.stop', 'axes.take_profit_pct': 
 
 // ================================================================ 입력 화면 (#/search)
 export async function renderSearch(el) {
-  el.append(h('h1', { text: t('s.title') }), loading(t('b.loadingData')));
+  el.append(h('h1', { text: t('sx.title') }), loading(t('b.loadingData')));
   let meta = state.meta;
   let opt;
   try {
     if (!meta || meta.status !== 'ready') { meta = await api.meta(); state.meta = meta; }
     opt = await api.searchOptions();
   } catch (e) {
-    el.replaceChildren(h('h1', { text: t('s.title') }), errorView(e, { onRetry: () => { el.replaceChildren(); renderSearch(el); } }));
+    el.replaceChildren(h('h1', { text: t('sx.title') }), errorView(e, { onRetry: () => { el.replaceChildren(); renderSearch(el); } }));
     return;
   }
   if (meta.status !== 'ready') {
@@ -102,16 +102,16 @@ export async function renderSearch(el) {
   const minIn = numIn('s-min', 'minTrades', 'numeric');
   targetIn.setAttribute('aria-describedby', slotId('target_win_rate'));
   minIn.setAttribute('aria-describedby', slotId('min_trades'));
-  const goalCard = h('article', { class: 'card' }, h('h2', {}, t('s.goal')),
-    h('p', { class: 'card-sub', text: t('s.goalSub') }),
-    h('label', { for: 's-target' }, t('s.target')), targetIn, errorSlot('target_win_rate'),
-    h('label', { for: 's-min' }, t('s.minTrades')), minIn,
-    h('p', { class: 'hint', text: t('s.minTradesHint', { a: opt.min_trades.min, b: opt.min_trades.max, d: opt.min_trades.default }) }),
+  const goalCard = h('article', { class: 'card' }, h('h2', {}, t('sx.goal')),
+    h('p', { class: 'card-sub', text: t('sx.goalSub') }),
+    h('label', { for: 's-target' }, t('sx.target')), targetIn, errorSlot('target_win_rate'),
+    h('label', { for: 's-min' }, t('sx.minTrades')), minIn,
+    h('p', { class: 'hint', text: t('sx.minTradesHint', { a: opt.min_trades.min, b: opt.min_trades.max, d: opt.min_trades.default }) }),
     errorSlot('min_trades'));
 
   // ---------------------------------------------------------------- 탐색 범위
-  const rangeCard = h('article', { class: 'card' }, h('h2', {}, t('s.range')),
-    h('p', { class: 'card-sub', text: t('s.rangeSub') }),
+  const rangeCard = h('article', { class: 'card' }, h('h2', {}, t('sx.range')),
+    h('p', { class: 'card-sub', text: t('sx.rangeSub') }),
     h('span', { class: 'label' }, t('b.patterns')),
     h('div', { class: 'checks', role: 'group', 'aria-label': t('b.patterns') }, opt.patterns.map((p) => {
       const box = h('input', { type: 'checkbox', checked: f.patterns.includes(p), 'aria-label': patLabel(p), 'aria-describedby': slotId('axes.patterns') });
@@ -123,18 +123,18 @@ export async function renderSearch(el) {
       });
       return lab;
     })), errorSlot('axes.patterns'),
-    h('span', { class: 'label' }, t('s.combine')), multi('combine', opt.axes.combine, (c) => c.toUpperCase(), t('s.combine'), 'axes.combine'), errorSlot('axes.combine'),
-    h('span', { class: 'label' }, t('s.stop')), multi('stop', opt.axes.stop_loss_pct, pctLabel, t('s.stop'), 'axes.stop'), errorSlot('axes.stop'),
-    h('span', { class: 'label' }, t('s.profit')), multi('profit', opt.axes.take_profit_pct, pctLabel, t('s.profit'), 'axes.profit'), errorSlot('axes.profit'),
-    h('span', { class: 'label' }, t('s.hold')), multi('hold', opt.axes.max_hold_days, (d) => String(d), t('s.hold'), 'axes.hold'), errorSlot('axes.hold'));
+    h('span', { class: 'label' }, t('sx.combine')), multi('combine', opt.axes.combine, (c) => c.toUpperCase(), t('sx.combine'), 'axes.combine'), errorSlot('axes.combine'),
+    h('span', { class: 'label' }, t('sx.stop')), multi('stop', opt.axes.stop_loss_pct, pctLabel, t('sx.stop'), 'axes.stop'), errorSlot('axes.stop'),
+    h('span', { class: 'label' }, t('sx.profit')), multi('profit', opt.axes.take_profit_pct, pctLabel, t('sx.profit'), 'axes.profit'), errorSlot('axes.profit'),
+    h('span', { class: 'label' }, t('sx.hold')), multi('hold', opt.axes.max_hold_days, (d) => String(d), t('sx.hold'), 'axes.hold'), errorSlot('axes.hold'));
 
   // ---------------------------------------------------------------- 대상·기간
   const dateIn = (id, key) => h('input', { id, type: 'date', value: f[key], min: meta.backtest_start, max: meta.data_as_of,
     'aria-describedby': slotId('filters.period'), onchange: (e) => { f[key] = e.target.value; changed(); } });
   const valueIn = h('input', { id: 's-value', inputmode: 'numeric', value: String(f.minValue), 'aria-describedby': slotId('filters.min_avg_value_krw'),
     oninput: (e) => { f.minValue = e.target.value.replace(/[,\s]/g, ''); changed(); } });
-  const scopeCard = h('article', { class: 'card' }, h('h2', {}, t('s.scope')),
-    h('p', { class: 'card-sub', text: t('s.scopeSub', { d: opt.split_date }) }),
+  const scopeCard = h('article', { class: 'card' }, h('h2', {}, t('sx.scope')),
+    h('p', { class: 'card-sub', text: t('sx.scopeSub', { d: opt.split_date }) }),
     h('span', { class: 'label' }, t('b.market')), multi('markets', meta.markets, (m) => m, t('b.market'), 'filters.markets'), errorSlot('filters.markets'),
     h('div', { class: 'field-two' },
       h('div', {}, h('label', { for: 's-start' }, t('b.start')), dateIn('s-start', 'start')),
@@ -147,17 +147,17 @@ export async function renderSearch(el) {
   // ---------------------------------------------------------------- 실행 막대
   const nameIn = h('input', { id: 's-name', value: f.name, style: { maxWidth: '260px' }, 'aria-describedby': slotId('name'),
     oninput: (e) => { f.name = e.target.value.trim(); changed(); } });
-  const countBox = h('div', { 'aria-live': 'polite', class: 'run-facts', style: { display: 'block' } }, t('s.counting'));
+  const countBox = h('div', { 'aria-live': 'polite', class: 'run-facts', style: { display: 'block' } }, t('sx.counting'));
   const serverBox = h('div', { class: 'callout hidden', role: 'alert' });
-  const runBtn = h('button', { class: 'primary', type: 'button' }, `${t('s.run')} `, h('span', { 'aria-hidden': 'true' }, '→'));
+  const runBtn = h('button', { class: 'primary', type: 'button' }, `${t('sx.run')} `, h('span', { 'aria-hidden': 'true' }, '→'));
   const runbar = h('div', { class: 'runbar' },
-    h('div', {}, h('label', { for: 's-name', style: { margin: '0 0 4px' } }, t('s.name')), nameIn, errorSlot('name'), countBox),
+    h('div', {}, h('label', { for: 's-name', style: { margin: '0 0 4px' } }, t('sx.name')), nameIn, errorSlot('name'), countBox),
     runBtn);
 
   el.append(
     h('div', { class: 'topline' },
-      h('div', {}, h('div', { class: 'eyebrow' }, t('s.eyebrow')), h('h1', { text: t('s.title') }), h('p', { class: 'lead', text: t('s.lead') })),
-      h('div', { class: 'notice' }, t('s.notice', { s: opt.split_date, e: dayAfter(opt.split_date), n: opt.max_candidates }))),
+      h('div', {}, h('div', { class: 'eyebrow' }, t('sx.eyebrow')), h('h1', { text: t('sx.title') }), h('p', { class: 'lead', text: t('sx.lead') })),
+      h('div', { class: 'notice' }, t('sx.notice', { s: opt.split_date, e: dayAfter(opt.split_date), n: opt.max_candidates }))),
     h('div', { class: 'grid-three' }, goalCard, rangeCard, scopeCard), serverBox, runbar);
 
   // ---------------------------------------------------------------- 동작
@@ -175,18 +175,18 @@ export async function renderSearch(el) {
   }
   async function refreshCount() {
     const e = validate(f, meta, opt);
-    if (Object.keys(e).length) { countBox.textContent = t('s.fixFirst'); withinLimit = false; return; }
+    if (Object.keys(e).length) { countBox.textContent = t('sx.fixFirst'); withinLimit = false; return; }
     const my = ++seq;
-    countBox.textContent = t('s.counting');
+    countBox.textContent = t('sx.counting');
     try {
       const p = await api.searchPreview(toBody(f));
       if (my !== seq) return;
       withinLimit = p.within_limit;
       countBox.replaceChildren(p.within_limit
-        ? h('span', {}, h('b', {}, t('s.count', { n: fmt.int(p.candidates), t: duration(p.estimated_sec) })), h('br'), h('small', { class: 'muted' }, t('s.countSub')))
-        : h('b', { class: 'warning' }, t('s.over', { n: fmt.int(p.candidates), m: p.max_candidates })));
+        ? h('span', {}, h('b', {}, t('sx.count', { n: fmt.int(p.candidates), t: duration(p.estimated_sec) })), h('br'), h('small', { class: 'muted' }, t('sx.countSub')))
+        : h('b', { class: 'warning' }, t('sx.over', { n: fmt.int(p.candidates), m: p.max_candidates })));
     } catch (err) {
-      if (my === seq) { withinLimit = false; countBox.textContent = t('s.countErr', { m: err.message }); }
+      if (my === seq) { withinLimit = false; countBox.textContent = t('sx.countErr', { m: err.message }); }
     }
   }
   function changed() {
@@ -218,7 +218,7 @@ export async function renderSearch(el) {
         for (const [k, v] of Object.entries(err.detail.fields)) mapped[SERVER_KEY[k] || k.replace(/\[\d+\]$/, '')] = v;
         showErrors(mapped);
         const unknown = Object.keys(mapped).filter((k) => !errEls[k]);
-        serverBox.replaceChildren(h('b', {}, t('s.serverFields')), h('ul', {}, Object.entries(err.detail.fields).map(([k, v]) => h('li', {}, `${k}: ${v}`))));
+        serverBox.replaceChildren(h('b', {}, t('sx.serverFields')), h('ul', {}, Object.entries(err.detail.fields).map(([k, v]) => h('li', {}, `${k}: ${v}`))));
         serverBox.classList.toggle('hidden', !unknown.length);
         toast(t('b.serverRejected'));
       } else if (err.code === 'busy') {
