@@ -28,6 +28,41 @@ def load_first_dates(cache: Path) -> pd.DataFrame | None:
     return pd.read_parquet(f) if f.exists() else None
 
 
+def index_warmup_file(cache: Path) -> Path:
+    """X5 과거 지수 파일 (scripts/fetch_index_history.py 가 만든다)."""
+    return cache / "warmup" / "index_warmup.parquet"
+
+
+def load_index_warmup(cache: Path) -> pd.DataFrame | None:
+    f = index_warmup_file(cache)
+    return pd.read_parquet(f) if f.exists() else None
+
+
+def index_warmup_fingerprint(cache: Path) -> str:
+    """준비 캐시 키용 지문. 파일이 생기거나 바뀌면 캐시가 다시 계산된다."""
+    f = index_warmup_file(cache)
+    if not f.exists():
+        return "none"
+    st = f.stat()
+    return f"size={st.st_size};mtime={int(st.st_mtime)}"
+
+
+def attach_index_warmup(index: pd.DataFrame, warm: pd.DataFrame | None, cfg: dict) -> pd.DataFrame:
+    """X5: store 지수 앞에 과거 지수를 붙인다 (시장 국면 200일선·20일 기울기 워밍업용).
+
+    시장마다 [warmup_source_start, store 첫날) 구간만 붙이고 겹치는 날짜는 store 값을 쓴다.
+    market_regime_start 이전 날짜의 국면은 regime.market_regime 이 null 로 둔다.
+    """
+    if warm is None or warm.empty:
+        return index
+    first = index.groupby("market")["date"].min()
+    w = warm[warm["market"].isin(first.index) & (warm["date"] >= pd.Timestamp(cfg["data"]["warmup_source_start"]))]
+    w = w[w["date"] < w["market"].map(first)]
+    out = pd.concat([w[index.columns], index], ignore_index=True)
+    out["date"] = out["date"].astype(index["date"].dtype)  # 입력 지수의 날짜 해상도를 유지
+    return out.sort_values(["market", "date"], kind="stable").reset_index(drop=True)
+
+
 def link_ratios(daily: pd.DataFrame, warm: pd.DataFrame, backtest_start: str) -> pd.Series:
     """종목별 보정 비율 = store 종가 / kor_price 종가 (backtest_start 당일)."""
     t0 = pd.Timestamp(backtest_start)
