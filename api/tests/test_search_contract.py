@@ -61,6 +61,7 @@ def test_options(client):
     assert len(o["patterns"]) == 10 and o["max_candidates"] == 200  # 핵심 5종 + 후순위 5종(X6)
     assert o["defaults"]["patterns"] == ["ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover"]
     assert o["min_trades"] == {"default": 300, "min": 30, "max": 5000}
+    assert 0 <= o["target_win_rate_default"] <= 1
     assert o["axes"]["max_hold_days"] == [3, 5, 10, 20, 40, 60] and o["split_date"] == "2024-02-29"
     assert "not_evaluated" in o["statuses"]
 
