@@ -1,4 +1,7 @@
 # 원본 데이터 (C5, NFR-8) — 읽기 전용, 커밋 금지
+# /data/ 는 저장소 루트의 원본 폴더만 가리킨다 (engine/src/regime_lab/data/ 코드 패키지는 추적)
+/data/
+store/
 multi_tables_db/
 
 # 실행 결과·파생 데이터 캐시
@@ -21,6 +24,3 @@ __pycache__/
 .idea/
 .omc/
 .claude/
-
-#DB
-data/
