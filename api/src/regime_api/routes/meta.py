@@ -18,6 +18,12 @@ PATTERN_INFO = {
     "breakout_vol": ("Breakout with volume surge", "20-day breakout and volume(t) ≥ 2.0 × prior 20-day average"),
     "rsi_rebound": ("RSI 30 recovery", "RSI14(t-1) < 30 and RSI14(t) ≥ 30 (14-day simple average)"),
     "bb_lower_recover": ("Bollinger lower recovery", "Close(t-1) < lower band(t-1) and close(t) ≥ lower band(t), 20d 2σ"),
+    # X6 후순위 5종 (r1)
+    "three_down_up": ("3 down days then up", "3 consecutive lower closes to t-1, then an up candle closing above the prior close"),
+    "bb_squeeze_break": ("Bollinger squeeze breakout", "Prior-day band width at its 125-day low, then the first close above the upper band"),
+    "pullback_ma20": ("20-day MA pullback", "Rising 20-day MA, low touches it (+1% / −2%), up candle closing above it"),
+    "granville_buy1": ("Granville buy rule 1", "200-day MA slope turns up and close crosses above it on the same day"),
+    "engulfing": ("Bullish engulfing", "Up-candle body engulfs the prior down-candle body after a 3-day decline"),
 }
 
 

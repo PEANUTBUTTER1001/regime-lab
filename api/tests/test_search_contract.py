@@ -58,7 +58,8 @@ def test_openapi_lists_new_paths(client):
 
 def test_options(client):
     o = client.get("/api/searches/options").json()
-    assert len(o["patterns"]) == 5 and o["max_candidates"] == 200
+    assert len(o["patterns"]) == 10 and o["max_candidates"] == 200  # 핵심 5종 + 후순위 5종(X6)
+    assert o["defaults"]["patterns"] == ["ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover"]
     assert o["min_trades"] == {"default": 300, "min": 30, "max": 5000}
     assert o["axes"]["max_hold_days"] == [3, 5, 10, 20, 40, 60] and o["split_date"] == "2024-02-29"
     assert "not_evaluated" in o["statuses"]

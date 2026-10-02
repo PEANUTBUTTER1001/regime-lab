@@ -100,7 +100,7 @@ class SearchRequest:
         for k in set(raw_axes) - set(AXIS_KEYS) - {PARAM_AXIS}:
             errors[f"axes.{k}"] = "Key not allowed"
         allowed = {"patterns": list(CORE_PATTERNS), **scfg["axes"]}
-        defaults = {"patterns": list(CORE_PATTERNS), **scfg["defaults"]}
+        defaults = {"patterns": list(CORE_PATTERNS), **scfg["defaults"]}  # 설정에 patterns 기본값이 있으면 그것
         for k in AXIS_KEYS:
             v = raw_axes.get(k, defaults[k])
             if not isinstance(v, list) or not v:

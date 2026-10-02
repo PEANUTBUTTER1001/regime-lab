@@ -109,7 +109,7 @@ const D = {
   'b.notice': ['다음 날 시가 체결 · 왕복 비용 {c}% · 데이터 기준일 {d}', 'Next-day open execution · Round-trip cost {c}% · Data as of {d}'],
   'b.loadingData': ['서버에서 분석 데이터를 불러오는 중…', 'Loading analysis data on the server…'],
   'b.buy': ['매수 조건', 'Buy conditions'],
-  'b.buySub': ['고정 패턴을 1개 이상 고르세요. 신호는 그날까지 확정된 정보만 씁니다. 패턴 파라미터는 바꿀 수 없습니다.', 'Choose one or more fixed patterns. Signals use information available only on that day. Pattern parameters cannot be changed.'],
+  'b.buySub': ['패턴을 1개 이상 고르세요. 신호는 그날까지 확정된 정보만 씁니다. 일부 패턴 수치는 아래 세부 조건에서 허용 범위 안에서만 바꿀 수 있습니다.', 'Choose one or more patterns. Signals use information available only on that day. Some pattern values can be changed within allowed ranges under Details below.'],
   'b.logic': ['진입 결합 방식', 'Entry logic'],
   'b.patterns': ['패턴', 'Patterns'],
   'b.exit': ['매도·청산 규칙', 'Sell & exit rules'],
@@ -635,6 +635,24 @@ const D = {
   'pp.searchHint': ['고르지 않으면 기본값 {d} 하나만 씁니다. 고른 값 수만큼 이 패턴이 든 조합이 늘어납니다.', 'If none is chosen, only the default {d} is used. Each chosen value multiplies the combinations that include this pattern.'],
   'pp.rsi_rebound.threshold': ['RSI 문턱', 'RSI threshold'],
   'pp.breakout_vol.volume_mult': ['거래량 배수', 'Volume multiple'],
+  // 후순위 패턴 5종 (X6)
+  'pat.three_down_up': ['3일 하락 뒤 반등', '3 down days then up'],
+  'pat.bb_squeeze_break': ['볼린저 수축 돌파', 'Bollinger squeeze breakout'],
+  'pat.pullback_ma20': ['20일선 눌림목', '20-day MA pullback'],
+  'pat.granville_buy1': ['그랜빌 매수 1법칙', 'Granville buy rule 1'],
+  'pat.engulfing': ['상승 장악형', 'Bullish engulfing'],
+  'rule.three_down_up': ['전일까지 종가 3번 연속 하락 뒤, 당일 양봉이 전일 종가보다 높게 마감', '3 consecutive lower closes to the prior day, then an up candle closing above the prior close'],
+  'rule.bb_squeeze_break': ['전일 볼린저 밴드폭이 125일 최저, 당일 종가가 상단을 처음 돌파', 'Prior-day band width at its 125-day low, then the first close above the upper band'],
+  'rule.pullback_ma20': ['상승 중인 20일선에 저가가 닿고(+1%·−2% 이내) 양봉으로 20일선 위 마감', 'Rising 20-day MA; the low touches it (within +1% / −2%) and an up candle closes above it'],
+  'rule.granville_buy1': ['200일선 기울기가 상승으로 바뀌는 날 종가가 200일선을 위로 돌파', 'The 200-day MA slope turns up and the close crosses above it on the same day'],
+  'rule.engulfing': ['3일 하락 뒤 당일 양봉 몸통이 전일 음봉 몸통을 감쌈', 'After a 3-day decline, the up-candle body engulfs the prior down-candle body'],
+  'pp.three_down_up.down_days': ['연속 하락 일수', 'Down days'],
+  'pp.bb_squeeze_break.squeeze_lookback': ['수축 비교 기간(일)', 'Squeeze lookback (days)'],
+  'pp.pullback_ma20.touch_tolerance_pct': ['접근 허용(%)', 'Touch tolerance (%)'],
+  'pp.pullback_ma20.max_penetration_pct': ['최대 침투(%)', 'Max penetration (%)'],
+  'pp.granville_buy1.slope_days': ['기울기 비교 일수', 'Slope days'],
+  'pp.engulfing.min_body_ratio': ['몸통 최소 배수', 'Min body ratio'],
+  'pp.engulfing.trend_days': ['직전 하락 비교 일수', 'Prior-decline days'],
 };
 
 export function t(key, vars = {}) {
