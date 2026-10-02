@@ -191,3 +191,40 @@ def test_preset_from_search_and_rerun(client):
         r = client.post("/api/presets", json={"name": f"x{cid}{sid2[:3]}",
                                               "from_search": {"search_id": sid2, "candidate_id": cid}})
         assert r.status_code == 404 and r.json()["code"] == code
+
+
+# ---------------------------------------------------------------- P1-4 패턴 수치
+def test_pattern_params_in_meta_and_options(client):
+    m = client.get("/api/meta").json()
+    assert m["pattern_params"]["rsi_rebound"]["threshold"] == {"default": 30, "min": 10, "max": 50}
+    assert m["pattern_params"]["breakout_vol"]["volume_mult"]["default"] == 2.0
+    o = client.get("/api/searches/options").json()
+    assert o["pattern_axes"]["rsi_rebound"]["threshold"] == [20, 25, 30, 35, 40]
+
+
+def test_run_with_pattern_params(client):
+    body = {"strategies": [{"name": "pp", "patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"threshold": 25}}}]}
+    r = client.post("/api/runs", json=body)
+    assert r.status_code == 202, r.text
+    bad = {"strategies": [{"name": "pp", "patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"threshold": 90}}}]}
+    r = client.post("/api/runs", json=bad)
+    assert r.status_code == 422 and "strategies[0].pattern_params.rsi_rebound.threshold" in r.json()["detail"]["fields"]
+    bad2 = {"strategies": [{"name": "pp", "patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"window": 10}}}]}
+    r = client.post("/api/runs", json=bad2)
+    assert r.status_code == 422 and "strategies[0].pattern_params.rsi_rebound.window" in r.json()["detail"]["fields"]
+
+
+def test_search_preview_with_pattern_axis(client):
+    body = {**BODY, "axes": {**BODY["axes"], "pattern_params": {"rsi_rebound": {"threshold": [25, 35]}}}}
+    r = client.post("/api/searches/preview", json=body)
+    assert r.status_code == 200 and r.json()["candidates"] == 7 * 2  # (bo 1 + rsi 2 + and·or 2·2) × 보유일 2
+    bad = {**BODY, "axes": {**BODY["axes"], "pattern_params": {"rsi_rebound": {"threshold": [27]}}}}
+    r = client.post("/api/searches/preview", json=bad)
+    assert r.status_code == 422 and "axes.pattern_params.rsi_rebound.threshold" in r.json()["detail"]["fields"]
+
+
+def test_preset_with_pattern_params(client):
+    r = client.post("/api/presets", json={"name": "수치", "strategy": {"patterns": ["breakout_vol"],
+                                                                     "pattern_params": {"breakout_vol": {"volume_mult": 1.5}}}})
+    assert r.status_code == 201, r.text
+    assert r.json()["strategy"]["pattern_params"] == {"breakout_vol": {"volume_mult": 1.5}}

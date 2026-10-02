@@ -20,9 +20,10 @@ class Pattern(ABC):
 
     name: str
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, params: dict | None = None):
+        """params: 조합별 수치 (P1-4). 설정 기본값 위에 덮어쓴다. 허용 범위 검증은 Strategy.validate 가 한다."""
         self.cfg = cfg
-        self.params = dict(cfg["patterns"][self.name])
+        self.params = {**cfg["patterns"][self.name], **(params or {})}
 
     def signal(self, frame: pd.DataFrame) -> pd.Series:
         if not all(c in frame.columns for c in REQUIRED_INDICATORS):
@@ -51,7 +52,15 @@ def combine_signals(signals: list[pd.Series], how: str) -> pd.Series:
     return out.rename("signal")
 
 
-def compute_signals(frame: pd.DataFrame, names: list[str], how: str, cfg: dict) -> pd.Series:
-    from regime_lab.patterns.core import get_pattern
+def compute_signals(frame: pd.DataFrame, names: list[str], how: str, cfg: dict,
+                    params: dict[str, dict] | None = None) -> pd.Series:
+    """params: {패턴 이름: 조합별 수치} (P1-4). 없으면 설정 기본값."""
+    return combine_signals([make_pattern(n, cfg, (params or {}).get(n)).signal(frame) for n in names], how)
 
-    return combine_signals([get_pattern(n, cfg).signal(frame) for n in names], how)
+
+def make_pattern(name: str, cfg: dict, params: dict | None = None) -> Pattern:
+    from regime_lab.patterns.core import CORE_PATTERNS
+
+    if name not in CORE_PATTERNS:
+        raise ValueError(f"지원하지 않는 패턴: {name} (핵심 패턴: {sorted(CORE_PATTERNS)})")
+    return CORE_PATTERNS[name](cfg, params)

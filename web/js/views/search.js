@@ -22,8 +22,17 @@ function defaults(meta, opt) {
     patterns: [...opt.patterns], combine: [...opt.defaults.combine],
     stop: [...opt.defaults.stop_loss_pct], profit: [...opt.defaults.take_profit_pct], hold: [...opt.defaults.max_hold_days],
     markets: [...meta.markets], start: meta.backtest_start, end: meta.data_as_of,
-    minValue: meta.min_avg_value_krw, caps: [...meta.cap_groups],
+    minValue: meta.min_avg_value_krw, caps: [...meta.cap_groups], pax: {},
   };
+}
+
+// 패턴 수치 축 (P1-4): 고른 패턴의 고른 값만 싣는다. 아무것도 안 고르면 기본값 하나만 쓴다
+function paramAxes(f) {
+  const out = {};
+  for (const p of f.patterns) {
+    for (const [k, v] of Object.entries(f.pax?.[p] || {})) if (v.length) (out[p] ||= {})[k] = v;
+  }
+  return out;
 }
 
 function validate(f, meta, opt) {
@@ -50,7 +59,8 @@ function validate(f, meta, opt) {
 function toBody(f) {
   return {
     name: f.name, target_win_rate: Number(f.target) / 100, min_trades: Number(f.minTrades),
-    axes: { patterns: f.patterns, combine: f.combine, stop_loss_pct: f.stop, take_profit_pct: f.profit, max_hold_days: f.hold },
+    axes: { patterns: f.patterns, combine: f.combine, stop_loss_pct: f.stop, take_profit_pct: f.profit, max_hold_days: f.hold,
+      ...(Object.keys(paramAxes(f)).length ? { pattern_params: paramAxes(f) } : {}) },
     filters: { markets: f.markets, cap_groups: f.caps, min_avg_value_krw: Number(f.minValue), period: { start: f.start, end: f.end } },
   };
 }
@@ -109,6 +119,31 @@ export async function renderSearch(el) {
     h('p', { class: 'hint', text: t('sx.minTradesHint', { a: opt.min_trades.min, b: opt.min_trades.max, d: opt.min_trades.default }) }),
     errorSlot('min_trades'));
 
+  // 패턴 수치 축 (P1-4): 고른 패턴 중 탐색할 수 있는 수치마다 값 칩
+  f.pax = f.pax || {};
+  const paxBox = h('div', {});
+  function renderPax() {
+    const items = f.patterns.flatMap((p) => Object.entries(opt.pattern_axes?.[p] || {}).map(([k, vals]) => [p, k, vals]));
+    paxBox.replaceChildren(...items.map(([p, k, vals]) => {
+      const cur = () => f.pax[p]?.[k] || [];
+      const key = `axes.pattern_params.${p}.${k}`;
+      const def = meta.pattern_params?.[p]?.[k]?.default;
+      return h('div', {}, h('span', { class: 'label' }, `${patLabel(p)} · ${t(`pp.${p}.${k}`)}`),
+        h('div', { class: 'inline-checks', role: 'group', 'aria-label': `${patLabel(p)} ${t(`pp.${p}.${k}`)}` }, vals.map((v) => {
+          const box = h('input', { type: 'checkbox', checked: cur().includes(v), 'aria-label': String(v), 'aria-describedby': slotId(key) });
+          const lab = h('label', { class: `check${cur().includes(v) ? ' selected' : ''}` }, box, String(v));
+          box.addEventListener('change', () => {
+            (f.pax[p] ||= {})[k] = vals.filter((x) => (x === v ? box.checked : cur().includes(x)));
+            lab.classList.toggle('selected', box.checked);
+            changed();
+          });
+          return lab;
+        })),
+        h('p', { class: 'hint', text: t('pp.searchHint', { d: def ?? '—' }) }), errorSlot(key));
+    }));
+  }
+  renderPax();
+
   // ---------------------------------------------------------------- 탐색 범위
   const rangeCard = h('article', { class: 'card' }, h('h2', {}, t('sx.range')),
     h('p', { class: 'card-sub', text: t('sx.rangeSub') }),
@@ -119,10 +154,11 @@ export async function renderSearch(el) {
       box.addEventListener('change', () => {
         f.patterns = opt.patterns.filter((x) => (x === p ? box.checked : f.patterns.includes(x)));
         lab.classList.toggle('selected', box.checked);
+        renderPax();
         changed();
       });
       return lab;
-    })), errorSlot('axes.patterns'),
+    })), errorSlot('axes.patterns'), paxBox,
     h('span', { class: 'label' }, t('sx.combine')), multi('combine', opt.axes.combine, (c) => c.toUpperCase(), t('sx.combine'), 'axes.combine'), errorSlot('axes.combine'),
     h('span', { class: 'label' }, t('sx.stop')), multi('stop', opt.axes.stop_loss_pct, pctLabel, t('sx.stop'), 'axes.stop'), errorSlot('axes.stop'),
     h('span', { class: 'label' }, t('sx.profit')), multi('profit', opt.axes.take_profit_pct, pctLabel, t('sx.profit'), 'axes.profit'), errorSlot('axes.profit'),
@@ -361,8 +397,16 @@ export function renderSearchProgress(el, id) {
 }
 
 // ================================================================ 결과 화면 (#/searches/:id/results)
+export function patternsText(st) {
+  const one = (p) => {
+    const pp = st.pattern_params?.[p];
+    return pp ? `${patLabel(p)} (${Object.entries(pp).map(([k, v]) => `${t(`pp.${p}.${k}`)} ${v}`).join(', ')})` : patLabel(p);
+  };
+  return st.patterns.map(one).join(st.patterns.length > 1 ? ` ${st.combine.toUpperCase()} ` : '');
+}
+
 function comboText(st) {
-  const pats = st.patterns.map(patLabel).join(st.patterns.length > 1 ? ` ${st.combine.toUpperCase()} ` : '');
+  const pats = patternsText(st);
   const ex = st.exit || {};
   return h('span', {}, pats, h('br'), h('small', { class: 'muted' }, t('sr.exit', {
     s: ex.stop_loss_pct == null ? t('sr.noStop') : `${ex.stop_loss_pct}%`,

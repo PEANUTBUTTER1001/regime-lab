@@ -44,6 +44,10 @@ patterns:
   rsi_rebound: {window: 14, threshold: 30}
   bb_lower_recover: {window: 20, k: 2.0}
 
+pattern_limits:                     # P1-4 조합별로 바꿀 수 있는 패턴 수치와 허용 범위 [최소, 최대]. 기본값은 위 patterns 절.
+  breakout_vol: {volume_mult: [1.0, 5.0]}   # 준비 프레임(지표 열)에 들어가지 않는 수치만 연다 → PREP_VERSION 영향 없음
+  rsi_rebound: {threshold: [10, 50]}
+
 exit:                               # A8 기본값
   stop_loss_pct: -8
   take_profit_pct: 20
@@ -81,6 +85,9 @@ search:                             # D-1 역방향 탐색 (docs/역방향_백�
     stop_loss_pct: [-3, -5, -8, -10, -15, -20, null]
     take_profit_pct: [5, 10, 15, 20, 30, 50, null]
     max_hold_days: [3, 5, 10, 20, 40, 60]
+  pattern_axes:                     # P1-4 패턴 수치 축의 허용 값. 그 패턴이 들어간 조합에만 곱해진다
+    breakout_vol: {volume_mult: [1.5, 2.0, 2.5, 3.0]}
+    rsi_rebound: {threshold: [20, 25, 30, 35, 40]}
   defaults:                         # 요청에서 축을 생략했을 때 (패턴은 핵심 5종 전체)
     combine: [and, or]
     stop_loss_pct: [-8]
