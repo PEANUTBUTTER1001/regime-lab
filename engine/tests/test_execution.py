@@ -153,3 +153,34 @@ def test_empty_trades_keep_same_columns(cfg):
     empty, _ = run_backtest(m.frame, sig & False, m.index, cfg, set(), m.sectors)
     assert len(full) > 0 and len(empty) == 0
     assert list(empty.columns) == list(full.columns)
+
+
+def _index_ret_loop(tr, index):
+    """옛 구현(거래마다 지수 가격 조회) — 한 번에 조회하도록 바꾼 구현과 값이 완전히 같은지 비교용 (NFR-14)."""
+    ip = {m: g.set_index("date")[["open", "close"]] for m, g in index.groupby("market")}
+    out = []
+    for m, ed, xd, atc in zip(tr["market"], tr["entry_date"], tr["exit_date"], tr["exit_at_close"]):
+        p = ip.get(m)
+        if p is None or ed not in p.index or xd not in p.index:
+            out.append(np.nan)
+            continue
+        out.append(p.at[xd, "close" if atc else "open"] / p.at[ed, "open"] - 1)
+    return np.array(out, float)
+
+
+@pytest.mark.parametrize("names", [["ma_cross_5_20"], ["breakout_20d", "rsi_rebound"], ["engulfing"]])
+def test_index_ret_vectorized_matches_loop(cfg, names):
+    from synth import make_market
+
+    from regime_lab.patterns import compute_signals
+
+    m = make_market(cfg, n_tickers=60, seed=9)
+    idx = m.index.copy()
+    idx = idx[~((idx["market"] == "KOSDAQ") & (idx["date"].dt.day == 15))]  # 지수에 없는 날 → NaN 경로도 검사
+    tr, _ = run_backtest(m.frame, compute_signals(m.frame, names, "or", cfg), idx, cfg, set(), m.sectors)
+    assert len(tr) > 100
+    want = _index_ret_loop(tr, idx)
+    got = tr["index_ret"].to_numpy(float)
+    assert np.isnan(want).any()
+    np.testing.assert_array_equal(got, want)  # 소수점 끝자리까지 같음 (NaN 위치 포함)
+    np.testing.assert_array_equal(tr["excess_ret"].to_numpy(float), tr["net_ret"].to_numpy(float) - want)
