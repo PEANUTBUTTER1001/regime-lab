@@ -19,6 +19,7 @@ class Pattern(ABC):
     """
 
     name: str
+    needs: tuple[str, ...] = REQUIRED_INDICATORS  # 이 패턴이 쓰는 지표 열. 없으면 계산한다
 
     def __init__(self, cfg: dict, params: dict | None = None):
         """params: 조합별 수치 (P1-4). 설정 기본값 위에 덮어쓴다. 허용 범위 검증은 Strategy.validate 가 한다."""
@@ -26,7 +27,7 @@ class Pattern(ABC):
         self.params = {**cfg["patterns"][self.name], **(params or {})}
 
     def signal(self, frame: pd.DataFrame) -> pd.Series:
-        if not all(c in frame.columns for c in REQUIRED_INDICATORS):
+        if not all(c in frame.columns for c in self.needs):
             frame = compute_indicators(frame, self.cfg)
         raw = self._raw_signal(frame)
         halted = frame["halted"].astype(bool) if "halted" in frame else False
@@ -38,6 +39,16 @@ class Pattern(ABC):
     @staticmethod
     def prev(f: pd.DataFrame, col: str) -> pd.Series:
         return f.groupby(f["ticker"].to_numpy(), sort=False)[col].shift(1)
+
+    @staticmethod
+    def lag(f: pd.DataFrame, s: pd.Series, k: int) -> pd.Series:
+        """같은 종목의 k 거래일 전 값 (X6). 종목 경계를 넘지 않는다."""
+        return s.groupby(f["ticker"].to_numpy(), sort=False).shift(k)
+
+    @staticmethod
+    def rolling_min(f: pd.DataFrame, s: pd.Series, n: int) -> pd.Series:
+        """같은 종목의 t-n+1..t 최솟값, n 개가 모두 있어야 값 (X6). 종목별 rolling (AGENTS 함정)."""
+        return s.groupby(f["ticker"].to_numpy(), sort=False).transform(lambda x: x.rolling(n, min_periods=n).min())
 
 
 def combine_signals(signals: list[pd.Series], how: str) -> pd.Series:

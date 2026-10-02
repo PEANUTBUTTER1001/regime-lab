@@ -12,7 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MAX_STRATEGIES = 5  # 한 요청의 최대 전략 수 (비교 실행, 핵심 5종 기준)
 
-PatternName = Literal["ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover"]
+PatternName = Literal["ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover",
+                      "three_down_up", "bb_squeeze_break", "pullback_ma20", "granville_buy1", "engulfing"]  # X6 후순위 5종
 Market = Literal["KOSPI", "KOSDAQ"]
 CapGroup = Literal["large", "mid", "small"]
 DATE = r"^\d{4}-\d{2}-\d{2}$"
