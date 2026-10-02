@@ -25,7 +25,7 @@ import shutil
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from itertools import combinations
+from itertools import combinations, product
 from pathlib import Path
 
 import numpy as np
@@ -38,13 +38,14 @@ from regime_lab.config import Paths, config_hash
 from regime_lab.context import NULL_CONTEXT, RunCancelled, RunContext
 from regime_lab.patterns import CORE_PATTERNS
 from regime_lab.patterns.base import combine_signals
-from regime_lab.patterns.core import get_pattern
+from regime_lab.patterns.base import make_pattern
 from regime_lab.data.loader import input_file_hashes
 from regime_lab.pipeline import Prepared, prep_hash
 from regime_lab.runs import DISCLAIMER, ENGINE_VERSION, Strategy, StrategyError, entry_mask, execute
 
 SEARCH_KEYS = {"name", "target_win_rate", "min_trades", "axes", "filters"}
 AXIS_KEYS = ("patterns", "combine", "stop_loss_pct", "take_profit_pct", "max_hold_days")
+PARAM_AXIS = "pattern_params"  # P1-4 {패턴: {수치: [값...]}} — 그 패턴이 들어간 조합에만 곱한다
 FILTER_KEYS = {"markets", "period", "min_avg_value_krw", "cap_groups"}
 NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 METRIC_KEYS = ("trades", "win_rate", "mean_ret", "median_ret", "mean_excess", "payoff_ratio", "sharpe", "mdd")
@@ -96,7 +97,7 @@ class SearchRequest:
         if not isinstance(raw_axes, dict):
             errors["axes"] = "Must be an object"
             raw_axes = {}
-        for k in set(raw_axes) - set(AXIS_KEYS):
+        for k in set(raw_axes) - set(AXIS_KEYS) - {PARAM_AXIS}:
             errors[f"axes.{k}"] = "Key not allowed"
         allowed = {"patterns": list(CORE_PATTERNS), **scfg["axes"]}
         defaults = {"patterns": list(CORE_PATTERNS), **scfg["defaults"]}
@@ -110,6 +111,7 @@ class SearchRequest:
                 errors[f"axes.{k}"] = "Duplicate values"
             else:
                 axes[k] = [x for x in allowed[k] if x in v]  # 허용 목록 순서로 정렬 → 후보 순번 고정
+        axes[PARAM_AXIS] = _param_axes(raw_axes.get(PARAM_AXIS) or {}, axes.get("patterns") or [], scfg, errors)
 
         filters = d.get("filters") or {}
         if not isinstance(filters, dict):
@@ -141,6 +143,49 @@ class SearchRequest:
                 "axes": self.axes, "filters": self.filters}
 
 
+def _param_axes(raw, patterns: list[str], scfg: dict, errors: dict) -> dict:
+    """패턴 수치 축 검증 (P1-4). 고른 패턴의, search.pattern_axes 에 있는 수치만, 허용 값 목록 안에서."""
+    allowed = scfg.get("pattern_axes", {})
+    if not isinstance(raw, dict):
+        errors[f"axes.{PARAM_AXIS}"] = "An object {pattern: {param: [values]}}"
+        return {}
+    out: dict = {}
+    for pat in sorted(raw):
+        vals = raw[pat]
+        if pat not in patterns:
+            errors[f"axes.{PARAM_AXIS}.{pat}"] = "Only for selected patterns"
+            continue
+        if not isinstance(vals, dict) or not vals:
+            errors[f"axes.{PARAM_AXIS}.{pat}"] = "A non-empty object {param: [values]}"
+            continue
+        for k in sorted(vals):
+            v, ok = vals[k], allowed.get(pat, {}).get(k)
+            key = f"axes.{PARAM_AXIS}.{pat}.{k}"
+            if ok is None:
+                errors[key] = f"Not searchable. Searchable: {sorted(allowed.get(pat, {}))}"
+            elif not isinstance(v, list) or not v:
+                errors[key] = "A non-empty list"
+            elif any(isinstance(x, bool) for x in v) or not all(x in ok for x in v):
+                errors[key] = f"Use values from {ok}"
+            elif len(set(v)) != len(v):
+                errors[key] = "Duplicate values"
+            else:
+                out.setdefault(pat, {})[k] = [x for x in ok if x in v]
+    return out
+
+
+def param_grid(combo: tuple[str, ...], param_axes: dict) -> list[dict]:
+    """조합에 든 패턴의 수치 축 곱집합. 축이 없으면 [{}] (기본값 1개 → 기존 순번 그대로)."""
+    keys = [(p, k) for p in combo for k in sorted(param_axes.get(p, {}))]
+    out = []
+    for vals in product(*(param_axes[p][k] for p, k in keys)):
+        d: dict = {}
+        for (p, k), v in zip(keys, vals):
+            d.setdefault(p, {})[k] = v
+        out.append(d)
+    return out
+
+
 # ---------------------------------------------------------------- 후보 생성 (P1-5.1)
 def pattern_sets(patterns: list[str], combines: list[str]) -> list[tuple[tuple[str, ...], str]]:
     """공집합 아닌 부분집합 × 결합. 패턴 1개짜리는 결합과 무관하므로 or 하나만 둔다.
@@ -157,8 +202,8 @@ def pattern_sets(patterns: list[str], combines: list[str]) -> list[tuple[tuple[s
 
 def count_candidates(req: SearchRequest) -> int:
     a = req.axes
-    return (len(pattern_sets(a["patterns"], a["combine"]))
-            * len(a["stop_loss_pct"]) * len(a["take_profit_pct"]) * len(a["max_hold_days"]))
+    combos = sum(len(param_grid(c, a.get(PARAM_AXIS, {}))) for c, _ in pattern_sets(a["patterns"], a["combine"]))
+    return combos * len(a["stop_loss_pct"]) * len(a["take_profit_pct"]) * len(a["max_hold_days"])
 
 
 def estimate_seconds(n_candidates: int, cfg: dict) -> float:
@@ -171,14 +216,16 @@ def generate_candidates(req: SearchRequest, period: dict | None = None) -> list[
     filters = {k: v for k, v in req.filters.items() if k != "period"}
     out = []
     for combo, how in pattern_sets(a["patterns"], a["combine"]):
-        for sl in a["stop_loss_pct"]:
-            for tp in a["take_profit_pct"]:
-                for hold in a["max_hold_days"]:
-                    out.append(Strategy.from_dict({
-                        "name": f"c{len(out) + 1:03d}", "patterns": list(combo), "combine": how,
-                        "exit": {"stop_loss_pct": sl, "take_profit_pct": tp, "max_hold_days": hold},
-                        **({"period": period} if period else {}), **filters,
-                    }))
+        for pp in param_grid(combo, a.get(PARAM_AXIS, {})):
+            for sl in a["stop_loss_pct"]:
+                for tp in a["take_profit_pct"]:
+                    for hold in a["max_hold_days"]:
+                        out.append(Strategy.from_dict({
+                            "name": f"c{len(out) + 1:03d}", "patterns": list(combo), "combine": how,
+                            "exit": {"stop_loss_pct": sl, "take_profit_pct": tp, "max_hold_days": hold},
+                            **({"pattern_params": pp} if pp else {}),
+                            **({"period": period} if period else {}), **filters,
+                        }))
     return out
 
 
@@ -215,13 +262,17 @@ def with_period(s: Strategy, period: dict) -> Strategy:
 
 
 # ---------------------------------------------------------------- 후보 평가 (P1-5.3)
-def score_candidate(s: Strategy, prep: Prepared, cfg: dict, signals: dict[str, pd.Series]) -> dict:
-    """후보 1개의 요약 지표와 단측 p-value (무작위 벤치마크 없음). signals 는 패턴별 신호 캐시(호출자가 공유)."""
+def score_candidate(s: Strategy, prep: Prepared, cfg: dict, signals: dict[tuple, pd.Series]) -> dict:
+    """후보 1개의 요약 지표와 단측 p-value (무작위 벤치마크 없음). signals 는 (패턴, 수치)별 신호 캐시(호출자가 공유)."""
     s.validate(cfg)
+    keys = []
     for p in s.patterns:
-        if p not in signals:
-            signals[p] = get_pattern(p, cfg).signal(prep.frame)
-    sig = combine_signals([signals[p] for p in s.patterns], s.combine)
+        pp = (s.pattern_params or {}).get(p)
+        key = (p, tuple(sorted((pp or {}).items())))
+        if key not in signals:
+            signals[key] = make_pattern(p, cfg, pp).signal(prep.frame)
+        keys.append(key)
+    sig = combine_signals([signals[k] for k in keys], s.combine)
     f, tr_rows, skip_rows = simulate_trades(prep.frame, sig, cfg, prep.delisted, s.exit_cfg(cfg),
                                             entry_mask(prep.frame, s))
     trades, skipped = build_trades(f, tr_rows, skip_rows, prep.index, cfg, prep.sectors)
@@ -233,7 +284,7 @@ def score_candidate(s: Strategy, prep: Prepared, cfg: dict, signals: dict[str, p
 
 def evaluate_candidates(cands: list[Strategy], prep: Prepared, cfg: dict) -> pd.DataFrame:
     """후보 전체를 한 번에 평가한다. 패턴 신호는 패턴마다 한 번만 계산한다."""
-    signals: dict[str, pd.Series] = {}
+    signals: dict[tuple, pd.Series] = {}
     return pd.DataFrame([score_candidate(s, prep, cfg, signals) for s in cands],
                         columns=["id", *METRIC_KEYS, "p_value"])
 
@@ -295,7 +346,7 @@ def run_search(req: SearchRequest, prep: Prepared, cfg: dict, ctx: RunContext = 
 
         ctx.stage("explore", f"{explore_p['start']}~{explore_p['end']}")
         cut = truncate(prep, explore_p["end"])
-        signals: dict[str, pd.Series] = {}
+        signals: dict[tuple, pd.Series] = {}
         met = 0
         for i, s in enumerate(cands):
             ctx.progress(i, len(cands))

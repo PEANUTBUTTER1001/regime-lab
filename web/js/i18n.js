@@ -628,6 +628,13 @@ const D = {
   'rh.cli': ['CLI 실행', 'CLI run'],
   'rh.noneInFilter': ['이 상태의 실행이 없습니다.', 'No runs with this status.'],
   'rh.emptyTitle': ['실행 기록이 없습니다', 'No runs yet'],
+  // 패턴 수치 (P1-4)
+  'pp.details': ['세부 조건 (패턴 수치)', 'Details (pattern values)'],
+  'pp.hint': ['기본 {d} · {a}–{b}', 'Default {d} · {a}–{b}'],
+  'pp.range': ['{a}–{b} 사이 숫자를 입력하세요.', 'Enter a number from {a} to {b}.'],
+  'pp.searchHint': ['고르지 않으면 기본값 {d} 하나만 씁니다. 고른 값 수만큼 이 패턴이 든 조합이 늘어납니다.', 'If none is chosen, only the default {d} is used. Each chosen value multiplies the combinations that include this pattern.'],
+  'pp.rsi_rebound.threshold': ['RSI 문턱', 'RSI threshold'],
+  'pp.breakout_vol.volume_mult': ['거래량 배수', 'Volume multiple'],
 };
 
 export function t(key, vars = {}) {

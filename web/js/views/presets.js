@@ -4,14 +4,14 @@ import { errorView, h, linkButton, loading, pill, table, toast } from '../compon
 import { has, t } from '../i18n.js';
 import { state } from '../state.js';
 import { isDirty } from './builder.js';
+import { patternsText } from './search.js';
 
-const patLabel = (n) => (has(`pat.${n}`) ? t(`pat.${n}`) : n);
 const errText = (e) => (has(`errmsg.${e.code}`) ? t(`errmsg.${e.code}`)
   : e.code === 'validation_failed' ? Object.values(e.detail?.fields || {}).join(' · ') : e.message);
 
 function summary(st) {
   const ex = st.exit || {};
-  return h('span', {}, st.patterns.map(patLabel).join(st.patterns.length > 1 ? ` ${st.combine.toUpperCase()} ` : ''), h('br'),
+  return h('span', {}, patternsText(st), h('br'),
     h('small', { class: 'muted' }, t('sr.exit', {
       s: ex.stop_loss_pct == null ? t('sr.noStop') : `${ex.stop_loss_pct}%`,
       p: ex.take_profit_pct == null ? t('sr.noProfit') : `+${ex.take_profit_pct}%`, h: ex.max_hold_days,

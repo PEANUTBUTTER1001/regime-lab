@@ -40,6 +40,9 @@ def meta(request: Request):
         "combine": ["and", "or"],
         "exit_defaults": cfg["exit"],
         "exit_limits": cfg["exit_limits"],
+        # P1-4 조합별로 바꿀 수 있는 패턴 수치: {패턴: {수치: {default, min, max}}}
+        "pattern_params": {p: {k: {"default": cfg["patterns"][p][k], "min": lo, "max": hi} for k, (lo, hi) in v.items()}
+                           for p, v in cfg.get("pattern_limits", {}).items()},
         "markets": cfg["data"]["markets"],
         "cap_groups": CAP_GROUPS,
         "min_avg_value_krw": cfg["universe"]["min_avg_value_krw"],

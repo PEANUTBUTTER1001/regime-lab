@@ -18,6 +18,7 @@ export function fromStrategy(st, meta) {
     useStop: ex.stop_loss_pct != null, stop: ex.stop_loss_pct ?? base.stop,
     useProfit: ex.take_profit_pct != null, profit: ex.take_profit_pct ?? base.profit, hold: ex.max_hold_days,
     markets: [...st.markets], start: st.period.start, end: st.period.end, minValue: st.min_avg_value_krw, caps: [...st.cap_groups],
+    pp: JSON.parse(JSON.stringify(st.pattern_params || {})),
   };
 }
 
@@ -35,8 +36,21 @@ function defaults(meta) {
     useStop: ex.stop_loss_pct != null, stop: ex.stop_loss_pct ?? -8,
     useProfit: ex.take_profit_pct != null, profit: ex.take_profit_pct ?? 20, hold: ex.max_hold_days,
     markets: [...meta.markets], start: meta.backtest_start, end: meta.data_as_of,
-    minValue: meta.min_avg_value_krw, caps: [...meta.cap_groups],
+    minValue: meta.min_avg_value_krw, caps: [...meta.cap_groups], pp: {},
   };
+}
+
+// 고른 패턴의 바꾼 수치만 (기본값과 같으면 싣지 않는다 → 손대지 않은 조합은 기존 요청과 같다) (P1-4)
+function changedParams(f, meta) {
+  const out = {};
+  for (const p of f.patterns) {
+    for (const [k, v] of Object.entries(f.pp?.[p] || {})) {
+      const lim = meta.pattern_params?.[p]?.[k];
+      if (!lim || v === '' || v == null || Number(v) === lim.default) continue;
+      (out[p] ||= {})[k] = Number(v);
+    }
+  }
+  return out;
 }
 
 function validate(f, meta) {
@@ -58,11 +72,21 @@ function validate(f, meta) {
   const mv = num(f.minValue);
   if (mv == null || !Number.isInteger(mv) || mv < meta.min_avg_value_krw) e.min_avg_value_krw = t('v.value', { v: fmt.int(meta.min_avg_value_krw) });
   if (!f.caps.length) e.cap_groups = t('v.caps');
+  for (const p of f.patterns) {
+    for (const [k, v] of Object.entries(f.pp?.[p] || {})) {
+      const lim = meta.pattern_params?.[p]?.[k];
+      if (lim && v !== '' && (Number.isNaN(Number(v)) || Number(v) < lim.min || Number(v) > lim.max)) {
+        e[`pattern_params.${p}.${k}`] = t('pp.range', { a: lim.min, b: lim.max });
+      }
+    }
+  }
   return e;
 }
 
-export function toBody(f) {
+export function toBody(f, meta = state.meta) {
+  const pp = meta ? changedParams(f, meta) : {};
   return {
+    ...(Object.keys(pp).length ? { pattern_params: pp } : {}),
     name: f.name, patterns: f.patterns, combine: f.combine,
     exit: { stop_loss_pct: f.useStop ? Number(f.stop) : null, take_profit_pct: f.useProfit ? Number(f.profit) : null,
       max_hold_days: Number(f.hold), trailing_stop_pct: null },
@@ -110,19 +134,37 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
   const seg = h('div', { class: 'segment', role: 'group', 'aria-label': t('b.logic') },
     ['and', 'or'].map((c) => h('button', { type: 'button', 'aria-pressed': String(f.combine === c), 'data-c': c,
       onclick: () => { f.combine = c; seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.c === c))); save(); } }, c.toUpperCase())));
+  // 세부 조건 (P1-4): 고른 패턴 중 조합별로 바꿀 수 있는 수치. 범위·기본값은 /api/meta 의 pattern_params
+  f.pp = f.pp || {};
+  const ppBox = h('div', {});
+  function renderPP() {
+    const items = f.patterns.flatMap((p) => Object.entries(meta.pattern_params?.[p] || {}).map(([k, lim]) => [p, k, lim]));
+    if (!items.length) { ppBox.replaceChildren(); return; }
+    ppBox.replaceChildren(h('details', { open: Object.keys(changedParams(f, meta)).length ? true : null },
+      h('summary', {}, t('pp.details')),
+      items.map(([p, k, lim]) => {
+        const id = `pp-${p}-${k}`;
+        const key = `pattern_params.${p}.${k}`;
+        const input = h('input', { id, inputmode: 'decimal', value: String(f.pp[p]?.[k] ?? lim.default), 'aria-describedby': described(key),
+          oninput: (e) => { (f.pp[p] ||= {})[k] = e.target.value.trim(); save(); } });
+        return h('div', {}, h('label', { for: id }, `${has(`pat.${p}`) ? t(`pat.${p}`) : p} · ${t(`pp.${p}.${k}`)}`), input,
+          h('p', { class: 'hint', text: t('pp.hint', { d: lim.default, a: lim.min, b: lim.max }) }), errorSlot(key));
+      })));
+  }
+  renderPP();
   const patternChecks = meta.patterns.map((p) => {
     const box = h('input', { type: 'checkbox', checked: f.patterns.includes(p.name), 'aria-label': patLabel(p), 'aria-describedby': described('patterns') });
     const lab = h('label', { class: `check${f.patterns.includes(p.name) ? ' selected' : ''}` }, box, h('span', {}, patLabel(p), h('small', {}, patRule(p))));
     box.addEventListener('change', () => {
       f.patterns = meta.patterns.map((q) => q.name).filter((n) => (n === p.name ? box.checked : f.patterns.includes(n)));
-      lab.classList.toggle('selected', box.checked); save();
+      lab.classList.toggle('selected', box.checked); renderPP(); save();
     });
     return lab;
   });
   const buyCard = h('article', { class: 'card' }, h('h2', {}, t('b.buy')),
     h('p', { class: 'card-sub', text: t('b.buySub') }),
     h('span', { class: 'label' }, t('b.logic')), seg,
-    h('div', { class: 'checks', role: 'group', 'aria-label': t('b.patterns') }, patternChecks), errorSlot('patterns'));
+    h('div', { class: 'checks', role: 'group', 'aria-label': t('b.patterns') }, patternChecks), errorSlot('patterns'), ppBox);
 
   // ---------------------------------------------------------------- Exit rules
   const numInput = (id, key, value, mode = 'decimal') => h('input', { id, inputmode: mode, value: String(value ?? ''), 'aria-describedby': described(key),
