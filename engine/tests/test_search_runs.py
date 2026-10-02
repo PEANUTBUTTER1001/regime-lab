@@ -86,6 +86,13 @@ def test_cancel_during_explore_keeps_partial_record(market, req, cfg, paths):
     assert "save" not in [x["stage"] for x in meta["stage_log"]]
 
 
+def test_cancel_before_first_candidate(market, req, cfg, paths):
+    d = run_and_save_search(req, market, cfg, paths, ctx=CancelAfter(0))
+    sj, meta, cand = _read(d)
+    assert sj["status"] == "cancelled" and sj["counts"]["processed"] == len(cand) == 0 and sj["rows"] == []
+    assert sj["fdr_family_size"] == 8 and sj["closest"] is None
+
+
 def test_cancel_before_evaluate_marks_not_evaluated(market, req, cfg):
     out = run_search(req, market, cfg, RecordingContext(cancel_on_stage="evaluate", stage_names=SEARCH_STAGES))
     t = out["table"]

@@ -60,3 +60,48 @@ class PreviewRequest(FilterIn):
 def to_engine_dict(model: BaseModel) -> dict:
     """생략한 필드는 빼고(엔진 기본값 적용), 명시한 null 은 유지한다."""
     return model.model_dump(exclude_unset=True)
+
+
+# ---------------------------------------------------------------- 역방향 탐색 (P1-7, 설계 §4.1)
+CombineName = Literal["and", "or"]
+
+
+class SearchAxesIn(_Strict):
+    patterns: list[PatternName] | None = Field(None, description="탐색할 패턴. 생략 시 핵심 5종 전체")
+    combine: list[CombineName] | None = Field(None, description="결합 방식. 생략 시 and·or")
+    stop_loss_pct: list[float | None] | None = Field(None, description="손절 % 목록 (허용 값은 GET /searches/options)")
+    take_profit_pct: list[float | None] | None = Field(None, description="익절 % 목록")
+    max_hold_days: list[int] | None = Field(None, description="최대 보유 거래일 목록")
+
+
+class SearchRequestIn(_Strict):
+    name: str = Field(pattern=r"^[A-Za-z0-9_\-]{1,64}$", description="탐색 이름 (영문·숫자·_·-)")
+    target_win_rate: float = Field(description="목표 승률 0~1 (0.55 = 55% 이상)")
+    min_trades: int | None = Field(None, description="최소 거래 수. 생략 시 300")
+    axes: SearchAxesIn | None = None
+    filters: FilterIn | None = Field(None, description="시장·기간·거래대금 하한·시총 그룹 (기간은 분할일 포함)")
+
+
+# ---------------------------------------------------------------- 찾은 조합 저장 (P1-9·P1-7, 설계 §5)
+class PresetStrategyIn(FilterIn):
+    name: str | None = Field(None, description="무시됨. 저장 시 조합 id 로 바뀐다")
+    patterns: list[PatternName] = Field(min_length=1)
+    combine: Literal["and", "or"] = "or"
+    exit: ExitIn | None = None
+
+
+class FromSearchIn(_Strict):
+    search_id: str = Field(pattern=r"^[A-Za-z0-9_\-]{1,128}$")
+    candidate_id: str = Field(pattern=r"^c\d{3}$")
+
+
+class PresetCreateIn(_Strict):
+    name: str = Field(description="조합 이름 1~60자 (한글 가능)")
+    strategy: PresetStrategyIn | None = Field(None, description="직접 작성한 조합. from_search 와 둘 중 하나")
+    from_search: FromSearchIn | None = Field(None, description="탐색 기록의 후보를 저장")
+
+
+class PresetUpdateIn(_Strict):
+    revision: int = Field(description="불러온 조합의 revision. 다르면 409 version_conflict")
+    name: str | None = None
+    strategy: PresetStrategyIn | None = None

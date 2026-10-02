@@ -40,7 +40,8 @@ def submit(req: RunRequest, request: Request):
         job = s.jobs.submit(strategies)
     except Busy as b:
         return JSONResponse(body("busy", "Another run is in progress. Try again when it finishes.",
-                                 {"run_id": b.run_id}, retryable=True), status_code=409)
+                                 {"run_id": b.run_id, "kind": b.kind, "id": b.run_id}, retryable=True),
+                            status_code=409)
     return {"run_id": job.run_id, "status": job.status, "fdr_family_size": len(strategies)}
 
 

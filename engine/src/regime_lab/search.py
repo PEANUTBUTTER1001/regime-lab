@@ -288,11 +288,10 @@ def run_search(req: SearchRequest, prep: Prepared, cfg: dict, ctx: RunContext = 
     status = "completed"
     ex_rows: list[dict] = []
     ev_rows: list[dict] = []
-    cands: list[Strategy] = []
+    cands = generate_candidates(req, explore_p)  # 취소와 관계없이 FDR 가족(시도하려던 전체 후보)을 정한다
+    by_id = {s.name: s for s in cands}
     try:
-        ctx.stage("generate", f"{count_candidates(req)} candidates")
-        cands = generate_candidates(req, explore_p)
-        by_id = {s.name: s for s in cands}
+        ctx.stage("generate", f"{len(cands)} candidates")
 
         ctx.stage("explore", f"{explore_p['start']}~{explore_p['end']}")
         cut = truncate(prep, explore_p["end"])
@@ -327,11 +326,11 @@ def run_search(req: SearchRequest, prep: Prepared, cfg: dict, ctx: RunContext = 
 
     table = ex.add_prefix("explore_").rename(columns={"explore_id": "id"}).merge(
         ev.add_prefix("evaluate_").rename(columns={"evaluate_id": "id"}), on="id", how="left")
-    evaluated = table["evaluate_trades"].notna()
-    ev_met = table["evaluate_met"].astype("boolean").fillna(False).astype(bool)
+    evaluated = table["evaluate_trades"].notna().to_numpy(bool)
+    ev_met = table["evaluate_met"].astype("boolean").fillna(False).to_numpy(bool)
+    ex_met = table["explore_met"].astype(bool).to_numpy()  # 처리한 후보가 0개면 object 형이라 bool 로 맞춘다
     table["status"] = np.select(
-        [table["explore_met"] & ev_met, table["explore_met"] & evaluated, table["explore_met"],
-         table["explore_enough_trades"]],
+        [ex_met & ev_met, ex_met & evaluated, ex_met, table["explore_enough_trades"].astype(bool).to_numpy()],
         ["both", "explore_only", "not_evaluated", "not_met"], "insufficient_trades")
     table["_s"] = table["status"].map({s: i for i, s in enumerate(STATUSES)})
     table = table.sort_values(["_s", "explore_win_rate", "id"], ascending=[True, False, True],
