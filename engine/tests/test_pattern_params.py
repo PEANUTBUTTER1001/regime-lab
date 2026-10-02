@@ -156,3 +156,29 @@ def test_preset_keeps_pattern_params(cfg, tmp_path):
     p = store.create("수치 조합", {"name": "x", "patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"threshold": 25}}})
     assert p["strategy"]["pattern_params"] == {"rsi_rebound": {"threshold": 25}}
     Strategy.from_dict(store.get(p["id"])["strategy"]).validate(cfg)
+
+
+def test_integer_params_reject_floats_nan_inf(cfg):
+    """기본값이 정수인 수치는 정수만 (X6 리뷰 반영). 실수 수치는 NaN·무한대 거부."""
+    import copy
+    c = copy.deepcopy(cfg)
+    c["pattern_limits"]["rsi_rebound"]["window"] = [5, 30]  # 테스트용: 정수 기본값(14)인 수치를 연다
+    s = _s(pattern_params={"rsi_rebound": {"window": 10.0}})
+    with pytest.raises(StrategyError) as e:
+        s.validate(c)
+    assert "whole number" in e.value.errors["pattern_params.rsi_rebound.window"]
+    _s(pattern_params={"rsi_rebound": {"window": 10}}).validate(c)
+    for bad in (float("nan"), float("inf")):
+        with pytest.raises(StrategyError):
+            _s(pattern_params={"breakout_vol": {"volume_mult": bad}}).validate(cfg)
+
+
+def test_search_integer_axis_rejects_float(cfg):
+    import copy
+    c = copy.deepcopy(cfg)
+    c["pattern_limits"]["rsi_rebound"]["window"] = [5, 30]
+    c["search"]["pattern_axes"]["rsi_rebound"]["window"] = [10, 14]
+    with pytest.raises(SearchError) as e:
+        SearchRequest.from_dict({"name": "pp", "target_win_rate": 0.5,
+                                 "axes": {"patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"window": [10.0]}}}}, c)
+    assert "axes.pattern_params.rsi_rebound.window" in e.value.errors

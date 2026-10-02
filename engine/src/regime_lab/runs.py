@@ -15,6 +15,7 @@ runs/<run_id>/
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform
 import re
@@ -201,8 +202,9 @@ class Strategy:
                 lim = limits.get(pat, {}).get(k)
                 if lim is None:
                     errors[f"pattern_params.{pat}.{k}"] = f"Not adjustable. Adjustable: {sorted(limits.get(pat, {}))}"
-                elif isinstance(v, bool) or not isinstance(v, (int, float)) or not lim[0] <= v <= lim[1]:
-                    errors[f"pattern_params.{pat}.{k}"] = f"A number from {lim[0]} to {lim[1]}"
+                elif not param_value_ok(v, cfg["patterns"][pat][k], lim):
+                    kind = "A whole number" if is_int_param(cfg["patterns"][pat][k]) else "A number"
+                    errors[f"pattern_params.{pat}.{k}"] = f"{kind} from {lim[0]} to {lim[1]}"
         return errors
 
     def exit_cfg(self, cfg: dict) -> dict:
@@ -230,6 +232,19 @@ class Strategy:
             if getattr(self, k) is not None:
                 d[k] = getattr(self, k)
         return d
+
+
+def is_int_param(default) -> bool:
+    """기본값이 정수인 패턴 수치(일수·창 길이 등)는 정수만 받는다 (P1-4)."""
+    return isinstance(default, int) and not isinstance(default, bool)
+
+
+def param_value_ok(v, default, lim) -> bool:
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+        return False
+    if is_int_param(default) and not isinstance(v, int):
+        return False
+    return lim[0] <= v <= lim[1]
 
 
 def entry_mask(frame: pd.DataFrame, strategy: Strategy) -> pd.Series:

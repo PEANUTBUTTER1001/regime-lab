@@ -41,7 +41,7 @@ class FilterIn(_Strict):
     cap_groups: list[CapGroup] | None = Field(None, description="시총 그룹. 생략 시 전체")
 
 
-PatternParams = dict[PatternName, dict[str, float]]
+PatternParams = dict[PatternName, dict[str, int | float]]  # 정수는 정수 그대로 (일수 같은 수치는 엔진이 정수만 받음)
 
 
 class StrategyIn(FilterIn):
@@ -77,7 +77,7 @@ class SearchAxesIn(_Strict):
     stop_loss_pct: list[float | None] | None = Field(None, description="손절 % 목록 (허용 값은 GET /searches/options)")
     take_profit_pct: list[float | None] | None = Field(None, description="익절 % 목록")
     max_hold_days: list[int] | None = Field(None, description="최대 보유 거래일 목록")
-    pattern_params: dict[PatternName, dict[str, list[float]]] | None = Field(
+    pattern_params: dict[PatternName, dict[str, list[int | float]]] | None = Field(
         None, description="P1-4 패턴 수치 축 {패턴: {수치: [값...]}}. 허용 값은 GET /searches/options 의 pattern_axes")
 
 

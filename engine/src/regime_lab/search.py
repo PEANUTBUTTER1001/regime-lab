@@ -41,7 +41,7 @@ from regime_lab.patterns.base import combine_signals
 from regime_lab.patterns.base import make_pattern
 from regime_lab.data.loader import input_file_hashes
 from regime_lab.pipeline import Prepared, prep_hash
-from regime_lab.runs import DISCLAIMER, ENGINE_VERSION, Strategy, StrategyError, entry_mask, execute
+from regime_lab.runs import DISCLAIMER, ENGINE_VERSION, Strategy, StrategyError, entry_mask, execute, is_int_param
 
 SEARCH_KEYS = {"name", "target_win_rate", "min_trades", "axes", "filters"}
 AXIS_KEYS = ("patterns", "combine", "stop_loss_pct", "take_profit_pct", "max_hold_days")
@@ -165,7 +165,8 @@ def _param_axes(raw, patterns: list[str], scfg: dict, errors: dict) -> dict:
                 errors[key] = f"Not searchable. Searchable: {sorted(allowed.get(pat, {}))}"
             elif not isinstance(v, list) or not v:
                 errors[key] = "A non-empty list"
-            elif any(isinstance(x, bool) for x in v) or not all(x in ok for x in v):
+            elif (any(isinstance(x, bool) or (is_int_param(ok[0]) and not isinstance(x, int)) for x in v)
+                  or not all(x in ok for x in v)):  # 정수 수치에 3.0 같은 실수가 섞여 들어오지 않게
                 errors[key] = f"Use values from {ok}"
             elif len(set(v)) != len(v):
                 errors[key] = "Duplicate values"
