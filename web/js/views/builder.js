@@ -9,6 +9,25 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const patLabel = (p) => (has(`pat.${p.name}`) ? t(`pat.${p.name}`) : p.label);
 const patRule = (p) => (has(`rule.${p.name}`) ? t(`rule.${p.name}`) : p.rule);
 
+// 저장한 조합(기본값을 채운 전략) → 빌더 입력값 (P1-10)
+export function fromStrategy(st, meta) {
+  const ex = st.exit || {};
+  const base = defaults(meta);
+  return {
+    ...base, name: st.name, patterns: [...st.patterns], combine: st.combine,
+    useStop: ex.stop_loss_pct != null, stop: ex.stop_loss_pct ?? base.stop,
+    useProfit: ex.take_profit_pct != null, profit: ex.take_profit_pct ?? base.profit, hold: ex.max_hold_days,
+    markets: [...st.markets], start: st.period.start, end: st.period.end, minValue: st.min_avg_value_krw, caps: [...st.cap_groups],
+  };
+}
+
+// 빌더 입력이 불러온 조합과 다른가 (저장하지 않은 변경 경고용)
+export function isDirty() {
+  const lp = state.loadedPreset;
+  if (!state.draft) return false;
+  return !lp || JSON.stringify(toBody(state.draft)) !== lp.body;
+}
+
 function defaults(meta) {
   const ex = meta.exit_defaults;
   return {
@@ -42,7 +61,7 @@ function validate(f, meta) {
   return e;
 }
 
-function toBody(f) {
+export function toBody(f) {
   return {
     name: f.name, patterns: f.patterns, combine: f.combine,
     exit: { stop_loss_pct: f.useStop ? Number(f.stop) : null, take_profit_pct: f.useProfit ? Number(f.profit) : null,
@@ -51,21 +70,35 @@ function toBody(f) {
   };
 }
 
-export async function renderBuilder(el) {
+export async function renderBuilder(el, query = new URLSearchParams()) {
   let meta = state.meta;
   if (!meta || meta.status !== 'ready') {
     el.append(h('h1', { text: t('b.title') }), loading(t('b.loadingData')));
     try { meta = await api.meta(); state.meta = meta; } catch (e) {
-      el.replaceChildren(h('h1', { text: t('b.title') }), errorView(e, { onRetry: () => { el.replaceChildren(); renderBuilder(el); } }));
+      el.replaceChildren(h('h1', { text: t('b.title') }), errorView(e, { onRetry: () => { el.replaceChildren(); renderBuilder(el, query); } }));
       return;
     }
     if (meta.status !== 'ready') {
-      const tm = setTimeout(() => { el.replaceChildren(); renderBuilder(el); }, 2000);
+      const tm = setTimeout(() => { el.replaceChildren(); renderBuilder(el, query); }, 2000);
       return () => clearTimeout(tm);
     }
     el.replaceChildren();
   }
 
+  // 저장 목록에서 불러오기: #/builder?preset=<id> → 입력값을 채우고 주소에서 매개변수를 지운다 (P1-10)
+  const presetId = query.get('preset');
+  if (presetId) {
+    try {
+      const p = await api.preset(presetId);
+      const loaded = fromStrategy(p.strategy, meta);
+      state.draft = loaded;
+      state.loadedPreset = { id: p.id, name: p.name, revision: p.revision, body: JSON.stringify(toBody(loaded)) };
+      toast(t('pb.loaded', { n: p.name }));
+    } catch (e) {
+      toast(`${has(`err.${e.code}`) ? t(`err.${e.code}`) : e.message} (${e.code})`);
+    }
+    history.replaceState(null, '', '#/builder');
+  }
   const f = { ...defaults(meta), ...(state.draft || {}) };
   const errs = {};
   const errEls = {};
@@ -155,12 +188,56 @@ export async function renderBuilder(el) {
         h('span', {}, h('b', {}, t('b.validation')), t('b.validationVal')))),
     runBtn);
 
+  // ---------------------------------------------------------------- 저장한 조합 (P1-10)
+  const presetStatus = h('p', { class: 'card-sub', 'aria-live': 'polite' });
+  const presetName = h('input', { id: 'pname', maxlength: '60', value: state.loadedPreset?.name || '', 'aria-describedby': 'pname-err' });
+  const presetErr = h('p', { class: 'field-error hidden', id: 'pname-err' });
+  const saveNewBtn = h('button', { class: 'secondary', type: 'button' }, t('pb.saveNew'));
+  const overwriteBtn = h('button', { class: 'secondary', type: 'button' }, t('pb.overwrite'));
+  function renderPresetStatus() {
+    const lp = state.loadedPreset;
+    overwriteBtn.disabled = !lp;
+    presetStatus.textContent = lp ? t(isDirty() ? 'pb.statusDirty' : 'pb.statusClean', { n: lp.name }) : t('pb.statusNone');
+  }
+  function presetFail(e) {
+    presetErr.textContent = has(`errmsg.${e.code}`) ? t(`errmsg.${e.code}`)
+      : e.code === 'validation_failed' ? Object.entries(e.detail?.fields || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') : e.message;
+    presetErr.classList.remove('hidden');
+    presetName.setAttribute('aria-invalid', 'true');
+  }
+  async function savePreset(overwrite) {
+    presetErr.classList.add('hidden');
+    presetName.setAttribute('aria-invalid', 'false');
+    const e = validate(f, meta);
+    if (Object.keys(e).length) { Object.assign(errs, e); showErrors(e); toast(t('b.checkFields', { n: Object.keys(e).length })); return; }
+    const name = presetName.value.trim();
+    if (!name) { presetFail({ code: 'name_required', message: t('pb.nameRequired') }); return; }
+    const body = toBody(f);
+    saveNewBtn.disabled = true; overwriteBtn.disabled = true;
+    try {
+      const lp = state.loadedPreset;
+      const p = overwrite
+        ? await api.updatePreset(lp.id, { revision: lp.revision, name, strategy: body })
+        : await api.savePreset({ name, strategy: body });
+      // 서버가 전략 이름을 조합 id 로 바꾸므로 빌더 입력도 맞춘다
+      f.name = p.strategy.name; nameIn.value = f.name; state.draft = { ...f };
+      state.loadedPreset = { id: p.id, name: p.name, revision: p.revision, body: JSON.stringify(toBody(f)) };
+      toast(t(overwrite ? 'pb.overwritten' : 'pb.saved', { n: p.name }));
+    } catch (err) { presetFail(err); } finally { saveNewBtn.disabled = false; renderPresetStatus(); }
+  }
+  saveNewBtn.addEventListener('click', () => savePreset(false));
+  overwriteBtn.addEventListener('click', () => savePreset(true));
+  const presetCard = h('article', { class: 'card', style: { marginTop: '18px' } }, h('h2', {}, t('pb.title')), presetStatus,
+    h('label', { for: 'pname' }, t('pb.name')), presetName, presetErr,
+    h('div', { class: 'actions', style: { justifyContent: 'flex-start' } }, saveNewBtn, overwriteBtn,
+      h('a', { class: 'secondary', href: '#/presets' }, t('pb.list'))));
+
   el.append(
     h('div', { class: 'topline' },
       h('div', {}, h('div', { class: 'eyebrow' }, t('b.eyebrow')), h('h1', { text: t('b.title') }),
         h('p', { class: 'lead', text: t('b.lead') })),
       h('div', { class: 'notice' }, t('b.notice', { c: cost, d: meta.data_as_of }))),
-    h('div', { class: 'grid-three' }, buyCard, exitCard, uniCard), runbar);
+    h('div', { class: 'grid-three' }, buyCard, exitCard, uniCard), presetCard, runbar);
 
   // ---------------------------------------------------------------- behaviour
   let previewTimer;
@@ -192,6 +269,7 @@ export async function renderBuilder(el) {
   }
   function save(universeChanged = false) {
     state.draft = { ...f };
+    renderPresetStatus();
     if (Object.keys(errs).length) showErrors(validate(f, meta));
     if (universeChanged) { clearTimeout(previewTimer); previewTimer = setTimeout(refreshPreview, 350); }
   }
@@ -230,6 +308,7 @@ export async function renderBuilder(el) {
     }
   });
 
+  renderPresetStatus();
   refreshPreview();
   return () => clearTimeout(previewTimer);
 }

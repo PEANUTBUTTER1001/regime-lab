@@ -12,5 +12,8 @@ export const state = {
   set lastRun(v) { set('rl.lastRun', v); },
   get draft() { try { return JSON.parse(get('rl.draft') || 'null'); } catch { return null; } },
   set draft(v) { set('rl.draft', v ? JSON.stringify(v) : null); },
+  // 빌더에 불러온 저장 조합 {id, name, revision, body} — 덮어쓰기·변경 여부 판단용 (P1-10)
+  get loadedPreset() { try { return JSON.parse(get('rl.loadedPreset') || 'null'); } catch { return null; } },
+  set loadedPreset(v) { set('rl.loadedPreset', v ? JSON.stringify(v) : null); },
   meta: null,
 };

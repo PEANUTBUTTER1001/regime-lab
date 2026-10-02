@@ -231,7 +231,29 @@ export async function renderSearch(el) {
   });
 
   refreshCount();
+  renderHistory(el);
   return () => clearTimeout(timer);
+}
+
+// 최근 탐색 기록 (plan/01 작업 ③-3): 과거 탐색을 다시 연다. 목록 값은 /api/searches 상태 그대로
+const RUN_KIND = { completed: '', cancelled: 'warn', failed: 'bad', running: 'neutral', queued: 'neutral' };
+async function renderHistory(el) {
+  const box = h('section', { style: { marginTop: '26px' } }, h('h2', {}, t('sh.title')));
+  el.append(box);
+  let list;
+  try { list = (await api.searches()).searches; } catch (e) { box.append(h('p', { class: 'muted', text: e.message })); return; }
+  if (!list.length) { box.append(h('p', { class: 'muted', text: t('sh.empty') })); return; }
+  const href = (s) => (s.status === 'running' || s.status === 'queued' ? `#/searches/${s.search_id}/progress` : `#/searches/${s.search_id}/results`);
+  box.append(h('article', { class: 'card', style: { marginTop: '12px' } }, table({
+    caption: t('sh.caption'),
+    columns: [
+      { label: t('sh.col.name'), render: (s) => h('a', { href: href(s) }, s.name) },
+      { label: t('sh.col.status'), render: (s) => pill(has(`sh.st.${s.status}`) ? t(`sh.st.${s.status}`) : s.status, RUN_KIND[s.status] ?? 'neutral') },
+      { label: t('sh.col.created'), render: (s) => s.created_at.replace('T', ' ') },
+      { label: t('sh.col.id'), render: (s) => h('small', { class: 'muted' }, s.search_id) },
+    ],
+    rows: list.filter((s) => s.status !== 'failed' || s.error),
+  })));
 }
 
 // ================================================================ 진행 화면 (#/searches/:id/progress)
