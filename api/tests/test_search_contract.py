@@ -68,7 +68,8 @@ def test_options(client):
 
 def test_preview_counts_and_limit(client):
     r = client.post("/api/searches/preview", json=BODY).json()
-    assert r == {"candidates": 8, "max_candidates": 200, "within_limit": True, "estimated_sec": 40.0}
+    sec = load_config()["search"]["sec_per_candidate"]
+    assert r == {"candidates": 8, "max_candidates": 200, "within_limit": True, "estimated_sec": round(8 * sec, 1)}
     big = {"name": "big", "target_win_rate": 0.5, "axes": {"stop_loss_pct": [-5, -8], "take_profit_pct": [10, 20]}}
     r = client.post("/api/searches/preview", json=big)
     assert r.status_code == 200 and r.json()["candidates"] == 228 and not r.json()["within_limit"]
