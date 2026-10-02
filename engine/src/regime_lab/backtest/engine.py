@@ -203,10 +203,6 @@ def run_backtest(
     return build_trades(f, rows, skip_rows, index, cfg, sectors)
 
 
-def _index_price(index: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    return {m: g.set_index("date")[["open", "close"]] for m, g in index.groupby("market")}
-
-
 def _build_trades(f, rows, index, cost, sectors) -> pd.DataFrame:
     cols = ["ticker", "signal_date", "entry_date", "exit_signal_date", "exit_date", "entry_price", "exit_price",
             "exit_reason", "exit_retries", "exit_at_close"]
@@ -238,16 +234,14 @@ def _build_trades(f, rows, index, cost, sectors) -> pd.DataFrame:
     for c in attrs:
         tr[c] = f[c].astype(object).to_numpy()[t_i]
     # 초과수익 (A10): 신호일 소속 시장 지수의 같은 보유기간 수익률 (진입 시가 → 청산 시가/종가)
-    ip = _index_price(index)
-    idx_ret = []
-    for m, ed, xd, atc in zip(tr.get("market", [None] * len(tr)), tr["entry_date"], tr["exit_date"],
-                              tr["exit_at_close"]):
-        p = ip.get(m)
-        if p is None or ed not in p.index or xd not in p.index:
-            idx_ret.append(np.nan)
-            continue
-        idx_ret.append(p.at[xd, "close" if atc else "open"] / p.at[ed, "open"] - 1)
-    tr["index_ret"] = idx_ret
+    # 거래마다 지수 가격을 하나씩 찾던 반복을 한 번의 색인 조회로 바꿨다 (NFR-14, 같은 값·같은 연산 순서).
+    # 시장·진입일·청산일 중 하나라도 지수에 없으면 NaN.
+    ix = index.set_index([index["market"].astype(object), "date"])[["open", "close"]]
+    mk = tr["market"].astype(object).to_numpy() if "market" in tr else np.full(len(tr), None, dtype=object)
+    at_entry = ix.reindex(pd.MultiIndex.from_arrays([mk, tr["entry_date"]]))
+    at_exit = ix.reindex(pd.MultiIndex.from_arrays([mk, tr["exit_date"]]))
+    exit_px = np.where(tr["exit_at_close"].to_numpy(bool), at_exit["close"].to_numpy(float), at_exit["open"].to_numpy(float))
+    tr["index_ret"] = exit_px / at_entry["open"].to_numpy(float) - 1
     tr["excess_ret"] = tr["net_ret"] - tr["index_ret"]
 
     # 업종: 신호일 이전(포함) 최신 월말 스냅샷 (FR-E5, 진입 시점 기준)
