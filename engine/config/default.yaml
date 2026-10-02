@@ -43,6 +43,21 @@ patterns:
   breakout_vol: {lookback: 20, volume_mult: 2.0}
   rsi_rebound: {window: 14, threshold: 30}
   bb_lower_recover: {window: 20, k: 2.0}
+  # X6 후순위 5종 (정의: 초안 r1, 2026-10-02 hongsungmin0315 승인 — 구현_전_결정사항 §5.3). 기존 열로만 계산
+  three_down_up: {down_days: 3}
+  bb_squeeze_break: {squeeze_lookback: 125}
+  pullback_ma20: {touch_tolerance_pct: 1.0, max_penetration_pct: 2.0}
+  granville_buy1: {slope_days: 5}
+  engulfing: {min_body_ratio: 1.0, trend_days: 3}
+
+pattern_limits:                     # P1-4 조합별로 바꿀 수 있는 패턴 수치와 허용 범위 [최소, 최대]. 기본값은 위 patterns 절.
+  breakout_vol: {volume_mult: [1.0, 5.0]}   # 준비 프레임(지표 열)에 들어가지 않는 수치만 연다 → PREP_VERSION 영향 없음
+  rsi_rebound: {threshold: [10, 50]}
+  three_down_up: {down_days: [2, 5]}                                  # X6 (r1 제안 범위)
+  bb_squeeze_break: {squeeze_lookback: [20, 200]}
+  pullback_ma20: {touch_tolerance_pct: [0, 5], max_penetration_pct: [0, 5]}
+  granville_buy1: {slope_days: [1, 20]}
+  engulfing: {min_body_ratio: [1, 3], trend_days: [1, 20]}
 
 exit:                               # A8 기본값
   stop_loss_pct: -8
@@ -81,7 +96,16 @@ search:                             # D-1 역방향 탐색 (docs/역방향_백�
     stop_loss_pct: [-3, -5, -8, -10, -15, -20, null]
     take_profit_pct: [5, 10, 15, 20, 30, 50, null]
     max_hold_days: [3, 5, 10, 20, 40, 60]
-  defaults:                         # 요청에서 축을 생략했을 때 (패턴은 핵심 5종 전체)
+  pattern_axes:                     # P1-4 패턴 수치 축의 허용 값. 그 패턴이 들어간 조합에만 곱해진다
+    breakout_vol: {volume_mult: [1.5, 2.0, 2.5, 3.0]}
+    rsi_rebound: {threshold: [20, 25, 30, 35, 40]}
+    three_down_up: {down_days: [2, 3, 4]}           # X6 (2026-10-02 hongsungmin0315): 기본값 앞뒤 값. 고른 값만큼 그 패턴이 든 조합이 늘어난다
+    bb_squeeze_break: {squeeze_lookback: [60, 125, 200]}
+    pullback_ma20: {touch_tolerance_pct: [0.5, 1.0, 2.0], max_penetration_pct: [1.0, 2.0, 3.0]}
+    granville_buy1: {slope_days: [3, 5, 10]}
+    engulfing: {min_body_ratio: [1.0, 1.5, 2.0], trend_days: [3, 5, 10]}
+  defaults:                         # 요청에서 축을 생략했을 때
+    patterns: [ma_cross_5_20, breakout_20d, breakout_vol, rsi_rebound, bb_lower_recover]  # 핵심 5종 (10종 전체는 후보 상한 초과)
     combine: [and, or]
     stop_loss_pct: [-8]
     take_profit_pct: [20]

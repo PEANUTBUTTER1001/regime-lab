@@ -91,8 +91,10 @@ def test_backtest_truncation(sample_prepared, paths, cfg, cut):
                             full.delisted, full.sectors)
         b, _ = run_backtest(part.frame, compute_signals(part.frame, [name], "or", cfg), part.index, cfg,
                             full.delisted, full.sectors)
+        # 후순위 패턴은 초기 구간에 거래 0건일 수 있다. 빈 거래 표도 같은 열을 가지므로 그대로 비교한다
         a = a[a["exit_date"] < pd.Timestamp(cut)][cols].reset_index(drop=True)
         b = b[(b["exit_date"] < pd.Timestamp(cut)) & (b["exit_reason"] != "end_of_data")][cols]
         b = b.reset_index(drop=True)
-        assert len(a) > 0 or name in ("bb_lower_recover", "rsi_rebound")
+        assert len(a) > 0 or name in ("bb_lower_recover", "rsi_rebound", "three_down_up", "bb_squeeze_break",
+                                      "pullback_ma20", "granville_buy1", "engulfing")
         pd.testing.assert_frame_equal(a.astype(str), b.astype(str), obj=name)

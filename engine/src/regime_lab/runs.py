@@ -15,6 +15,7 @@ runs/<run_id>/
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform
 import re
@@ -43,7 +44,8 @@ FDR_NOTE = ("FDR 가족 크기 m 은 이 실행 요청에 포함된 전략 수�
             "다중검정 보정이 약해집니다.")
 ENGINE_VERSION = "0.2.0"
 
-STRATEGY_KEYS = {"name", "patterns", "combine", "exit", "markets", "period", "min_avg_value_krw", "cap_groups"}
+STRATEGY_KEYS = {"name", "patterns", "combine", "exit", "markets", "period", "min_avg_value_krw", "cap_groups",
+                 "pattern_params"}
 EXIT_KEYS = {"stop_loss_pct", "take_profit_pct", "max_hold_days", "trailing_stop_pct"}
 CAP_GROUPS = ["large", "mid", "small"]
 NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
@@ -68,6 +70,7 @@ class Strategy:
     period: dict | None = None
     min_avg_value_krw: int | None = None
     cap_groups: list[str] | None = None
+    pattern_params: dict | None = None  # P1-4 {패턴: {수치: 값}}. 없으면 설정 기본값 (기존 결과와 동일)
 
     @classmethod
     def load(cls, path: Path) -> "Strategy":
@@ -82,7 +85,7 @@ class Strategy:
         errors: dict[str, str] = {}
         unknown = set(d) - STRATEGY_KEYS
         if unknown:
-            # 패턴 파라미터 등은 전략 파일에서 바꿀 수 없다 (C-3, FR-P4)
+            # 정해진 키 밖은 받지 않는다. 패턴 수치는 pattern_params 로만, pattern_limits 범위 안에서 (P1-4)
             errors["_"] = f"Keys not allowed: {sorted(unknown)}"
         name = d.get("name")
         if not isinstance(name, str) or not NAME_RE.match(name):
@@ -105,7 +108,7 @@ class Strategy:
         if isinstance(period, dict):  # YAML 은 따옴표 없는 날짜를 date 객체로 읽는다 → YYYY-MM-DD 문자열
             period = {k: v.isoformat() if isinstance(v, date) else v for k, v in period.items()}
         return cls(name, list(pats), combine, d.get("exit"), d.get("markets"), period,
-                   d.get("min_avg_value_krw"), d.get("cap_groups"))
+                   d.get("min_avg_value_krw"), d.get("cap_groups"), d.get("pattern_params"))
 
     # ------------------------------------------------------------------ 값 검증 (FR-X5)
     def validate(self, cfg: dict) -> None:
@@ -176,8 +179,33 @@ class Strategy:
                     or not set(self.cap_groups) <= set(CAP_GROUPS) or len(set(self.cap_groups)) != len(self.cap_groups)):
                 errors["cap_groups"] = f"One or more of {CAP_GROUPS}, no duplicates"
 
+        if self.pattern_params is not None:
+            errors.update(self._pattern_param_errors(cfg))
+
         if errors:
             raise StrategyError(errors)
+
+    def _pattern_param_errors(self, cfg: dict) -> dict[str, str]:
+        """조합별 패턴 수치: 고른 패턴의, pattern_limits 에 있는 수치만, 허용 범위 안의 숫자 (P1-4)."""
+        pp, limits = self.pattern_params, cfg.get("pattern_limits", {})
+        if not isinstance(pp, dict):
+            return {"pattern_params": "An object {pattern: {param: value}}"}
+        errors: dict[str, str] = {}
+        for pat, vals in pp.items():
+            if pat not in self.patterns:
+                errors[f"pattern_params.{pat}"] = "Only for selected patterns"
+                continue
+            if not isinstance(vals, dict) or not vals:
+                errors[f"pattern_params.{pat}"] = "A non-empty object {param: value}"
+                continue
+            for k, v in vals.items():
+                lim = limits.get(pat, {}).get(k)
+                if lim is None:
+                    errors[f"pattern_params.{pat}.{k}"] = f"Not adjustable. Adjustable: {sorted(limits.get(pat, {}))}"
+                elif not param_value_ok(v, cfg["patterns"][pat][k], lim):
+                    kind = "A whole number" if is_int_param(cfg["patterns"][pat][k]) else "A number"
+                    errors[f"pattern_params.{pat}.{k}"] = f"{kind} from {lim[0]} to {lim[1]}"
+        return errors
 
     def exit_cfg(self, cfg: dict) -> dict:
         return {**cfg["exit"], **(self.exit or {})}
@@ -191,14 +219,32 @@ class Strategy:
             "period": self.period or {"start": cfg["data"]["backtest_start"], "end": cfg["data"]["as_of_date"]},
             "min_avg_value_krw": self.min_avg_value_krw or int(cfg["universe"]["min_avg_value_krw"]),
             "cap_groups": self.cap_groups or list(CAP_GROUPS),
+            # 바꾼 수치가 있을 때만 싣는다 → 기존 전략의 메타데이터·결과 형식은 그대로.
+            # 조정 가능한 수치(pattern_limits)를 기본값까지 채워 싣는다 → 이 값을 그대로 다시 넣어도 검증을 통과한다
+            **({"pattern_params": {p: {k: v.get(k, cfg["patterns"][p][k]) for k in cfg["pattern_limits"][p]}
+                                   for p, v in self.pattern_params.items()}}
+               if self.pattern_params else {}),
         }
 
     def to_dict(self) -> dict:
         d = {"name": self.name, "patterns": self.patterns, "combine": self.combine, "exit": self.exit}
-        for k in ("markets", "period", "min_avg_value_krw", "cap_groups"):
+        for k in ("markets", "period", "min_avg_value_krw", "cap_groups", "pattern_params"):
             if getattr(self, k) is not None:
                 d[k] = getattr(self, k)
         return d
+
+
+def is_int_param(default) -> bool:
+    """기본값이 정수인 패턴 수치(일수·창 길이 등)는 정수만 받는다 (P1-4)."""
+    return isinstance(default, int) and not isinstance(default, bool)
+
+
+def param_value_ok(v, default, lim) -> bool:
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+        return False
+    if is_int_param(default) and not isinstance(v, int):
+        return False
+    return lim[0] <= v <= lim[1]
 
 
 def entry_mask(frame: pd.DataFrame, strategy: Strategy) -> pd.Series:
@@ -252,7 +298,7 @@ def execute(strategies, prep: Prepared, cfg: dict, ctx: RunContext = NULL_CONTEX
     ctx.stage("signals_execution")
     sims = {}
     for i, s in enumerate(lst):
-        sig = compute_signals(prep.frame, s.patterns, s.combine, cfg)
+        sig = compute_signals(prep.frame, s.patterns, s.combine, cfg, s.pattern_params)
         sims[s.name] = simulate_trades(prep.frame, sig, cfg, prep.delisted, s.exit_cfg(cfg), masks[s.name],
                                        _Offset(ctx, i, len(lst)))
 

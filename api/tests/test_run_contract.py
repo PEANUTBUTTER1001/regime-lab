@@ -13,7 +13,9 @@ def test_meta(client):
     m = client.get("/api/meta").json()
     assert m["status"] == "ready" and m["data_as_of"] == "2026-09-18"
     assert {p["name"] for p in m["patterns"]} == {"ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound",
-                                                  "bb_lower_recover"}
+                                                  "bb_lower_recover",  # 핵심 5종 유지
+                                                  "three_down_up", "bb_squeeze_break", "pullback_ma20",
+                                                  "granville_buy1", "engulfing"}  # X6 후순위 5종
     assert m["exit_defaults"] == {"stop_loss_pct": -8, "take_profit_pct": 20, "max_hold_days": 20,
                                   "trailing_stop_pct": None}
     assert m["min_avg_value_krw"] == 500_000_000 and m["execution"]["round_trip_cost_pct"] == 0.30

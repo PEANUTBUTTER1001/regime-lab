@@ -139,3 +139,17 @@ def test_trade_records_liquidity_group_at_signal_date(cfg):
     df.loc[5, "liq_group"] = "large"
     t = _run(df, [5], cfg)[0].iloc[0]
     assert t.liq_group == "large"
+
+
+def test_empty_trades_keep_same_columns(cfg):
+    """거래 0건이어도 거래가 있을 때와 같은 열·순서 (실데이터 리뷰: granville_buy1 초기 구간 0건에서 열 누락)."""
+    from synth import make_market
+
+    from regime_lab.patterns import compute_signals
+
+    m = make_market(cfg, n_tickers=5, seed=2)
+    sig = compute_signals(m.frame, ["breakout_20d"], "or", cfg)
+    full, _ = run_backtest(m.frame, sig, m.index, cfg, set(), m.sectors)
+    empty, _ = run_backtest(m.frame, sig & False, m.index, cfg, set(), m.sectors)
+    assert len(full) > 0 and len(empty) == 0
+    assert list(empty.columns) == list(full.columns)
