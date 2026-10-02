@@ -1,13 +1,18 @@
-"""역방향 탐색 (P1, D-1): 목표 성과를 만족한 전략 조합을 후보 곱집합에서 찾는다.
+"""역방향 탐색 (P1, D-1): 목표 승률 N% 이상을 과거에 충족한 조건 조합을 후보 곱집합에서 찾는다.
 
-절차 (docs/역방향_백테스트_설계.md §3.4)
+절차 (docs/역방향_백테스트_설계.md §3.4, docs/plan/01-presets-and-reverse-backtest.md 작업 ②)
 1. 후보 생성: 패턴 조합 × 결합 × 손절 × 익절 × 보유일. 순번은 요청이 같으면 항상 같다.
-2. 탐색 구간(backtest_start ~ split_date) 전 후보: 요약 지표 + 단측 p-value. 무작위 벤치마크는 하지 않는다.
-3. 선별: 목표 조건 충족 + 거래 수 ≥ min_cell_trades + BH-FDR 통과(m = 전체 후보 수). sort_by 내림차순 순위.
-4. 평가 구간(split_date 다음 날 ~ 기준일): 상위 finalists 개를 execute() 로 3중 검증(FDR m = 최종 후보 수).
-   held = 평가 구간에서도 목표 조건 충족 + 거래 수 ≥ min_cell_trades + FDR 통과.
+2. 탐색 구간(기간 시작 ~ split_date) 전 후보: 기존 엔진 규칙 그대로 요약 지표 + 단측 p-value.
+   데이터를 split_date 까지 잘라 계산한다(as_of = split_date 백테스트). 그래서 평가 구간 데이터가 바뀌어도
+   탐색 결과·후보 선택이 바뀌지 않는다. 분할일에 보유 중인 거래는 기존 규칙대로 end_of_data(집계 제외)다.
+3. 탐색 구간에서 목표 승률과 최소 거래 수를 충족한 후보만 평가 구간(split_date 다음 날 ~ 기간 끝)에서 다시 평가한다.
+   평가 구간 결과는 후보 선택에 쓰지 않는다.
+4. FDR 가족 크기는 두 구간 모두 **시도한 전체 후보 수**다. 평가하지 않은 후보는 p = 1 로 두어 m 에만 포함한다.
+5. 상태: both(탐색·평가 모두 충족) / explore_only(탐색만 충족) / insufficient_trades(탐색 거래 수 부족) / not_met(미충족).
+   충족 후보가 없으면 가장 가까운 후보와 부족분을 돌려준다.
 
-각 후보는 기존 Strategy 그대로라 POST /runs 에 같은 전략·기간을 넣으면 같은 지표가 나온다 (정방향 일치).
+각 후보는 기존 Strategy 그대로다. 탐색 구간 값은 같은 전략·기간을 split_date 까지의 데이터로 정방향 실행한 값,
+평가 구간 값은 같은 전략을 평가 기간으로 정방향 실행한 값과 같다 (정방향 일치, P1-11.1).
 """
 
 from __future__ import annotations
@@ -28,11 +33,13 @@ from regime_lab.patterns.core import get_pattern
 from regime_lab.pipeline import Prepared
 from regime_lab.runs import Strategy, StrategyError, entry_mask, execute
 
-SEARCH_KEYS = {"name", "axes", "filters", "target", "sort_by"}
+SEARCH_KEYS = {"name", "target_win_rate", "min_trades", "axes", "filters"}
 AXIS_KEYS = ("patterns", "combine", "stop_loss_pct", "take_profit_pct", "max_hold_days")
-FILTER_KEYS = {"markets", "min_avg_value_krw", "cap_groups"}
+FILTER_KEYS = {"markets", "period", "min_avg_value_krw", "cap_groups"}
 NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 METRIC_KEYS = ("trades", "win_rate", "mean_ret", "median_ret", "mean_excess", "payoff_ratio", "sharpe", "mdd")
+STATUSES = ("both", "explore_only", "not_met", "insufficient_trades")  # 표시 순서
+SORT_RULE = "status (both → explore_only → not_met → insufficient_trades), then explore win_rate desc, then id"
 
 
 class SearchError(StrategyError):
@@ -46,10 +53,10 @@ class SearchError(StrategyError):
 @dataclass
 class SearchRequest:
     name: str
+    target_win_rate: float
+    min_trades: int
     axes: dict
     filters: dict
-    target: dict[str, float]
-    sort_by: str
 
     @classmethod
     def from_dict(cls, d: dict, cfg: dict) -> "SearchRequest":
@@ -62,6 +69,14 @@ class SearchRequest:
         name = d.get("name")
         if not isinstance(name, str) or not NAME_RE.match(name):
             errors["name"] = "Use 1-64 letters, digits, _ or -"
+
+        wr = d.get("target_win_rate")
+        if isinstance(wr, bool) or not isinstance(wr, (int, float)) or not 0 <= wr <= 1:
+            errors["target_win_rate"] = "A ratio from 0 to 1 (e.g. 0.55 = 55%)"
+        mt = d.get("min_trades", scfg["min_trades_default"])
+        lo, hi = scfg["min_trades_limits"]
+        if isinstance(mt, bool) or not isinstance(mt, int) or not lo <= mt <= hi:
+            errors["min_trades"] = f"Whole number from {lo} to {hi}"
 
         raw_axes = d.get("axes") or {}
         axes: dict = {}
@@ -90,27 +105,18 @@ class SearchRequest:
         for k in set(filters) - FILTER_KEYS:
             errors[f"filters.{k}"] = "Key not allowed"
 
-        target = d.get("target")
-        metrics = scfg["target_metrics"]
-        if not isinstance(target, dict) or not target:
-            errors["target"] = f"At least one of {metrics}"
-            target = {}
-        for k, v in target.items():
-            if k not in metrics:
-                errors[f"target.{k}"] = f"Use one of {metrics}"
-            elif isinstance(v, bool) or not isinstance(v, (int, float)) or not np.isfinite(v):
-                errors[f"target.{k}"] = "A number (lower bound)"
-        sort_by = d.get("sort_by", next(iter(target), None))
-        if target and sort_by not in target:
-            errors["sort_by"] = "Must be one of the target metrics"
-
         if errors:
             raise SearchError(errors)
-        req = cls(name, axes, dict(filters), {k: float(v) for k, v in target.items()}, sort_by)
+        req = cls(name, float(wr), mt, axes, dict(filters))
         try:  # 필터 값 검증은 기존 전략 규칙 그대로
             Strategy.from_dict({"name": name, "patterns": axes["patterns"][:1], **req.filters}).validate(cfg)
         except StrategyError as e:
             raise SearchError({f"filters.{k}": v for k, v in e.errors.items()}) from None
+        split = cfg["analysis"]["split_date"]
+        p = req.filters.get("period")
+        if p and not pd.Timestamp(p["start"]) <= pd.Timestamp(split) < pd.Timestamp(p["end"]):
+            raise SearchError({"filters.period": f"The period must include the split date {split} "
+                                                 "(search before it, evaluate after it)"})
         n, cap = count_candidates(req), int(scfg["max_candidates"])
         if n > cap:
             raise SearchError({"axes": f"{n} candidates exceed the limit of {cap}"}, "too_many_candidates",
@@ -118,8 +124,8 @@ class SearchRequest:
         return req
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "axes": self.axes, "filters": self.filters, "target": self.target,
-                "sort_by": self.sort_by}
+        return {"name": self.name, "target_win_rate": self.target_win_rate, "min_trades": self.min_trades,
+                "axes": self.axes, "filters": self.filters}
 
 
 # ---------------------------------------------------------------- 후보 생성 (P1-5.1)
@@ -142,8 +148,14 @@ def count_candidates(req: SearchRequest) -> int:
             * len(a["stop_loss_pct"]) * len(a["take_profit_pct"]) * len(a["max_hold_days"]))
 
 
+def estimate_seconds(n_candidates: int, cfg: dict) -> float:
+    """실행 전 예상 시간 (탐색 구간 전 후보 기준, NFR-14). 평가 구간 재평가 수는 실행 전에 알 수 없다."""
+    return round(n_candidates * float(cfg["search"]["sec_per_candidate"]), 1)
+
+
 def generate_candidates(req: SearchRequest, period: dict | None = None) -> list[Strategy]:
     a = req.axes
+    filters = {k: v for k, v in req.filters.items() if k != "period"}
     out = []
     for combo, how in pattern_sets(a["patterns"], a["combine"]):
         for sl in a["stop_loss_pct"]:
@@ -152,19 +164,37 @@ def generate_candidates(req: SearchRequest, period: dict | None = None) -> list[
                     out.append(Strategy.from_dict({
                         "name": f"c{len(out) + 1:03d}", "patterns": list(combo), "combine": how,
                         "exit": {"stop_loss_pct": sl, "take_profit_pct": tp, "max_hold_days": hold},
-                        **({"period": period} if period else {}), **req.filters,
+                        **({"period": period} if period else {}), **filters,
                     }))
     return out
 
 
 # ---------------------------------------------------------------- 구간 분할 (P1-5.2)
-def split_periods(cfg: dict) -> tuple[dict, dict]:
-    """탐색 구간 [backtest_start, split_date], 평가 구간 [split_date 다음 날, as_of_date] (신호일 기준)."""
+def split_periods(cfg: dict, period: dict | None = None) -> tuple[dict, dict]:
+    """탐색 구간 [start, split_date], 평가 구간 [split_date 다음 날, end] (신호일 기준).
+
+    period 가 없으면 [backtest_start, as_of_date]. 분할일은 기존 기간 분할(FR-A3)의 split_date 와 같다.
+    """
     d = cfg["data"]
+    start, end = (period["start"], period["end"]) if period else (d["backtest_start"], d["as_of_date"])
     split = pd.Timestamp(cfg["analysis"]["split_date"])
-    explore = {"start": d["backtest_start"], "end": split.date().isoformat()}
-    evaluate = {"start": (split + pd.Timedelta(days=1)).date().isoformat(), "end": d["as_of_date"]}
+    explore = {"start": start, "end": split.date().isoformat()}
+    evaluate = {"start": (split + pd.Timedelta(days=1)).date().isoformat(), "end": end}
     return explore, evaluate
+
+
+def truncate(prep: Prepared, end: str) -> Prepared:
+    """end 일까지의 데이터만 남긴 준비 프레임 (as_of = end).
+
+    지표·유니버스·그룹·국면은 t일까지의 값만 쓰므로(test_lookahead 절단 불변) 앞부분 값은 그대로다.
+    상장폐지 종목은 마지막 거래일이 end 이하인 종목만 남긴다. 그 밖의 종목은 end 에서 보유 중(end_of_data)이다.
+    """
+    e = pd.Timestamp(end)
+    f = prep.frame
+    last = f.groupby(f["ticker"].astype(str), observed=True)["date"].max()
+    delisted = {t for t in prep.delisted if t in last.index and last[t] <= e}
+    return Prepared(f[f["date"] <= e].reset_index(drop=True), prep.index[prep.index["date"] <= e],
+                    delisted, prep.sectors, prep.names)
 
 
 def with_period(s: Strategy, period: dict) -> Strategy:
@@ -172,15 +202,6 @@ def with_period(s: Strategy, period: dict) -> Strategy:
 
 
 # ---------------------------------------------------------------- 후보 평가 (P1-5.3)
-def target_met(metrics: dict, target: dict[str, float]) -> bool:
-    """모든 목표 지표가 하한 이상. 값이 없으면(NaN) 미충족."""
-    for k, lo in target.items():
-        v = metrics.get(k)
-        if v is None or not np.isfinite(v) or v < lo:
-            return False
-    return True
-
-
 def evaluate_candidates(cands: list[Strategy], prep: Prepared, cfg: dict,
                         ctx: RunContext = NULL_CONTEXT) -> pd.DataFrame:
     """후보별 요약 지표와 단측 p-value (무작위 벤치마크 없음). 패턴 신호는 패턴마다 한 번만 계산한다."""
@@ -205,45 +226,79 @@ def evaluate_candidates(cands: list[Strategy], prep: Prepared, cfg: dict,
     return pd.DataFrame(rows, columns=["id", *METRIC_KEYS, "p_value"])
 
 
+def meets(win_rate: float, trades: int, req: SearchRequest) -> bool:
+    """목표 판정: 기존 win_rate 정의 그대로 N% 이상 + 최소 거래 수 이상. 승률이 없으면(NaN) 미충족."""
+    return bool(np.isfinite(win_rate) and win_rate >= req.target_win_rate and trades >= req.min_trades)
 
-def select(scores: pd.DataFrame, req: SearchRequest, cfg: dict) -> pd.DataFrame:
-    """목표 충족·표본·FDR(m = 전체 후보 수) 판정과 통과 후보 순위 (1부터, 동률은 순번 순)."""
-    out = scores.copy()
-    min_n = int(cfg["analysis"]["min_cell_trades"])
-    out["target_met"] = [target_met(r, req.target) for r in out.to_dict(orient="records")]
-    out["enough_trades"] = out["trades"] >= min_n
-    out["fdr_pass"] = bh_reject(out["p_value"].to_numpy(float), float(cfg["analysis"]["fdr_q"]))
-    passed = out["target_met"] & out["enough_trades"] & out["fdr_pass"]
-    order = out[passed].sort_values([req.sort_by, "id"], ascending=[False, True], kind="stable")
-    out["rank"] = pd.Series(np.arange(1, len(order) + 1), index=order.index).reindex(out.index).astype("Int64")
-    return out
+
+def fdr_family(p_values: pd.Series, ids: pd.Series, q: float) -> pd.Series:
+    """BH-FDR, 가족 = ids 전체(시도한 후보 수). p_values 에 없는 후보는 p = 1 로 m 에만 들어간다."""
+    p = p_values.reindex(ids).fillna(1.0).to_numpy(float)
+    return pd.Series(bh_reject(p, q), index=ids.to_numpy())
+
+
+def closest_candidate(explore: pd.DataFrame, req: SearchRequest) -> dict | None:
+    """충족 후보가 없을 때 가장 가까운 후보: 거래 수 충족 우선 → 승률 부족분 작은 순 → 거래 수 많은 순 → 순번."""
+    if explore.empty:
+        return None
+    wr = explore["win_rate"].astype(float)
+    gap = pd.DataFrame({
+        "id": explore["id"],
+        "win_rate_short": np.maximum(req.target_win_rate - wr.fillna(-np.inf), 0.0).clip(upper=1.0),
+        "trades_short": np.maximum(req.min_trades - explore["trades"].astype(int), 0),
+        "trades": explore["trades"].astype(int),
+    })
+    best = gap.sort_values(["trades_short", "win_rate_short", "trades", "id"],
+                           ascending=[True, True, False, True], kind="stable").iloc[0]
+    return {"id": best["id"], "win_rate_short": float(best["win_rate_short"]),
+            "trades_short": int(best["trades_short"])}
 
 
 def run_search(req: SearchRequest, prep: Prepared, cfg: dict, ctx: RunContext = NULL_CONTEXT) -> dict:
-    """탐색 → 선별 → 평가. 저장하지 않는다."""
-    explore_p, evaluate_p = split_periods(cfg)
+    """탐색 → 평가 → 상태 분류. 저장하지 않는다.
+
+    반환 table: 후보마다 한 행. explore_* / evaluate_* 지표, fdr_pass 두 개, 무작위 벤치마크, status, order.
+    """
+    q = float(cfg["analysis"]["fdr_q"])
+    explore_p, evaluate_p = split_periods(cfg, req.filters.get("period"))
     cands = generate_candidates(req, explore_p)
     by_id = {s.name: s for s in cands}
+    ids = pd.Series([s.name for s in cands])
 
-    explore = select(evaluate_candidates(cands, prep, cfg, ctx), req, cfg)
-    ctx.check_cancel()
+    ex = evaluate_candidates(cands, truncate(prep, explore_p["end"]), cfg, ctx)
+    ex["enough_trades"] = ex["trades"] >= req.min_trades
+    ex["met"] = [meets(w, t, req) for w, t in zip(ex["win_rate"], ex["trades"])]
+    ex["fdr_pass"] = fdr_family(ex.set_index("id")["p_value"], ids, q).to_numpy()
 
-    top = explore.dropna(subset=["rank"]).sort_values("rank").head(int(cfg["search"]["finalists"]))
-    finalists = pd.DataFrame(columns=["id", *METRIC_KEYS, "p_value", "fdr_pass", "random_percentile",
-                                      "random_pass", "target_met", "held"])
-    if len(top):
-        res = execute([with_period(by_id[i], evaluate_p) for i in top["id"]], prep, cfg, ctx)
-        val = res["validation"].set_index("strategy")
-        min_n = int(cfg["analysis"]["min_cell_trades"])
-        rows = []
-        for i in top["id"]:
-            m = res["results"][i]["summary"]
-            v = val.loc[i]
-            met = target_met(m, req.target)
-            rows.append({"id": i, **{k: m[k] for k in METRIC_KEYS}, "p_value": v["p_value"],
-                         "fdr_pass": bool(v["fdr_pass"]), "random_percentile": v["random_percentile"],
-                         "random_pass": bool(v["random_pass"]), "target_met": met,
-                         "held": bool(met and m["trades"] >= min_n and v["fdr_pass"])})
-        finalists = pd.DataFrame(rows)
+    qualified = ex.loc[ex["met"], "id"].tolist()
+    ev_rows = []
+    for i, cid in enumerate(qualified):
+        ctx.progress(i, len(qualified))
+        ctx.check_cancel()
+        res = execute(with_period(by_id[cid], evaluate_p), prep, cfg)  # FDR 은 아래에서 m = 전체 후보로 다시 계산
+        m, v = res["results"][cid]["summary"], res["validation"].iloc[0]
+        ev_rows.append({"id": cid, **{k: m[k] for k in METRIC_KEYS}, "p_value": v["p_value"],
+                        "random_percentile": v["random_percentile"], "random_pass": bool(v["random_pass"]),
+                        "met": meets(m["win_rate"], m["trades"], req)})
+    ctx.progress(len(qualified), len(qualified))
+    ev = pd.DataFrame(ev_rows, columns=["id", *METRIC_KEYS, "p_value", "random_percentile", "random_pass", "met"])
+    ev_fdr = fdr_family(ev.set_index("id")["p_value"], ids, q)
+    ev["fdr_pass"] = ev_fdr.reindex(ev["id"]).to_numpy(bool)
+
+    table = ex.add_prefix("explore_").rename(columns={"explore_id": "id"}).merge(
+        ev.add_prefix("evaluate_").rename(columns={"evaluate_id": "id"}), on="id", how="left")
+    ev_met = table["evaluate_met"].astype("boolean").fillna(False).astype(bool)
+    table["status"] = np.select(
+        [table["explore_met"] & ev_met, table["explore_met"], table["explore_enough_trades"]],
+        ["both", "explore_only", "not_met"], "insufficient_trades")
+    table["_s"] = table["status"].map({s: i for i, s in enumerate(STATUSES)})
+    table = table.sort_values(["_s", "explore_win_rate", "id"], ascending=[True, False, True],
+                              na_position="last", kind="stable").drop(columns="_s").reset_index(drop=True)
+    table["order"] = np.arange(1, len(table) + 1)
+
     return {"request": req, "split": {"explore": explore_p, "evaluate": evaluate_p},
-            "candidates": cands, "explore": explore, "finalists": finalists}
+            "candidates": cands, "table": table, "sort_rule": SORT_RULE,
+            "counts": {"candidates": len(cands), **{s: int((table["status"] == s).sum()) for s in STATUSES},
+                       "explore_fdr_pass": int(table["explore_fdr_pass"].sum()),
+                       "evaluate_fdr_pass": int(table["evaluate_fdr_pass"].astype("boolean").fillna(False).sum())},
+            "closest": None if qualified else closest_candidate(ex, req)}

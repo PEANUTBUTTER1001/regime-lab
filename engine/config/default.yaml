@@ -72,9 +72,10 @@ analysis:
   risk_free_rate: 0.0               # A9
 
 search:                             # D-1 역방향 탐색 (docs/역방향_백테스트_설계.md §3)
-  max_candidates: 200               # 탐색 1회 후보 수 상한. 넘으면 실행하지 않는다
-  finalists: 10                     # 평가 구간에서 다시 확인할 1차 통과 상위 후보 수
-  target_metrics: [win_rate, mean_ret, mean_excess, payoff_ratio, sharpe, mdd]  # 목표 조건(하한)으로 쓸 수 있는 지표
+  max_candidates: 200               # 탐색 1회 후보 수 상한 (NFR-14). 넘으면 실행하지 않는다
+  sec_per_candidate: 5.0            # 예상 시간 = 후보 수 × 이 값. 합성 3,000종목 실측 2.9초 × 실데이터 보정 1.7 (실데이터로 재측정)
+  min_trades_default: 300           # 최소 거래 수 기본값 (analysis.min_cell_trades 와 같은 기준)
+  min_trades_limits: [30, 5000]     # 최소 거래 수 입력 허용 범위
   axes:                             # 축별 허용 값 (이 순서가 후보 순번 순서)
     combine: [and, or]
     stop_loss_pct: [-3, -5, -8, -10, -15, -20, null]
