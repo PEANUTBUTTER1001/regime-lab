@@ -54,4 +54,7 @@ export const api = {
   // 찾은 조합 저장 (P1-9)
   presets: () => request('GET', '/presets'),
   savePreset: (body) => request('POST', '/presets', body),
+  preset: (id) => request('GET', `/presets/${encodeURIComponent(id)}`),
+  updatePreset: (id, body) => request('PUT', `/presets/${encodeURIComponent(id)}`, body),
+  deletePreset: (id) => request('DELETE', `/presets/${encodeURIComponent(id)}`),
 };
