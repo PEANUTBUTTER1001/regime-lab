@@ -182,3 +182,15 @@ def test_search_integer_axis_rejects_float(cfg):
         SearchRequest.from_dict({"name": "pp", "target_win_rate": 0.5,
                                  "axes": {"patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"window": [10.0]}}}}, c)
     assert "axes.pattern_params.rsi_rebound.window" in e.value.errors
+
+
+def test_config_axes_and_limits_are_consistent(cfg):
+    """설정 점검: 탐색 축 값은 모두 조합별 허용 범위·타입을 통과하고, 기본값도 범위 안이다."""
+    for pat, params in cfg["search"]["pattern_axes"].items():
+        for k, values in params.items():
+            assert k in cfg["pattern_limits"][pat], (pat, k)
+            for v in values:
+                Strategy.from_dict({"name": "x", "patterns": [pat], "pattern_params": {pat: {k: v}}}).validate(cfg)
+    for pat, params in cfg["pattern_limits"].items():
+        for k, (lo, hi) in params.items():
+            assert lo <= cfg["patterns"][pat][k] <= hi, (pat, k)
