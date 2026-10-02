@@ -61,13 +61,15 @@ def test_options(client):
     assert len(o["patterns"]) == 10 and o["max_candidates"] == 200  # 핵심 5종 + 후순위 5종(X6)
     assert o["defaults"]["patterns"] == ["ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover"]
     assert o["min_trades"] == {"default": 300, "min": 30, "max": 5000}
+    assert 0 <= o["target_win_rate_default"] <= 1
     assert o["axes"]["max_hold_days"] == [3, 5, 10, 20, 40, 60] and o["split_date"] == "2024-02-29"
     assert "not_evaluated" in o["statuses"]
 
 
 def test_preview_counts_and_limit(client):
     r = client.post("/api/searches/preview", json=BODY).json()
-    assert r == {"candidates": 8, "max_candidates": 200, "within_limit": True, "estimated_sec": 40.0}
+    sec = load_config()["search"]["sec_per_candidate"]
+    assert r == {"candidates": 8, "max_candidates": 200, "within_limit": True, "estimated_sec": round(8 * sec, 1)}
     big = {"name": "big", "target_win_rate": 0.5, "axes": {"stop_loss_pct": [-5, -8], "take_profit_pct": [10, 20]}}
     r = client.post("/api/searches/preview", json=big)
     assert r.status_code == 200 and r.json()["candidates"] == 228 and not r.json()["within_limit"]
