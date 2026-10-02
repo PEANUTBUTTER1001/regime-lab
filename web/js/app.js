@@ -11,6 +11,7 @@ import { renderLogin } from './views/login.js';
 import { renderProgress } from './views/progress.js';
 import { renderReport } from './views/report.js';
 import { renderResults } from './views/results.js';
+import { renderRuns } from './views/runs.js';
 import { renderPresets } from './views/presets.js';
 import { renderSearch, renderSearchProgress, renderSearchResult } from './views/search.js';
 import { renderSettings } from './views/settings.js';
@@ -20,6 +21,7 @@ const NAV = [
   { id: 'builder', icon: '⌘', label: 'nav.builder', href: () => '#/builder' },
   { id: 'search', icon: '⟲', label: 'nav.search', href: () => '#/search' },
   { id: 'presets', icon: '☆', label: 'nav.presets', href: () => '#/presets' },
+  { id: 'runs', icon: '☰', label: 'nav.runs', href: () => '#/runs' },
   { id: 'results', icon: '▦', label: 'nav.results', href: () => (state.lastRun ? `#/runs/${state.lastRun}/results` : '#/results') },
   { id: 'stock', icon: '⌁', label: 'nav.stock', href: () => (state.lastRun ? `#/runs/${state.lastRun}/stock` : '#/stock') },
   { id: 'report', icon: '✦', label: 'nav.report', href: () => (state.lastRun ? `#/runs/${state.lastRun}/report` : '#/report') },
@@ -29,6 +31,7 @@ const NAV = [
 const ROUTES = [
   [/^#\/login$/, () => ({ nav: null, view: renderLogin, bare: true })],
   [/^#\/builder$/, () => ({ nav: 'builder', view: renderBuilder })],
+  [/^#\/runs$/, () => ({ nav: 'runs', view: renderRuns })],
   [/^#\/runs\/([^/]+)\/progress$/, (m) => ({ nav: 'builder', view: (el) => renderProgress(el, m[1]) })],
   [/^#\/runs\/([^/]+)\/results$/, (m) => ({ nav: 'results', view: (el, q) => renderResults(el, m[1], q) })],
   [/^#\/runs\/([^/]+)\/stock(?:\/([^/]+))?$/, (m) => ({ nav: 'stock', view: (el, q) => renderStock(el, m[1], m[2], q) })],
