@@ -17,29 +17,42 @@
 
 from __future__ import annotations
 
+import json
+import os
+import platform
 import re
+import shutil
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from itertools import combinations
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from regime_lab.analysis.report import to_jsonable
 from regime_lab.analysis.validation import bh_reject, one_sided_pvalue
-from regime_lab.backtest import build_trades, simulate_trades, summarize
-from regime_lab.context import NULL_CONTEXT, RunContext
+from regime_lab.backtest import METRIC_DEFS, build_trades, simulate_trades, summarize
+from regime_lab.config import Paths, config_hash
+from regime_lab.context import NULL_CONTEXT, RunCancelled, RunContext
 from regime_lab.patterns import CORE_PATTERNS
 from regime_lab.patterns.base import combine_signals
 from regime_lab.patterns.core import get_pattern
-from regime_lab.pipeline import Prepared
-from regime_lab.runs import Strategy, StrategyError, entry_mask, execute
+from regime_lab.data.loader import input_file_hashes
+from regime_lab.pipeline import Prepared, prep_hash
+from regime_lab.runs import DISCLAIMER, ENGINE_VERSION, Strategy, StrategyError, entry_mask, execute
 
 SEARCH_KEYS = {"name", "target_win_rate", "min_trades", "axes", "filters"}
 AXIS_KEYS = ("patterns", "combine", "stop_loss_pct", "take_profit_pct", "max_hold_days")
 FILTER_KEYS = {"markets", "period", "min_avg_value_krw", "cap_groups"}
 NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 METRIC_KEYS = ("trades", "win_rate", "mean_ret", "median_ret", "mean_excess", "payoff_ratio", "sharpe", "mdd")
-STATUSES = ("both", "explore_only", "not_met", "insufficient_trades")  # 표시 순서
-SORT_RULE = "status (both → explore_only → not_met → insufficient_trades), then explore win_rate desc, then id"
+# 표시 순서. not_evaluated 는 탐색 충족 후보가 평가 전에 취소된 경우에만 나온다.
+STATUSES = ("both", "explore_only", "not_evaluated", "not_met", "insufficient_trades")
+NOTE = "목표 조건을 과거 구간에서 충족한 조합입니다. 미래 성과를 보장하지 않습니다."
+SORT_RULE = ("status (both → explore_only → not_evaluated → not_met → insufficient_trades), "
+             "then explore win_rate desc, then id")
 
 
 class SearchError(StrategyError):
@@ -202,28 +215,36 @@ def with_period(s: Strategy, period: dict) -> Strategy:
 
 
 # ---------------------------------------------------------------- 후보 평가 (P1-5.3)
-def evaluate_candidates(cands: list[Strategy], prep: Prepared, cfg: dict,
-                        ctx: RunContext = NULL_CONTEXT) -> pd.DataFrame:
-    """후보별 요약 지표와 단측 p-value (무작위 벤치마크 없음). 패턴 신호는 패턴마다 한 번만 계산한다."""
+def score_candidate(s: Strategy, prep: Prepared, cfg: dict, signals: dict[str, pd.Series]) -> dict:
+    """후보 1개의 요약 지표와 단측 p-value (무작위 벤치마크 없음). signals 는 패턴별 신호 캐시(호출자가 공유)."""
+    s.validate(cfg)
+    for p in s.patterns:
+        if p not in signals:
+            signals[p] = get_pattern(p, cfg).signal(prep.frame)
+    sig = combine_signals([signals[p] for p in s.patterns], s.combine)
+    f, tr_rows, skip_rows = simulate_trades(prep.frame, sig, cfg, prep.delisted, s.exit_cfg(cfg),
+                                            entry_mask(prep.frame, s))
+    trades, skipped = build_trades(f, tr_rows, skip_rows, prep.index, cfg, prep.sectors)
+    summ = summarize(trades, skipped, prep.frame)
+    inc = trades[~trades["excluded"]] if len(trades) else trades
+    excess = inc["excess_ret"].dropna().to_numpy(float) if len(inc) else np.array([])
+    return {"id": s.name, **{k: summ[k] for k in METRIC_KEYS}, "p_value": one_sided_pvalue(excess)}
+
+
+def evaluate_candidates(cands: list[Strategy], prep: Prepared, cfg: dict) -> pd.DataFrame:
+    """후보 전체를 한 번에 평가한다. 패턴 신호는 패턴마다 한 번만 계산한다."""
     signals: dict[str, pd.Series] = {}
-    rows = []
-    for i, s in enumerate(cands):
-        ctx.progress(i, len(cands))
-        ctx.check_cancel()
-        s.validate(cfg)
-        for p in s.patterns:
-            if p not in signals:
-                signals[p] = get_pattern(p, cfg).signal(prep.frame)
-        sig = combine_signals([signals[p] for p in s.patterns], s.combine)
-        f, tr_rows, skip_rows = simulate_trades(prep.frame, sig, cfg, prep.delisted, s.exit_cfg(cfg),
-                                                entry_mask(prep.frame, s))
-        trades, skipped = build_trades(f, tr_rows, skip_rows, prep.index, cfg, prep.sectors)
-        summ = summarize(trades, skipped, prep.frame)
-        inc = trades[~trades["excluded"]] if len(trades) else trades
-        excess = inc["excess_ret"].dropna().to_numpy(float) if len(inc) else np.array([])
-        rows.append({"id": s.name, **{k: summ[k] for k in METRIC_KEYS}, "p_value": one_sided_pvalue(excess)})
-    ctx.progress(len(cands), len(cands))
-    return pd.DataFrame(rows, columns=["id", *METRIC_KEYS, "p_value"])
+    return pd.DataFrame([score_candidate(s, prep, cfg, signals) for s in cands],
+                        columns=["id", *METRIC_KEYS, "p_value"])
+
+
+def evaluate_in_period(s: Strategy, period: dict, prep: Prepared, cfg: dict, req: "SearchRequest") -> dict:
+    """평가 구간 재평가: 정방향 실행 그대로(무작위 벤치마크 포함). FDR 은 호출자가 m = 전체 후보로 다시 계산한다."""
+    res = execute(with_period(s, period), prep, cfg)
+    m, v = res["results"][s.name]["summary"], res["validation"].iloc[0]
+    return {"id": s.name, **{k: m[k] for k in METRIC_KEYS}, "p_value": v["p_value"],
+            "random_percentile": v["random_percentile"], "random_pass": bool(v["random_pass"]),
+            "met": meets(m["win_rate"], m["trades"], req)}
 
 
 def meets(win_rate: float, trades: int, req: SearchRequest) -> bool:
@@ -257,48 +278,151 @@ def closest_candidate(explore: pd.DataFrame, req: SearchRequest) -> dict | None:
 def run_search(req: SearchRequest, prep: Prepared, cfg: dict, ctx: RunContext = NULL_CONTEXT) -> dict:
     """탐색 → 평가 → 상태 분류. 저장하지 않는다.
 
-    반환 table: 후보마다 한 행. explore_* / evaluate_* 지표, fdr_pass 두 개, 무작위 벤치마크, status, order.
+    ctx 단계는 SEARCH_STAGES(generate·explore·evaluate). 진행은 처리 후보 수 / 전체, report(met_so_far).
+    취소되면 그때까지 처리한 후보만 담아 status = "cancelled" 로 돌려준다(예외를 올리지 않는다).
+    FDR 가족 크기는 취소와 관계없이 시도하려던 전체 후보 수다.
+    table: 처리한 후보마다 한 행. explore_* / evaluate_* 지표, fdr_pass 두 개, 무작위 벤치마크, status, order.
     """
     q = float(cfg["analysis"]["fdr_q"])
     explore_p, evaluate_p = split_periods(cfg, req.filters.get("period"))
-    cands = generate_candidates(req, explore_p)
-    by_id = {s.name: s for s in cands}
-    ids = pd.Series([s.name for s in cands])
+    status = "completed"
+    ex_rows: list[dict] = []
+    ev_rows: list[dict] = []
+    cands: list[Strategy] = []
+    try:
+        ctx.stage("generate", f"{count_candidates(req)} candidates")
+        cands = generate_candidates(req, explore_p)
+        by_id = {s.name: s for s in cands}
 
-    ex = evaluate_candidates(cands, truncate(prep, explore_p["end"]), cfg, ctx)
+        ctx.stage("explore", f"{explore_p['start']}~{explore_p['end']}")
+        cut = truncate(prep, explore_p["end"])
+        signals: dict[str, pd.Series] = {}
+        met = 0
+        for i, s in enumerate(cands):
+            ctx.progress(i, len(cands))
+            ctx.check_cancel()
+            row = score_candidate(s, cut, cfg, signals)
+            ex_rows.append(row)
+            met += meets(row["win_rate"], row["trades"], req)
+            ctx.report(met_so_far=met)
+        ctx.progress(len(cands), len(cands))
+
+        qualified = [r["id"] for r in ex_rows if meets(r["win_rate"], r["trades"], req)]
+        ctx.stage("evaluate", f"{evaluate_p['start']}~{evaluate_p['end']}")
+        for i, cid in enumerate(qualified):
+            ctx.progress(i, len(qualified))
+            ctx.check_cancel()
+            ev_rows.append(evaluate_in_period(by_id[cid], evaluate_p, prep, cfg, req))
+        ctx.progress(len(qualified), len(qualified))
+    except RunCancelled:
+        status = "cancelled"
+
+    ids = pd.Series([s.name for s in cands])
+    ex = pd.DataFrame(ex_rows, columns=["id", *METRIC_KEYS, "p_value"])
     ex["enough_trades"] = ex["trades"] >= req.min_trades
     ex["met"] = [meets(w, t, req) for w, t in zip(ex["win_rate"], ex["trades"])]
-    ex["fdr_pass"] = fdr_family(ex.set_index("id")["p_value"], ids, q).to_numpy()
-
-    qualified = ex.loc[ex["met"], "id"].tolist()
-    ev_rows = []
-    for i, cid in enumerate(qualified):
-        ctx.progress(i, len(qualified))
-        ctx.check_cancel()
-        res = execute(with_period(by_id[cid], evaluate_p), prep, cfg)  # FDR 은 아래에서 m = 전체 후보로 다시 계산
-        m, v = res["results"][cid]["summary"], res["validation"].iloc[0]
-        ev_rows.append({"id": cid, **{k: m[k] for k in METRIC_KEYS}, "p_value": v["p_value"],
-                        "random_percentile": v["random_percentile"], "random_pass": bool(v["random_pass"]),
-                        "met": meets(m["win_rate"], m["trades"], req)})
-    ctx.progress(len(qualified), len(qualified))
+    ex["fdr_pass"] = fdr_family(ex.set_index("id")["p_value"], ids, q).reindex(ex["id"]).to_numpy(bool)
     ev = pd.DataFrame(ev_rows, columns=["id", *METRIC_KEYS, "p_value", "random_percentile", "random_pass", "met"])
-    ev_fdr = fdr_family(ev.set_index("id")["p_value"], ids, q)
-    ev["fdr_pass"] = ev_fdr.reindex(ev["id"]).to_numpy(bool)
+    ev["fdr_pass"] = fdr_family(ev.set_index("id")["p_value"], ids, q).reindex(ev["id"]).to_numpy(bool)
 
     table = ex.add_prefix("explore_").rename(columns={"explore_id": "id"}).merge(
         ev.add_prefix("evaluate_").rename(columns={"evaluate_id": "id"}), on="id", how="left")
+    evaluated = table["evaluate_trades"].notna()
     ev_met = table["evaluate_met"].astype("boolean").fillna(False).astype(bool)
     table["status"] = np.select(
-        [table["explore_met"] & ev_met, table["explore_met"], table["explore_enough_trades"]],
-        ["both", "explore_only", "not_met"], "insufficient_trades")
+        [table["explore_met"] & ev_met, table["explore_met"] & evaluated, table["explore_met"],
+         table["explore_enough_trades"]],
+        ["both", "explore_only", "not_evaluated", "not_met"], "insufficient_trades")
     table["_s"] = table["status"].map({s: i for i, s in enumerate(STATUSES)})
     table = table.sort_values(["_s", "explore_win_rate", "id"], ascending=[True, False, True],
                               na_position="last", kind="stable").drop(columns="_s").reset_index(drop=True)
     table["order"] = np.arange(1, len(table) + 1)
 
-    return {"request": req, "split": {"explore": explore_p, "evaluate": evaluate_p},
+    any_met = bool(table["explore_met"].any()) if len(table) else False
+    return {"request": req, "status": status, "split": {"explore": explore_p, "evaluate": evaluate_p},
             "candidates": cands, "table": table, "sort_rule": SORT_RULE,
-            "counts": {"candidates": len(cands), **{s: int((table["status"] == s).sum()) for s in STATUSES},
+            "counts": {"candidates": len(cands), "processed": len(ex),
+                       **{s: int((table["status"] == s).sum()) for s in STATUSES},
                        "explore_fdr_pass": int(table["explore_fdr_pass"].sum()),
                        "evaluate_fdr_pass": int(table["evaluate_fdr_pass"].astype("boolean").fillna(False).sum())},
-            "closest": None if qualified else closest_candidate(ex, req)}
+            "closest": None if any_met else closest_candidate(ex, req)}
+
+
+# ---------------------------------------------------------------- 탐색 기록 저장 (P1-6.3)
+def searches_dir(paths: Paths) -> Path:
+    return paths.runs / "searches"
+
+
+def make_search_id(req: SearchRequest, cfg: dict, data_ver: str) -> str:
+    key = config_hash({"request": req.to_dict(), "cfg": cfg, "data": data_ver})[:8]
+    return f"{datetime.now().strftime('%Y%m%dT%H%M%S')}_search_{req.name}_{key}"
+
+
+def _side(row: dict, prefix: str, keys) -> dict | None:
+    if prefix == "evaluate_" and pd.isna(row.get("evaluate_trades")):
+        return None
+    return {k: row.get(prefix + k) for k in keys}
+
+
+def search_payload(out: dict, search_id: str, cfg: dict) -> dict:
+    """화면용 search.json (설계 §4.3)."""
+    by_id = {s.name: s for s in out["candidates"]}
+    ex_keys = (*METRIC_KEYS, "p_value", "fdr_pass")
+    ev_keys = (*METRIC_KEYS, "p_value", "fdr_pass", "random_percentile", "random_pass")
+    rows = [{"order": r["order"], "id": r["id"], "status": r["status"], "strategy": by_id[r["id"]].to_dict(),
+             "explore": _side(r, "explore_", ex_keys), "evaluate": _side(r, "evaluate_", ev_keys)}
+            for r in out["table"].to_dict(orient="records")]
+    return {
+        "search_id": search_id, "status": out["status"], "data_as_of": cfg["data"]["as_of_date"],
+        "request": out["request"].to_dict(), "method": "exhaustive", "split": out["split"],
+        "fdr_q": cfg["analysis"]["fdr_q"], "fdr_family_size": out["counts"]["candidates"],
+        "counts": out["counts"], "sort_rule": out["sort_rule"], "rows": rows, "closest": out["closest"],
+        "metric_definitions": {k: {"name": n, "unit": u, "formula": f} for k, (n, u, f) in METRIC_DEFS.items()},
+        "note": NOTE, "disclaimer": DISCLAIMER,
+    }
+
+
+def _write_json(path: Path, obj) -> None:
+    path.write_text(json.dumps(to_jsonable(obj), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def run_and_save_search(req: SearchRequest, prep: Prepared, cfg: dict, paths: Paths, search_id: str | None = None,
+                        ctx: RunContext = NULL_CONTEXT) -> Path:
+    """탐색을 실행하고 runs/searches/<search_id>/ 에 기록한다. 완료·취소 모두 기록을 남긴다(취소는 status=cancelled).
+
+    임시 폴더에 쓴 뒤 한 번에 옮긴다(E4). 실패(예외)하면 기록을 남기지 않는다.
+    """
+    t0 = time.time()
+    started = datetime.now().isoformat(timespec="seconds")
+    inputs = input_file_hashes(paths.store)
+    data_ver = config_hash(inputs)[:8]
+    search_id = search_id or make_search_id(req, cfg, data_ver)
+    root = searches_dir(paths)
+    out_dir, tmp = root / search_id, root / f".tmp_{search_id}"
+    if out_dir.exists():
+        raise FileExistsError(out_dir)
+    try:
+        out = run_search(req, prep, cfg, ctx)
+        if out["status"] == "completed":  # 취소된 탐색은 단계 전환(취소 확인) 없이 바로 기록한다
+            ctx.stage("save")
+        tmp.mkdir(parents=True, exist_ok=False)
+        table = out["table"].copy()
+        by_id = {s.name: s for s in out["candidates"]}
+        table["strategy"] = [json.dumps(by_id[i].to_dict(), ensure_ascii=False, sort_keys=True) for i in table["id"]]
+        table.to_parquet(tmp / "candidates.parquet", index=False)
+        _write_json(tmp / "search.json", search_payload(out, search_id, cfg))
+        _write_json(tmp / "meta.json", {
+            "search_id": search_id, "status": out["status"], "request": req.to_dict(),
+            "split": out["split"], "counts": out["counts"], "method": "exhaustive",
+            "data_as_of": cfg["data"]["as_of_date"], "config": cfg, "config_hash": config_hash(cfg),
+            "prep_hash": prep_hash(cfg), "input_files": inputs, "data_version": data_ver,
+            "seed": cfg["analysis"]["random_seed"], "engine_version": ENGINE_VERSION,
+            "python": platform.python_version(), "pandas": pd.__version__,
+            "started_at": started, "elapsed_sec": round(time.time() - t0, 2),
+            "stage_log": ctx.stage_log() if hasattr(ctx, "stage_log") else None, "disclaimer": DISCLAIMER,
+        })
+        os.replace(tmp, out_dir)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return out_dir

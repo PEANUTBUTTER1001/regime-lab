@@ -11,6 +11,8 @@ import time
 
 # FR-U2 단계 (필터 → 로드 → 지표 → 신호·체결 → 국면 결합 → 집계 → 저장)
 STAGES = ["filter", "load", "indicators", "signals_execution", "regime_join", "aggregate", "save"]
+# 역방향 탐색 단계 (P1-6): 후보 생성 → 탐색 구간 전 후보 → 평가 구간 재평가 → 저장
+SEARCH_STAGES = ["generate", "explore", "evaluate", "save"]
 
 
 class RunCancelled(Exception):
@@ -29,12 +31,17 @@ class RunContext:
     def check_cancel(self) -> None:
         pass
 
+    def report(self, **values) -> None:
+        """단계·진행 외에 화면에 보일 측정값 (예: 탐색 중 목표 충족 수)."""
+
 
 class RecordingContext(RunContext):
     """단계·진행을 기록하고 스레드 안전한 취소 요청을 받는 문맥 (API·테스트 용)."""
 
-    def __init__(self, cancel_on_stage: str | None = None):
+    def __init__(self, cancel_on_stage: str | None = None, stage_names: list[str] = STAGES):
+        self.stage_names = stage_names
         self.stages: list[tuple[str, str | None, float]] = []  # (단계, 부가 정보, 시작 경과초)
+        self.values: dict = {}
         self.current: str | None = None
         self.done = 0
         self.total = 0
@@ -44,7 +51,7 @@ class RecordingContext(RunContext):
         self._lock = threading.Lock()
 
     def stage(self, name: str, detail: str | None = None) -> None:
-        if name not in STAGES:
+        if name not in self.stage_names:
             raise ValueError(f"unknown stage: {name}")
         with self._lock:
             self.stages.append((name, detail, round(time.time() - self.started, 2)))
@@ -56,6 +63,10 @@ class RecordingContext(RunContext):
     def progress(self, done: int, total: int) -> None:
         with self._lock:
             self.done, self.total = int(done), int(total)
+
+    def report(self, **values) -> None:
+        with self._lock:
+            self.values.update(values)
 
     def cancel(self) -> None:
         self._cancel.set()
@@ -74,8 +85,8 @@ class RecordingContext(RunContext):
 
     def snapshot(self) -> dict:
         with self._lock:
-            return {"stage": self.current, "stages": STAGES, "processed": self.done, "total": self.total,
-                    "elapsed_sec": round(time.time() - self.started, 1)}
+            return {"stage": self.current, "stages": self.stage_names, "processed": self.done, "total": self.total,
+                    "elapsed_sec": round(time.time() - self.started, 1), **self.values}
 
 
 NULL_CONTEXT = RunContext()
