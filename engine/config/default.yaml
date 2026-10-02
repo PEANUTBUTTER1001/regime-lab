@@ -70,3 +70,19 @@ analysis:
   split_pass_judgements: [maintained, weakened]   # FR-A3 기간 분할 통과 판정 (진입일 기준 전/후반, 양쪽 평균 초과수익 > 0)
   random_bench_pass_percentile: 0.95              # FR-A4/A5 실제 평균 초과수익의 무작위 분포 백분위 통과 기준
   risk_free_rate: 0.0               # A9
+
+search:                             # D-1 역방향 탐색 (docs/역방향_백테스트_설계.md §3)
+  max_candidates: 200               # 탐색 1회 후보 수 상한 (NFR-14). 넘으면 실행하지 않는다
+  sec_per_candidate: 5.0            # 예상 시간 = 후보 수 × 이 값. 합성 3,000종목 실측 2.9초 × 실데이터 보정 1.7 (실데이터로 재측정)
+  min_trades_default: 300           # 최소 거래 수 기본값 (analysis.min_cell_trades 와 같은 기준)
+  min_trades_limits: [30, 5000]     # 최소 거래 수 입력 허용 범위
+  axes:                             # 축별 허용 값 (이 순서가 후보 순번 순서)
+    combine: [and, or]
+    stop_loss_pct: [-3, -5, -8, -10, -15, -20, null]
+    take_profit_pct: [5, 10, 15, 20, 30, 50, null]
+    max_hold_days: [3, 5, 10, 20, 40, 60]
+  defaults:                         # 요청에서 축을 생략했을 때 (패턴은 핵심 5종 전체)
+    combine: [and, or]
+    stop_loss_pct: [-8]
+    take_profit_pct: [20]
+    max_hold_days: [20]
