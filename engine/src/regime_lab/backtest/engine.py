@@ -210,8 +210,10 @@ def _index_price(index: pd.DataFrame) -> dict[str, pd.DataFrame]:
 def _build_trades(f, rows, index, cost, sectors) -> pd.DataFrame:
     cols = ["ticker", "signal_date", "entry_date", "exit_signal_date", "exit_date", "entry_price", "exit_price",
             "exit_reason", "exit_retries", "exit_at_close"]
-    if not rows:
-        return pd.DataFrame(columns=cols + ["gross_ret", "cost", "net_ret", "index_ret", "excess_ret", "hold_days"])
+    attrs = [c for c in ("market", "stock_regime", "market_regime", "cap_group", "liq_group") if c in f]
+    if not rows:  # 거래 0건이어도 거래가 있을 때와 같은 열·순서 (저장 파일·절단 비교가 열 구조에 의존)
+        return pd.DataFrame(columns=cols + ["hold_days", "gross_ret", "cost", "net_ret", "excluded", *attrs,
+                                            "index_ret", "excess_ret", "sector"])
     t_i, e_i, d_i, x_i, pin, pout, why, rt, ac = map(list, zip(*rows))
     date = f["date"].to_numpy()
     tr = pd.DataFrame({
@@ -233,9 +235,8 @@ def _build_trades(f, rows, index, cost, sectors) -> pd.DataFrame:
     tr["excluded"] = tr["exit_reason"] == "end_of_data"
 
     # 진입 당시(신호일 t) 속성 (FR-E5)
-    for c in ("market", "stock_regime", "market_regime", "cap_group", "liq_group"):
-        if c in f:
-            tr[c] = f[c].astype(object).to_numpy()[t_i]
+    for c in attrs:
+        tr[c] = f[c].astype(object).to_numpy()[t_i]
     # 초과수익 (A10): 신호일 소속 시장 지수의 같은 보유기간 수익률 (진입 시가 → 청산 시가/종가)
     ip = _index_price(index)
     idx_ret = []
