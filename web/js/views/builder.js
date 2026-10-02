@@ -220,8 +220,10 @@ export async function renderBuilder(el) {
         showErrors(server);
         toast(t('b.serverRejected'));
       } else if (err.code === 'busy') {
-        toast(t('b.busy'));
-        location.hash = `#/runs/${err.detail.run_id}/progress`;
+        // 실행·탐색이 작업 슬롯을 공유한다 (P1-7). 진행 중인 쪽의 진행 화면을 연다
+        const search = err.detail?.kind === 'search';
+        toast(search ? t('b.busySearch') : t('b.busy'));
+        location.hash = search ? `#/searches/${err.detail.id}/progress` : `#/runs/${err.detail.run_id}/progress`;
       } else {
         toast(`${err.message} (${err.code})`);
       }

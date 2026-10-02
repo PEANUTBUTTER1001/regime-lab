@@ -43,4 +43,15 @@ export const api = {
   llmConfig: () => request('GET', '/llm/config'),
   setLlmConfig: (body) => request('PUT', '/llm/config', body),
   clearLlmConfig: () => request('DELETE', '/llm/config'),
+  // 역방향 탐색 (P1-7·P1-8)
+  searchOptions: () => request('GET', '/searches/options'),
+  searchPreview: (body) => request('POST', '/searches/preview', body),
+  submitSearch: (body) => request('POST', '/searches', body),
+  searches: () => request('GET', '/searches'),
+  searchStatus: (id) => request('GET', `/searches/${encodeURIComponent(id)}`),
+  cancelSearch: (id) => request('POST', `/searches/${encodeURIComponent(id)}/cancel`),
+  searchResult: (id) => request('GET', `/searches/${encodeURIComponent(id)}/result`),
+  // 찾은 조합 저장 (P1-9)
+  presets: () => request('GET', '/presets'),
+  savePreset: (body) => request('POST', '/presets', body),
 };
