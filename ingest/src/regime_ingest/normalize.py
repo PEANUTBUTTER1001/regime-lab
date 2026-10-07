@@ -79,5 +79,6 @@ def normalize(item: dict, *, first_seen_at: datetime, backfilled: bool, ingest_r
         "report_tags": tags,
         "report_base": base,
         "is_amendment": any(t in AMEND_TAGS for t in tags),
-        "amends_doc_id": None,  # dedup.link_amendments 가 채운다
+        "amends_candidate_doc_id": None,  # dedup.link_amendments 가 채운다 (후보, 확정 아님)
+        "amends_basis": None,
     }

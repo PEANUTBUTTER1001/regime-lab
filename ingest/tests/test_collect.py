@@ -167,7 +167,7 @@ def test_amendment_links_across_runs(tmp_path, cfg):
     _run(Store(tmp_path), FakeDart([orig]), cfg, date(2021, 1, 1), date(2021, 1, 31))
     _run(Store(tmp_path), FakeDart([orig, amend]), cfg, date(2021, 1, 1), date(2021, 2, 28), run_id="r2")
     docs = {d["rcept_no"]: d for d in Store(tmp_path).read_docs("opendart")}
-    assert docs["20210205000001"]["amends_doc_id"] == f"opendart:{orig['rcept_no']}"
+    assert docs["20210205000001"]["amends_candidate_doc_id"] == f"opendart:{orig['rcept_no']}"
     assert docs["20210205000001"]["is_amendment"] and len(docs) == 2
 
 

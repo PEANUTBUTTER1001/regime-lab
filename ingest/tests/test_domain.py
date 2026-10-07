@@ -83,10 +83,11 @@ def test_link_amendments_by_company_and_base_name():
     amend = _norm()
     other = _norm({**ITEM, "corp_code": "00000002", "rcept_no": "20240312000999"})  # 다른 회사 정정 → 원공시 없음
     chain = link_amendments([amend, other, orig], {})
-    assert amend["amends_doc_id"] == orig["doc_id"] and other["amends_doc_id"] is None
-    assert orig["amends_doc_id"] is None
+    assert amend["amends_candidate_doc_id"] == orig["doc_id"] and other["amends_candidate_doc_id"] is None
+    assert orig["amends_candidate_doc_id"] is None
+    assert amend["amends_basis"] == "same_corp_base_title" and other["amends_basis"] is None
     assert chain[("00126380", "사업보고서 (2023.12)")] == amend["doc_id"]
     # 이전 실행에서 이어 받은 원공시
     amend2 = _norm({**ITEM, "rcept_no": "20240401000001", "rcept_dt": "20240401"})
     link_amendments([amend2], chain)
-    assert amend2["amends_doc_id"] == amend["doc_id"]
+    assert amend2["amends_candidate_doc_id"] == amend["doc_id"]

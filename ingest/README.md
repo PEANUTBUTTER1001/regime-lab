@@ -35,4 +35,4 @@ uv run --project ingest python -m pytest ingest                                 
 
 - 소급분(`backfilled=true`, 날짜만): `available_at` = 접수일 **다음 날 00:00 KST** → 다음 거래일 첫 봉부터 연결
 - 순방향: `available_at` = 처음 본 시각(`first_seen_at`)
-- 정정 공시(`[기재정정]` 등)는 같은 회사·같은 기본 보고서명의 직전 공시를 `amends_doc_id` 로 잇는다 (plan §11 1-4 실측 10건으로 규칙 확정 예정)
+- 정정 공시(`[기재정정]` 등)는 같은 회사·같은 기본 보고서명의 직전 공시를 `amends_candidate_doc_id`(후보, `amends_basis=same_corp_base_title`)로 남긴다. 제목만으로 원공시 관계를 확정하지 않으며, 확정 규칙은 P3-6 계약·plan §11 1-4 실측 뒤

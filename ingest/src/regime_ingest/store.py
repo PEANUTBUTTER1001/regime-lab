@@ -46,7 +46,7 @@ DOC_SCHEMA = pa.schema([
     ("license_scope", pa.string()), ("ingest_run_id", pa.string()), ("rcept_no", pa.string()),
     ("corp_code", pa.string()), ("corp_name", pa.string()), ("corp_cls", pa.string()), ("flr_nm", pa.string()),
     ("rm", pa.string()), ("report_tags", pa.list_(pa.string())), ("report_base", pa.string()),
-    ("is_amendment", pa.bool_()), ("amends_doc_id", pa.string()),
+    ("is_amendment", pa.bool_()), ("amends_candidate_doc_id", pa.string()), ("amends_basis", pa.string()),
 ])
 
 
