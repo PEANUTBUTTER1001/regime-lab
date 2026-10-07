@@ -73,6 +73,9 @@ exit_limits:                        # A8 허용 범위
   stop_loss_pct: [-50, -1]
   take_profit_pct: [1, 200]
   max_hold_days: [1, 250]
+  trailing_stop_pct: [-50, -1]      # 2026-10-07 선택 청산(기본 꺼짐): 보유 중 최고 기준가 대비 하락률
+  breakeven_trigger_pct: [1, 100]   # 이 수익률을 한 번 넘으면 손절선을 진입가(0%)로 올림
+  ma_exit_window: [5, 250]          # 종가가 N일 이동평균 아래로 내려가면 청산
 
 execution:
   limit_up_pct: 30                  # A11 원주가 기준 상한가

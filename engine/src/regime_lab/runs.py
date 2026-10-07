@@ -46,7 +46,8 @@ ENGINE_VERSION = "0.2.0"
 
 STRATEGY_KEYS = {"name", "patterns", "combine", "exit", "markets", "period", "min_avg_value_krw", "cap_groups",
                  "pattern_params"}
-EXIT_KEYS = {"stop_loss_pct", "take_profit_pct", "max_hold_days", "trailing_stop_pct"}
+EXIT_KEYS = {"stop_loss_pct", "take_profit_pct", "max_hold_days", "trailing_stop_pct", "breakeven_trigger_pct",
+             "ma_exit_window"}
 CAP_GROUPS = ["large", "mid", "small"]
 NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -121,10 +122,13 @@ class Strategy:
             else:
                 for k in set(self.exit) - EXIT_KEYS:
                     errors[f"exit.{k}"] = "Key not allowed"
-                for k in ("stop_loss_pct", "take_profit_pct", "trailing_stop_pct"):
+                for k in ("stop_loss_pct", "take_profit_pct", "trailing_stop_pct", "breakeven_trigger_pct"):
                     v = self.exit.get(k)
                     if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))):
                         errors[f"exit.{k}"] = "A percent number (e.g. -8) or null"
+                mw = self.exit.get("ma_exit_window")
+                if mw is not None and (isinstance(mw, bool) or not isinstance(mw, int)):
+                    errors["exit.ma_exit_window"] = "Whole number of trading days or null"
                 mh = self.exit.get("max_hold_days", cfg["exit"]["max_hold_days"])
                 if isinstance(mh, bool) or not isinstance(mh, int):
                     errors["exit.max_hold_days"] = "Whole number of trading days"

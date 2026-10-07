@@ -17,6 +17,9 @@ export function fromStrategy(st, meta) {
     ...base, name: st.name, patterns: [...st.patterns], combine: st.combine,
     useStop: ex.stop_loss_pct != null, stop: ex.stop_loss_pct ?? base.stop,
     useProfit: ex.take_profit_pct != null, profit: ex.take_profit_pct ?? base.profit, hold: ex.max_hold_days,
+    useTrail: ex.trailing_stop_pct != null, trail: ex.trailing_stop_pct ?? base.trail,
+    useBe: ex.breakeven_trigger_pct != null, be: ex.breakeven_trigger_pct ?? base.be,
+    useMa: ex.ma_exit_window != null, maWin: ex.ma_exit_window ?? base.maWin,
     markets: [...st.markets], start: st.period.start, end: st.period.end, minValue: st.min_avg_value_krw, caps: [...st.cap_groups],
     pp: JSON.parse(JSON.stringify(st.pattern_params || {})),
   };
@@ -35,6 +38,7 @@ function defaults(meta) {
     name: 'my_strategy', patterns: ['breakout_20d'], combine: 'or',
     useStop: ex.stop_loss_pct != null, stop: ex.stop_loss_pct ?? -8,
     useProfit: ex.take_profit_pct != null, profit: ex.take_profit_pct ?? 20, hold: ex.max_hold_days,
+    useTrail: false, trail: -10, useBe: false, be: 5, useMa: false, maWin: 20,
     markets: [...meta.markets], start: meta.backtest_start, end: meta.data_as_of,
     minValue: meta.min_avg_value_krw, caps: [...meta.cap_groups], pp: {},
   };
@@ -61,6 +65,13 @@ function validate(f, meta) {
   const num = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? null : Number(v));
   if (f.useStop) { const v = num(f.stop); if (v == null || v < lim.stop_loss_pct[0] || v > lim.stop_loss_pct[1]) e['exit.stop_loss_pct'] = t('v.range', { a: lim.stop_loss_pct[0], b: lim.stop_loss_pct[1] }); }
   if (f.useProfit) { const v = num(f.profit); if (v == null || v < lim.take_profit_pct[0] || v > lim.take_profit_pct[1]) e['exit.take_profit_pct'] = t('v.range', { a: lim.take_profit_pct[0], b: lim.take_profit_pct[1] }); }
+  // 선택 청산 (2026-10-07): 범위는 /api/meta 의 exit_limits
+  for (const [use, key, val, intOnly] of [['useTrail', 'trailing_stop_pct', 'trail', false], ['useBe', 'breakeven_trigger_pct', 'be', false], ['useMa', 'ma_exit_window', 'maWin', true]]) {
+    const r = lim[key];
+    if (!f[use] || !r) continue;
+    const v = num(f[val]);
+    if (v == null || (intOnly && !Number.isInteger(v)) || v < r[0] || v > r[1]) e[`exit.${key}`] = t('v.range', { a: r[0], b: r[1] });
+  }
   const hd = num(f.hold);
   if (hd == null || !Number.isInteger(hd) || hd < lim.max_hold_days[0] || hd > lim.max_hold_days[1]) e['exit.max_hold_days'] = t('v.hold', { a: lim.max_hold_days[0], b: lim.max_hold_days[1] });
   if (!f.markets.length) e.markets = t('v.markets');
@@ -89,7 +100,10 @@ export function toBody(f, meta = state.meta) {
     ...(Object.keys(pp).length ? { pattern_params: pp } : {}),
     name: f.name, patterns: f.patterns, combine: f.combine,
     exit: { stop_loss_pct: f.useStop ? Number(f.stop) : null, take_profit_pct: f.useProfit ? Number(f.profit) : null,
-      max_hold_days: Number(f.hold), trailing_stop_pct: null },
+      max_hold_days: Number(f.hold), trailing_stop_pct: f.useTrail ? Number(f.trail) : null,
+      // 본전·이평 이탈은 켰을 때만 싣는다 → 안 쓰면 예전과 같은 요청 (저장 조합 변경 여부 비교 유지)
+      ...(f.useBe ? { breakeven_trigger_pct: Number(f.be) } : {}),
+      ...(f.useMa ? { ma_exit_window: Number(f.maWin) } : {}) },
     markets: f.markets, period: { start: f.start, end: f.end }, min_avg_value_krw: Number(f.minValue), cap_groups: f.caps,
   };
 }
@@ -172,6 +186,9 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
   const stopIn = numInput('stop', 'exit.stop_loss_pct', f.stop);
   const profitIn = numInput('profit', 'exit.take_profit_pct', f.profit);
   const holdIn = numInput('hold', 'exit.max_hold_days', f.hold, 'numeric');
+  const trailIn = numInput('trail', 'exit.trailing_stop_pct', f.trail);
+  const beIn = numInput('be', 'exit.breakeven_trigger_pct', f.be);
+  const maIn = numInput('maWin', 'exit.ma_exit_window', f.maWin, 'numeric');
   const useToggle = (key, input, word) => {
     const box = h('input', { type: 'checkbox', checked: f[key], 'aria-label': t('b.useLabel', { x: word }) });
     input.disabled = !f[key];
@@ -189,8 +206,13 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     h('div', { class: 'field-two' },
       h('div', {}, h('label', { for: 'hold' }, t('b.hold')), holdIn,
         h('p', { class: 'hint', text: t('b.holdHint', { a: lim.max_hold_days[0], b: lim.max_hold_days[1] }) }), errorSlot('exit.max_hold_days')),
-      h('div', {}, h('label', { for: 'trail' }, t('b.trail')), h('input', { id: 'trail', value: t('b.trailOff'), disabled: true, 'aria-describedby': 'trail-hint' }),
-        h('p', { class: 'hint', id: 'trail-hint', text: t('b.trailHint') }))),
+      h('div', {}, h('label', { for: 'trail' }, t('b.trail')), trailIn, useToggle('useTrail', trailIn, t('b.trailWord')),
+        h('p', { class: 'hint', text: t('b.trailHint2', { a: lim.trailing_stop_pct[0], b: lim.trailing_stop_pct[1] }) }), errorSlot('exit.trailing_stop_pct'))),
+    h('div', { class: 'field-two' },
+      h('div', {}, h('label', { for: 'be' }, t('b.be')), beIn, useToggle('useBe', beIn, t('b.beWord')),
+        h('p', { class: 'hint', text: t('b.beHint', { a: lim.breakeven_trigger_pct[0], b: lim.breakeven_trigger_pct[1] }) }), errorSlot('exit.breakeven_trigger_pct')),
+      h('div', {}, h('label', { for: 'maWin' }, t('b.maExit')), maIn, useToggle('useMa', maIn, t('b.maWord')),
+        h('p', { class: 'hint', text: t('b.maHint', { a: lim.ma_exit_window[0], b: lim.ma_exit_window[1] }) }), errorSlot('exit.ma_exit_window'))),
     h('div', { class: 'callout info', style: { marginTop: '16px' } }, t('b.exitCallout')));
 
   // ---------------------------------------------------------------- Universe & period
