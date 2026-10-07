@@ -20,7 +20,15 @@ from regime_lab.data.loader import (
     load_master,
     load_sector_snapshots,
 )
-from regime_lab.data.warmup import attach_warmup, first_trade_dates, load_first_dates, load_warmup_source
+from regime_lab.data.warmup import (
+    attach_index_warmup,
+    attach_warmup,
+    first_trade_dates,
+    index_warmup_fingerprint,
+    load_first_dates,
+    load_index_warmup,
+    load_warmup_source,
+)
 from regime_lab.indicators import compute_indicators
 from regime_lab.regime import attach_regimes
 from regime_lab.universe import apply_universe, assign_groups
@@ -28,7 +36,7 @@ from regime_lab.universe import apply_universe, assign_groups
 # 준비 프레임에 영향을 주는 설정 절 (전략·청산·분석 설정은 캐시 무효화 대상 아님)
 PREP_SECTIONS = ("data", "universe", "groups", "regime", "indicators", "patterns")
 # 준비 프레임 계산 코드가 바뀌면 올린다 (캐시 무효화)
-PREP_VERSION = 2
+PREP_VERSION = 3  # 3: X5 과거 지수 워밍업 연결
 
 
 @dataclass
@@ -49,9 +57,10 @@ def prepare(paths: Paths, cfg: dict, tickers: Sequence[str] | None = None, end: 
     end = end or cfg["data"]["as_of_date"]
     cache_file = None
     if use_cache and tickers is None:
-        data_ver = config_hash(input_file_hashes(paths.store))[:8]
+        data_ver = config_hash({**input_file_hashes(paths.store),
+                                "index_warmup": index_warmup_fingerprint(paths.cache)})[:8]
         cache_file = paths.cache / "prepared" / f"frame_{end}_{prep_hash(cfg)}_{data_ver}.parquet"
-    index = load_index(paths.store, end=end)
+    index = attach_index_warmup(load_index(paths.store, end=end), load_index_warmup(paths.cache), cfg)
     delisted = set(load_delisted(paths.store)["ticker"])
     sectors = load_sector_snapshots(paths.store)
     master = load_master(paths.store)

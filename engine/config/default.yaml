@@ -27,7 +27,7 @@ regime:
   ma_window: 200                    # A6
   slope_window: 20                  # A6 200일선 20일 변화율
   slope_threshold_pct: 1.0          # A6 ±1%
-  market_regime_start: "2021-07-21" # A2-1 이전 진입은 market_regime = null
+  market_regime_start: "2020-09-01" # X5 과거 지수(cache/warmup/index_warmup.parquet)로 백테스트 시작일부터 산출. 파일이 없으면 지수 이력 부족으로 2021-07-21부터 (A2-1)
 
 indicators:
   rsi_window: 14
