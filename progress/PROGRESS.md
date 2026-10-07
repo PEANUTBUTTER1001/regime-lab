@@ -1,5 +1,35 @@
 # PROGRESS
 
+## 2026-10-07 16:49 KST (+09:00) — hongsungmin0315 백테스트 담당(오후): P3-7 OpenDART 수집기·계약 정렬·실데이터 회귀·팀 PR 리뷰
+
+- 시작 시각: 2026-10-07 오후 (기록 시각 2026-10-07 16:49). Claude Code 작업, Agent Relay friends 채널 재개 — hchee99-codex(P3-4/P3-6 계약·리뷰), codex-01a0fb4b(G2·검증), seonghwan-claude(데이터 서버·P2)와 협업
+- 목표: P3-7 을 계약에 맞춰 develop 에 넣고, 원본 없이 막혀 있던 실데이터 회귀를 데이터 서버로 돌린다.
+
+### 단계 상태
+
+| 단계 | 상태 | 비고 |
+|---|---|---|
+| 1. P3-7 OpenDART 공시 목록 수집기 | 🟢 완료 | PR #21 병합. 새 최상위 패키지 `ingest/`(CLI `regime-ingest backfill·run·status`), `<ext_store>`(저장소 밖), `metadata_only`. 결정 §5.3 D-4(공시) A·B·C |
+| 2. 리뷰 반영 (hchee99-codex 6건 + codex 2건) | 🟢 완료 | 변경 버전 available_at, 정정 후보는 과거 접수번호만, 잘못된 행 창은 partial·커서 미전진, 재시도 한도, 종목코드 형식, tmp→commit→확정·잠금 안 복구, KST 고정 오프셋(Windows), coverage 기반 창 건너뛰기 |
+| 3. P3-6 계약 정렬 | 🟢 완료 | R1 포트(`ports.py`), 식별자·조회 창·시장 검증, 응답 완전성(total_count·고유 접수번호), 리디렉션 거부·서버 메시지 미기록, manifest(schema·policy 버전), `select_as_of`(observed / historical_assumed), coverage_log. ingest 67 passed |
+| 4. P3-7.5 순방향 스케줄 | 🟢 완료 | README 에 cron·작업 스케줄러 예시(자동 등록 없음). 순방향 coverage 는 `forward`(일부)로 구분 |
+| 5. 계약 문서 대리 게시 | 🟢 완료 | PR #23: `docs/P3_수집_계약.md`·`docs/P3_OpenDART_측정_20261007.md` (작성 hchee99, GitHub 403 으로 대리 게시) |
+| 6. P3-8 뉴스 기반(hchee99) 브랜치 준비 | 🟡 PR 대기 | `feat/P3-8-news-bounded-input` 96edccc(작성자 hchee99, 패치 sha256 일치). ingest 105 passed. G2 뒤 develop 기준 PR |
+| 7. 실데이터 회귀 (데이터 서버) | 🟢 완료 | Seonghwanaa 데이터 서버(조회 전용 API)에서 sample30 에 필요한 것만 받아 저장소 밖에 엔진 형식으로 저장. develop 3e4b4eb engine **338 passed / 0 skipped**, api **83 passed** |
+| 8. 새 매수 패턴 실데이터 (sample30, 기본 청산) | 🟢 완료 | 거래·승률·평균 초과: macd_cross 823·40.3%·+0.69%, high_52w 174·43.7%·+1.78%, disparity_rebound 439·39.2%·−0.34%, stochastic_rebound 1,167·39.2%·−0.26% |
+| 9. 팀 PR 리뷰 | 🟢 완료 | #24 GO(병합됨), #25 GO(국면 null 유지 테스트 요청), #26 GO, #27 GO + 빈 결과 dtype 불일치 [P2] |
+| 10. X5 후속(실행 기록 지문) | ⚪ 불필요 | #17 `warmup_file_hashes` 가 `cache/warmup/*.parquet` 전체를 지문에 넣어 index_warmup 도 포함 |
+| 11. P3-13 자료 보관함 화면 | ⏳ 대기 | P3-11·P3-12(PEANUTBUTTER1001) 선행 |
+
+### 최종 결과
+
+- develop 반영: #21(P3-7), #22(X6-2 정리), #23(계약 문서), #24(gitignore, Seonghwanaa)
+- 남은 결정: G2 2차(`ingest/`·news·P2 bars/forecast 위치) — PEANUTBUTTER1001. X6-2 범위 확장·SRS FR-E3(트레일링) 문구 — PEANUTBUTTER1001
+- 실수·정정: #21 에 브랜치 전환 실패로 `.DS_Store` 변경 커밋(4a881fe)이 들어가 다음 커밋에서 추적 해제·무시 처리(squash 병합). 채널에 "5년 소급 하루에 끝" 이라고 확정처럼 쓴 것을 단일 월 외삽으로 정정
+- 미완료 실측(hchee99 계약 §7): 1거래일 발견 지연, 정정 10건 원관계, 5년 소급·무인 운영
+
+---
+
 ## 2026-10-07 12:32 KST (+09:00) — hongsungmin0315 백테스트 담당: 재현성 보강·조건 확장(패턴 수치·선택 청산·매수 패턴 4종)
 
 - 시작 시각: 2026-10-07 (기록 시각 2026-10-07 12:32). Claude Code 작업. 이날부터 Agent Relay 채널은 읽지 않고 사용자와만 진행
