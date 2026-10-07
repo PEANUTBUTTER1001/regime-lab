@@ -51,8 +51,12 @@ patterns:
   engulfing: {min_body_ratio: 1.0, trend_days: 3}
 
 pattern_limits:                     # P1-4 조합별로 바꿀 수 있는 패턴 수치와 허용 범위 [최소, 최대]. 기본값은 위 patterns 절.
-  breakout_vol: {volume_mult: [1.0, 5.0]}   # 준비 프레임(지표 열)에 들어가지 않는 수치만 연다 → PREP_VERSION 영향 없음
-  rsi_rebound: {threshold: [10, 50]}
+  # 기간·배수가 준비 프레임 기본값과 다르면 패턴이 같은 지표 함수로 그 자리에서 계산한다 → PREP_VERSION 영향 없음
+  ma_cross_5_20: {fast: [2, 60], slow: [5, 250]}            # 2026-10-07 hongsungmin0315: 기간 열기. fast < slow
+  breakout_20d: {lookback: [5, 250]}
+  breakout_vol: {volume_mult: [1.0, 5.0], lookback: [5, 250]}
+  rsi_rebound: {threshold: [10, 50], window: [5, 50]}
+  bb_lower_recover: {window: [5, 60], k: [1.0, 4.0]}
   three_down_up: {down_days: [2, 5]}                                  # X6 (r1 제안 범위)
   bb_squeeze_break: {squeeze_lookback: [20, 200]}
   pullback_ma20: {touch_tolerance_pct: [0, 5], max_penetration_pct: [0, 5]}
@@ -99,8 +103,11 @@ search:                             # D-1 역방향 탐색 (docs/역방향_백�
     take_profit_pct: [5, 10, 15, 20, 30, 50, null]
     max_hold_days: [3, 5, 10, 20, 40, 60]
   pattern_axes:                     # P1-4 패턴 수치 축의 허용 값. 그 패턴이 들어간 조합에만 곱해진다
-    breakout_vol: {volume_mult: [1.5, 2.0, 2.5, 3.0]}
-    rsi_rebound: {threshold: [20, 25, 30, 35, 40]}
+    breakout_vol: {volume_mult: [1.5, 2.0, 2.5, 3.0], lookback: [10, 20, 60]}
+    rsi_rebound: {threshold: [20, 25, 30, 35, 40], window: [7, 14, 21]}
+    ma_cross_5_20: {fast: [3, 5, 10], slow: [20, 60, 120]}   # 어떤 조합이든 fast < slow
+    breakout_20d: {lookback: [10, 20, 60]}
+    bb_lower_recover: {window: [10, 20, 40], k: [1.5, 2.0, 2.5]}
     three_down_up: {down_days: [2, 3, 4]}           # X6 (2026-10-02 hongsungmin0315): 기본값 앞뒤 값. 고른 값만큼 그 패턴이 든 조합이 늘어난다
     bb_squeeze_break: {squeeze_lookback: [60, 125, 200]}
     pullback_ma20: {touch_tolerance_pct: [0.5, 1.0, 2.0], max_penetration_pct: [1.0, 2.0, 3.0]}

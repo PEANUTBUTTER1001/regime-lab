@@ -205,6 +205,9 @@ class Strategy:
                 elif not param_value_ok(v, cfg["patterns"][pat][k], lim):
                     kind = "A whole number" if is_int_param(cfg["patterns"][pat][k]) else "A number"
                     errors[f"pattern_params.{pat}.{k}"] = f"{kind} from {lim[0]} to {lim[1]}"
+            if not any(e.startswith(f"pattern_params.{pat}") for e in errors):  # 수치끼리의 관계 (예: fast < slow)
+                for k, msg in CORE_PATTERNS[pat].param_errors({**cfg["patterns"][pat], **vals}).items():
+                    errors[f"pattern_params.{pat}.{k}"] = msg
         return errors
 
     def exit_cfg(self, cfg: dict) -> dict:

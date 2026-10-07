@@ -635,6 +635,13 @@ const D = {
   'pp.searchHint': ['고르지 않으면 기본값 {d} 하나만 씁니다. 고른 값 수만큼 이 패턴이 든 조합이 늘어납니다.', 'If none is chosen, only the default {d} is used. Each chosen value multiplies the combinations that include this pattern.'],
   'pp.rsi_rebound.threshold': ['RSI 문턱', 'RSI threshold'],
   'pp.breakout_vol.volume_mult': ['거래량 배수', 'Volume multiple'],
+  'pp.ma_cross_5_20.fast': ['단기 이평(일)', 'Fast MA (days)'],
+  'pp.ma_cross_5_20.slow': ['장기 이평(일)', 'Slow MA (days)'],
+  'pp.breakout_20d.lookback': ['고가 비교 기간(일)', 'High lookback (days)'],
+  'pp.breakout_vol.lookback': ['고가·거래량 비교 기간(일)', 'High/volume lookback (days)'],
+  'pp.rsi_rebound.window': ['RSI 기간(일)', 'RSI period (days)'],
+  'pp.bb_lower_recover.window': ['볼린저 기간(일)', 'Bollinger period (days)'],
+  'pp.bb_lower_recover.k': ['볼린저 배수(σ)', 'Bollinger width (σ)'],
   // 후순위 패턴 5종 (X6)
   'pat.three_down_up': ['3일 하락 뒤 반등', '3 down days then up'],
   'pat.bb_squeeze_break': ['볼린저 수축 돌파', 'Bollinger squeeze breakout'],
