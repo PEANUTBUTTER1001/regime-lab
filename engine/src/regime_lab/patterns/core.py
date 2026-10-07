@@ -1,58 +1,89 @@
-"""핵심 패턴 5종(구현_계획.md §4.1)과 후순위 패턴 5종(X6, 정의는 r1 초안 — 채널 메시지 231676300370046976)."""
+"""핵심 패턴 5종(구현_계획.md §4.1), 후순위 패턴 5종(X6, 정의 r1), 추가 패턴 4종(2026-10-07, MACD·52주 신고가·이격도·스토캐스틱)."""
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
+from regime_lab.indicators import bollinger, filled_hl, rolling_max_prev, rolling_mean_prev, rsi, sma
 from regime_lab.patterns.base import REQUIRED_INDICATORS, Pattern
+
+# 핵심 5종의 기간·배수는 준비 프레임 열(sma5·sma20·high_max_prev20·vol_mean_prev20·rsi14·bb_lower)에 기본값으로
+# 계산돼 있다. 조합별 수치(P1-4)가 그 기본값과 같으면 그 열을 그대로 쓰고, 다르면 같은 지표 함수로 그 자리에서
+# 다시 계산한다 → 기본값이면 결과가 비트 단위로 같고, 준비 캐시(PREP_VERSION)는 바뀌지 않는다.
 
 
 class MaCross520(Pattern):
-    """SMA5(t-1) ≤ SMA20(t-1) 이고 SMA5(t) > SMA20(t)."""
+    """SMA_fast(t-1) ≤ SMA_slow(t-1) 이고 SMA_fast(t) > SMA_slow(t). 기본 fast 5·slow 20."""
 
     name = "ma_cross_5_20"
 
+    def _ma(self, f: pd.DataFrame, n: int) -> pd.Series:
+        base = self.cfg["patterns"][self.name]
+        col = {int(base["fast"]): "sma5", int(base["slow"]): "sma20"}.get(n)
+        return f[col] if col in f else sma(f, n)
+
     def _raw_signal(self, f: pd.DataFrame) -> pd.Series:
-        return (self.prev(f, "sma5") <= self.prev(f, "sma20")) & (f["sma5"] > f["sma20"])
+        fast, slow = self._ma(f, int(self.params["fast"])), self._ma(f, int(self.params["slow"]))
+        return (self.lag(f, fast, 1) <= self.lag(f, slow, 1)) & (fast > slow)
+
+    @classmethod
+    def param_errors(cls, p: dict) -> dict[str, str]:
+        return {"fast": "Must be shorter than slow"} if p["fast"] >= p["slow"] else {}
+
+
+def _high_max_prev(pat: Pattern, f: pd.DataFrame, n: int) -> pd.Series:
+    if n == int(pat.cfg["patterns"]["breakout_20d"]["lookback"]) and "high_max_prev20" in f:
+        return f["high_max_prev20"]
+    return rolling_max_prev(f, filled_hl(f)[0], n)
 
 
 class Breakout20d(Pattern):
-    """종가(t) > 직전 20거래일(t-20 ~ t-1) 고가 최댓값."""
+    """종가(t) > 직전 lookback 거래일(t-lookback ~ t-1) 고가 최댓값. 기본 20일."""
 
     name = "breakout_20d"
 
     def _raw_signal(self, f: pd.DataFrame) -> pd.Series:
-        return f["close"] > f["high_max_prev20"]
+        return f["close"] > _high_max_prev(self, f, int(self.params["lookback"]))
 
 
 class BreakoutVol(Pattern):
-    """breakout_20d 이고 거래량(t) ≥ 직전 20거래일 평균 거래량 × volume_mult."""
+    """직전 lookback 일 고가 돌파 이고 거래량(t) ≥ 직전 lookback 일 평균 거래량 × volume_mult. 기본 20일·2배."""
 
     name = "breakout_vol"
 
     def _raw_signal(self, f: pd.DataFrame) -> pd.Series:
-        vol_ok = f["volume"] >= f["vol_mean_prev20"] * float(self.params["volume_mult"])
-        return (f["close"] > f["high_max_prev20"]) & vol_ok & (f["vol_mean_prev20"] > 0)
+        n = int(self.params["lookback"])
+        vol_mean = (f["vol_mean_prev20"] if n == int(self.cfg["patterns"]["breakout_vol"]["lookback"]) and "vol_mean_prev20" in f
+                    else rolling_mean_prev(f, f["volume"].fillna(0), n))
+        vol_ok = f["volume"] >= vol_mean * float(self.params["volume_mult"])
+        return (f["close"] > _high_max_prev(self, f, n)) & vol_ok & (vol_mean > 0)
 
 
 class RsiRebound(Pattern):
-    """RSI14(t-1) < threshold 이고 RSI14(t) ≥ threshold."""
+    """RSI_window(t-1) < threshold 이고 RSI_window(t) ≥ threshold. 기본 14일(단순평균, A7-1)·30."""
 
     name = "rsi_rebound"
 
     def _raw_signal(self, f: pd.DataFrame) -> pd.Series:
+        icfg = self.cfg["indicators"]
+        n = int(self.params["window"])
+        r = f["rsi14"] if n == int(icfg["rsi_window"]) and "rsi14" in f else rsi(f, n, icfg["rsi_smoothing"])
         th = float(self.params["threshold"])
-        return (self.prev(f, "rsi14") < th) & (f["rsi14"] >= th)
+        return (self.lag(f, r, 1) < th) & (r >= th)
 
 
 class BbLowerRecover(Pattern):
-    """종가(t-1) < 볼린저 하단(t-1) 이고 종가(t) ≥ 볼린저 하단(t)."""
+    """종가(t-1) < 볼린저 하단(t-1) 이고 종가(t) ≥ 볼린저 하단(t). 기본 20일·2σ(ddof=0)."""
 
     name = "bb_lower_recover"
 
     def _raw_signal(self, f: pd.DataFrame) -> pd.Series:
-        return (self.prev(f, "close") < self.prev(f, "bb_lower")) & (f["close"] >= f["bb_lower"])
+        icfg = self.cfg["indicators"]
+        n, k = int(self.params["window"]), float(self.params["k"])
+        lower = (f["bb_lower"] if n == int(icfg["bb_window"]) and k == float(icfg["bb_k"]) and "bb_lower" in f
+                 else bollinger(f, n, k, icfg["bb_ddof"])["bb_lower"])
+        return (self.prev(f, "close") < self.lag(f, lower, 1)) & (f["close"] >= lower)
 
 
 # ---------------------------------------------------------------- 후순위 패턴 5종 (X6)
@@ -137,9 +168,81 @@ class Engulfing(Pattern):
                 & ((c - o) >= r * (o1 - c1)) & (c1 < self.lag(f, c, 1 + n)))
 
 
+# ---------------------------------------------------------------- 추가 패턴 4종 (2026-10-07, SRS 범위 확장 승인 필요)
+# 모두 종가·고가·저가로 패턴 안에서 종목별로 계산한다 (준비 프레임 열 추가 없음). t일 값은 t일까지의 가격만 쓴다.
+def _by_ticker(f: pd.DataFrame, s: pd.Series, fn) -> pd.Series:
+    return s.groupby(f["ticker"].to_numpy(), sort=False).transform(fn)
+
+
+def _ema(f: pd.DataFrame, s: pd.Series, n: int) -> pd.Series:
+    """종목별 지수이동평균 (adjust=False, 첫 n개 전에는 NaN). 재귀식이라 t일 값은 t일까지의 값만 쓴다."""
+    return _by_ticker(f, s, lambda x: x.ewm(span=n, adjust=False, min_periods=n).mean())
+
+
+class MacdCross(Pattern):
+    """MACD = EMA_fast(종가) − EMA_slow(종가), 시그널 = EMA_signal(MACD).
+    MACD(t-1) ≤ 시그널(t-1) 이고 MACD(t) > 시그널(t). 기본 12·26·9."""
+
+    name = "macd_cross"
+
+    def _raw_signal(self, f: pd.DataFrame) -> pd.Series:
+        c = _pos(f["close"])
+        macd = _ema(f, c, int(self.params["fast"])) - _ema(f, c, int(self.params["slow"]))
+        sig = _ema(f, macd, int(self.params["signal"]))
+        return (self.lag(f, macd, 1) <= self.lag(f, sig, 1)) & (macd > sig)
+
+    @classmethod
+    def param_errors(cls, p: dict) -> dict[str, str]:
+        return {"fast": "Must be shorter than slow"} if p["fast"] >= p["slow"] else {}
+
+
+class High52w(Pattern):
+    """종가(t) > 직전 lookback 거래일 고가 최댓값 이고, 전날은 그 아래 (처음 넘는 날만). 기본 250거래일(약 52주)."""
+
+    name = "high_52w"
+
+    def _raw_signal(self, f: pd.DataFrame) -> pd.Series:
+        hi = rolling_max_prev(f, filled_hl(f)[0], int(self.params["lookback"]))
+        c = _pos(f["close"])
+        return (c > hi) & (self.lag(f, c, 1) <= self.lag(f, hi, 1))
+
+
+class DisparityRebound(Pattern):
+    """이격도 = 종가 / SMA_window × 100. 이격도(t-1) < threshold 이고 이격도(t) ≥ threshold. 기본 20일·90."""
+
+    name = "disparity_rebound"
+
+    def _raw_signal(self, f: pd.DataFrame) -> pd.Series:
+        n = int(self.params["window"])
+        base = self.cfg["patterns"]["ma_cross_5_20"]
+        m = f["sma20"] if n == int(base["slow"]) and "sma20" in f else sma(f, n)
+        d = _pos(f["close"]) / _pos(m) * 100
+        th = float(self.params["threshold"])
+        return (self.lag(f, d, 1) < th) & (d >= th)
+
+
+class StochasticRebound(Pattern):
+    """%K = (종가 − k_window일 최저가) / (최고가 − 최저가) × 100 (t일 포함), %D = %K 의 d_window일 평균.
+    %K(t-1) ≤ %D(t-1), %K(t) > %D(t), %K(t-1) < oversold. 기본 14·3·20. 고가 = 저가면 %K 없음."""
+
+    name = "stochastic_rebound"
+
+    def _raw_signal(self, f: pd.DataFrame) -> pd.Series:
+        n, m = int(self.params["k_window"]), int(self.params["d_window"])
+        hi, lo = filled_hl(f)
+        hh = _by_ticker(f, hi, lambda x: x.rolling(n, min_periods=n).max())
+        ll = _by_ticker(f, lo, lambda x: x.rolling(n, min_periods=n).min())
+        rng = (hh - ll).where(lambda r: r > 0)
+        k = (f["close"] - ll) / rng * 100
+        d = _by_ticker(f, k, lambda x: x.rolling(m, min_periods=m).mean())
+        k1 = self.lag(f, k, 1)
+        return (k1 <= self.lag(f, d, 1)) & (k > d) & (k1 < float(self.params["oversold"]))
+
+
 CORE_PATTERNS: dict[str, type[Pattern]] = {
     p.name: p for p in (MaCross520, Breakout20d, BreakoutVol, RsiRebound, BbLowerRecover,
-                        ThreeDownUp, BbSqueezeBreak, PullbackMa20, GranvilleBuy1, Engulfing)
+                        ThreeDownUp, BbSqueezeBreak, PullbackMa20, GranvilleBuy1, Engulfing,
+                        MacdCross, High52w, DisparityRebound, StochasticRebound)
 }
 
 

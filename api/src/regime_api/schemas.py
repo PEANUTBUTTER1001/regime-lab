@@ -13,7 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field
 MAX_STRATEGIES = 5  # 한 요청의 최대 전략 수 (비교 실행, 핵심 5종 기준)
 
 PatternName = Literal["ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover",
-                      "three_down_up", "bb_squeeze_break", "pullback_ma20", "granville_buy1", "engulfing"]  # X6 후순위 5종
+                      "three_down_up", "bb_squeeze_break", "pullback_ma20", "granville_buy1", "engulfing",  # X6 후순위 5종
+                      "macd_cross", "high_52w", "disparity_rebound", "stochastic_rebound"]  # 추가 4종
 Market = Literal["KOSPI", "KOSDAQ"]
 CapGroup = Literal["large", "mid", "small"]
 DATE = r"^\d{4}-\d{2}-\d{2}$"
@@ -27,7 +28,9 @@ class ExitIn(_Strict):
     stop_loss_pct: float | None = Field(None, description="손절 %, -50 ~ -1 또는 null(미사용)")
     take_profit_pct: float | None = Field(None, description="익절 %, +1 ~ +200 또는 null(미사용)")
     max_hold_days: int = Field(20, description="최대 보유 거래일, 1 ~ 250 (필수)")
-    trailing_stop_pct: None = Field(None, description="이번 릴리스는 null 만 허용")
+    trailing_stop_pct: float | None = Field(None, description="트레일링 스톱 %, 보유 중 최고 기준가 대비 -50 ~ -1 또는 null(미사용)")
+    breakeven_trigger_pct: float | None = Field(None, description="본전 스톱 발동 수익률 %, +1 ~ +100 또는 null(미사용)")
+    ma_exit_window: int | None = Field(None, description="이동평균 이탈 청산 기간(거래일), 5 ~ 250 또는 null(미사용)")
 
 
 class PeriodIn(_Strict):

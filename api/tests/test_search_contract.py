@@ -58,7 +58,7 @@ def test_openapi_lists_new_paths(client):
 
 def test_options(client):
     o = client.get("/api/searches/options").json()
-    assert len(o["patterns"]) == 10 and o["max_candidates"] == 200  # 핵심 5종 + 후순위 5종(X6)
+    assert len(o["patterns"]) == 14 and o["max_candidates"] == 200  # 핵심 5종 + 후순위 5종(X6) + 추가 4종
     assert o["defaults"]["patterns"] == ["ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover"]
     assert o["min_trades"] == {"default": 300, "min": 30, "max": 5000}
     assert 0 <= o["target_win_rate_default"] <= 1
@@ -212,9 +212,13 @@ def test_run_with_pattern_params(client):
     bad = {"strategies": [{"name": "pp", "patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"threshold": 90}}}]}
     r = client.post("/api/runs", json=bad)
     assert r.status_code == 422 and "strategies[0].pattern_params.rsi_rebound.threshold" in r.json()["detail"]["fields"]
-    bad2 = {"strategies": [{"name": "pp", "patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"window": 10}}}]}
+    bad2 = {"strategies": [{"name": "pp", "patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"foo": 10}}}]}
     r = client.post("/api/runs", json=bad2)
-    assert r.status_code == 422 and "strategies[0].pattern_params.rsi_rebound.window" in r.json()["detail"]["fields"]
+    assert r.status_code == 422 and "strategies[0].pattern_params.rsi_rebound.foo" in r.json()["detail"]["fields"]
+    bad3 = {"strategies": [{"name": "pp", "patterns": ["ma_cross_5_20"],
+                            "pattern_params": {"ma_cross_5_20": {"fast": 30, "slow": 20}}}]}
+    r = client.post("/api/runs", json=bad3)
+    assert r.status_code == 422 and "strategies[0].pattern_params.ma_cross_5_20.fast" in r.json()["detail"]["fields"]
 
 
 def test_search_preview_with_pattern_axis(client):
@@ -230,4 +234,4 @@ def test_preset_with_pattern_params(client):
     r = client.post("/api/presets", json={"name": "수치", "strategy": {"patterns": ["breakout_vol"],
                                                                      "pattern_params": {"breakout_vol": {"volume_mult": 1.5}}}})
     assert r.status_code == 201, r.text
-    assert r.json()["strategy"]["pattern_params"] == {"breakout_vol": {"volume_mult": 1.5}}
+    assert r.json()["strategy"]["pattern_params"] == {"breakout_vol": {"volume_mult": 1.5, "lookback": 20}}

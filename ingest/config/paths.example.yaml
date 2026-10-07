@@ -1,0 +1,4 @@
+# 이 파일을 paths.local.yaml 로 복사해 수집 저장 위치를 지정한다 (paths.local.yaml 은 Git 제외).
+# 저장소 밖 별도 폴더만 허용한다 — 저장소·data/·multi_tables_db/ 와 겹치면 실행을 거부한다 (계약 §2).
+# 상대 경로는 저장소 루트 기준. 기본값은 저장소 옆 폴더.
+ext_store: ../regime-lab_ext_store

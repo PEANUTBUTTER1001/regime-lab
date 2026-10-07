@@ -40,6 +40,15 @@ function toggleGroup(label, items, current, onPick) {
   return g;
 }
 
+// 선택 청산 규칙(2026-10-07)을 켠 실행만 요약에 덧붙인다
+function extraExits(ex) {
+  const parts = [];
+  if (ex.trailing_stop_pct != null) parts.push(t('r.exTrail', { v: ex.trailing_stop_pct }));
+  if (ex.breakeven_trigger_pct != null) parts.push(t('r.exBe', { v: ex.breakeven_trigger_pct }));
+  if (ex.ma_exit_window != null) parts.push(t('r.exMa', { v: ex.ma_exit_window }));
+  return parts.length ? ` · ${parts.join(' · ')}` : '';
+}
+
 export async function renderResults(el, runId, query) {
   state.lastRun = runId;
   el.append(h('h1', { text: t('r.title') }), loading(t('r.loading')));
@@ -67,7 +76,8 @@ export async function renderResults(el, runId, query) {
       h('p', { class: 'lead', text: t('r.lead', {
         name: cur, pats: inp.patterns.map((p) => (has(`pat.${p}`) ? t(`pat.${p}`) : p)).join(` ${inp.combine.toUpperCase()} `),
         mk: inp.markets.join(' + '), s: inp.period.start, e: inp.period.end,
-        sl: inp.exit.stop_loss_pct ?? t('r.off'), tp: inp.exit.take_profit_pct ?? t('r.off'), h: inp.exit.max_hold_days }) })),
+        sl: inp.exit.stop_loss_pct ?? t('r.off'), tp: inp.exit.take_profit_pct ?? t('r.off'), h: inp.exit.max_hold_days })
+        + extraExits(inp.exit) })),
     h('div', {}, v.analysis_target ? pill(t('r.target')) : pill(t('r.notTarget'), 'warn'))));
 
   if (names.length > 1) {
