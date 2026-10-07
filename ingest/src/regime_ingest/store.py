@@ -19,6 +19,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import re
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
@@ -65,10 +66,14 @@ DOC_SCHEMA = pa.schema([
     ("is_amendment", pa.bool_()), ("amends_candidate_doc_id", pa.string()), ("amends_basis", pa.string()),
 ])
 
+NEWS_SCHEMA = DOC_SCHEMA.append(pa.field("article_key", pa.string()))
+NEWS_MANIFEST = {"schema_version": 1, "policy_version": "news-observed-2026-10-07.v1"}
+
 
 class Store:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, formats: dict | None = None):
         self.root = Path(root)
+        self.formats = {"opendart": (DOC_SCHEMA, MANIFEST), **(formats or {})}
         self.root.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.root / "state.sqlite")
         self.db.executescript(SCHEMA)
@@ -78,21 +83,28 @@ class Store:
 
     def check_manifest(self, source: str):
         """docs/source=<s>/_manifest.json 의 스키마·정책 버전이 지금 코드와 같아야 쓴다 (다르면 섞지 않고 거부)."""
+        self._source(source)
+        manifest = self.formats[source][1]
         d = self.root / "docs" / f"source={source}"
         d.mkdir(parents=True, exist_ok=True)
         p = d / "_manifest.json"
         if p.exists():
             got = json.loads(p.read_text(encoding="utf-8"))
-            if {k: got.get(k) for k in MANIFEST} != MANIFEST:
-                raise RuntimeError(f"저장소 manifest {got} 가 코드 {MANIFEST} 와 다름 — 새 ext_store 를 쓰거나 이전을 먼저 정함")
+            if {k: got.get(k) for k in manifest} != manifest:
+                raise RuntimeError("저장소 manifest 불일치 — 새 ext_store 또는 명시적 이전 필요")
         else:
-            p.write_text(json.dumps(MANIFEST, ensure_ascii=False, indent=2), encoding="utf-8")
+            p.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _source(self, source: str):
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", source) or source not in self.formats:
+            raise ValueError("unknown storage source")
 
     def close(self):
         self.db.close()
 
     # ---------------------------------------------------------------- 잠금
     def lock(self, source: str):
+        self._source(source)
         d = self.root / "locks"
         d.mkdir(exist_ok=True)
         p = d / f"{source}.lock"
@@ -124,6 +136,7 @@ class Store:
 
     def stage_docs(self, source: str, run_id: str, docs: list[dict]) -> list[Path]:
         """1단계: 달별 tmp 파일을 쓰고 doc_files 에 최종 이름을 넣는다 (commit 은 호출자). 최종 경로 목록을 돌려준다."""
+        self._source(source)
         by_month = defaultdict(list)
         for d in docs:
             by_month[d["published_at"][:7]].append(d)
@@ -134,7 +147,7 @@ class Store:
             p, i = d / f"part-{run_id}.parquet", 1
             while p.exists() or self._tmp(p).exists():  # 같은 실행이 같은 달을 여러 번 쓰면 조각을 늘린다
                 p, i = d / f"part-{run_id}-{i}.parquet", i + 1
-            pq.write_table(pa.Table.from_pylist(rows, schema=DOC_SCHEMA), self._tmp(p))
+            pq.write_table(pa.Table.from_pylist(rows, schema=self.formats[source][0]), self._tmp(p))
             self.db.execute("INSERT INTO doc_files VALUES (?, ?)", (str(p.relative_to(self.root)), run_id))
             final.append(p)
         return final
@@ -152,6 +165,7 @@ class Store:
     def recover(self, source: str):
         """source 의 docs/source=<source>/ 아래 남은 tmp 만 정리한다. 잠금이 출처 단위라 정리 범위도 출처 단위여야
         다른 출처(예: 뉴스)가 동시에 쓰는 미커밋 tmp 를 지우지 않는다 (hchee99-codex 리뷰)."""
+        self._source(source)
         base = self.root / "docs" / f"source={source}"
         committed = {r[0] for r in self.db.execute("SELECT path FROM doc_files")}
         for t in base.rglob("*.parquet.tmp") if base.exists() else []:
@@ -167,6 +181,7 @@ class Store:
 
     def read_docs(self, source: str) -> list[dict]:
         """읽기 전용: 최종 파일 + commit 됐지만 이름을 아직 못 바꾼 tmp. 진행 중(미커밋) tmp 는 보지 않는다."""
+        self._source(source)
         base = self.root / "docs" / f"source={source}"
         if not base.exists():
             return []
@@ -174,7 +189,7 @@ class Store:
         files = sorted(base.rglob("*.parquet"))
         files += sorted(t for t in base.rglob("*.parquet.tmp")
                         if str(t.with_suffix("").relative_to(self.root)) in committed and not t.with_suffix("").exists())
-        return [r for f in files for r in pq.read_table(f, schema=DOC_SCHEMA).to_pylist()]
+        return [r for f in files for r in pq.read_table(f, schema=self.formats[source][0]).to_pylist()]
 
     # ---------------------------------------------------------------- 상태
     def seen(self, doc_ids: list[str]) -> dict[str, Seen]:
