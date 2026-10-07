@@ -36,6 +36,13 @@ REPORT_EVERY = 5_000_000
 
 def main(out_dir: Path) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
+    # 이전 내보내기 결과와 섞이지 않게, 결과물이 하나라도 있는 폴더에는 쓰지 않는다 (삭제는 사람이 직접)
+    leftovers = sorted(p.name for p in out_dir.glob("stock_minutes_*.parquet*")) + \
+        (["minutes_manifest.json"] if (out_dir / "minutes_manifest.json").exists() else [])
+    if leftovers:
+        print(f"[stop] {out_dir} 에 이전 결과가 있습니다 ({', '.join(leftovers[:3])} 등 {len(leftovers)}개). "
+              "빈 새 폴더를 지정하거나, 기존 폴더를 직접 옮긴 뒤 다시 실행하세요.", file=sys.stderr)
+        return 1
     started = datetime.now()
     t0 = time.time()
     try:

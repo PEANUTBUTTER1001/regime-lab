@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 
 MINUTE_COLS = ["code", "dt", "open_p", "high_p", "low_p", "close_p", "volume", "value"]
 FILE_RE = re.compile(r"^stock_minutes_(\d{6})\.parquet$")
@@ -38,6 +39,25 @@ def load_manifest(minutes_dir: Path) -> dict | None:
     return json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
 
 
+def check_manifest(minutes_dir: Path) -> dict:
+    """매니페스트와 실제 월 파일(월 목록·파일별 행 수)이 같은지 확인한다. 다르면 ValueError.
+
+    내보내기가 중간에 끊겼거나 서로 다른 내보내기 결과가 섞인 폴더를 정상 데이터로 읽지 않기 위함이다.
+    """
+    m = load_manifest(minutes_dir)
+    if m is None:
+        raise ValueError(f"{minutes_dir} 에 minutes_manifest.json 이 없습니다 — 내보내기가 끝나지 않았거나 다른 폴더입니다")
+    files = month_files(minutes_dir)
+    want = {int(k): int(v["rows"]) for k, v in m["months"].items()}
+    if set(files) != set(want):
+        raise ValueError(f"매니페스트 월 {sorted(want)} 과 실제 파일 월 {sorted(files)} 이 다릅니다")
+    for ym, f in files.items():
+        n = pq.ParquetFile(f).metadata.num_rows
+        if n != want[ym]:
+            raise ValueError(f"{f.name}: 행 수 {n:,} ≠ 매니페스트 {want[ym]:,}")
+    return m
+
+
 def minutes_fingerprint(minutes_dir: Path) -> str:
     """정규화 캐시 키용 데이터 지문 (월별 파일 이름·크기·수정 시각)."""
     h = hashlib.sha256()
@@ -52,8 +72,10 @@ def load_minutes(minutes_dir: Path, codes: Sequence[str] | None = None, start: s
                  end: str | None = None, columns: Sequence[str] | None = None) -> pd.DataFrame:
     """기간 [start, end] (양 끝 포함, 날짜만 주면 end 는 그날 전체)·종목으로 1분봉을 읽는다.
 
-    결과는 (code, dt) 오름차순이고 code 는 6자리 문자열이다. 해당 월 파일이 없으면 빈 프레임을 돌려준다.
+    결과는 (code, dt) 오름차순이고 code 는 6자리 문자열이다. 읽기 전에 매니페스트와 파일이 맞는지 확인하며
+    (check_manifest), 요청 기간이 매니페스트 범위 밖이라 해당 월 파일이 없으면 빈 프레임을 돌려준다.
     """
+    check_manifest(minutes_dir)
     cols = list(columns) if columns else list(MINUTE_COLS)
     unknown = set(cols) - set(MINUTE_COLS)
     if unknown:
