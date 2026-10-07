@@ -1,0 +1,26 @@
+[project]
+name = "regime-ingest"
+version = "0.1.0"
+description = "regime-lab 외부 자료 수집 (P3-7 OpenDART 공시 목록) — 과거 데이터 분석 도구이며 투자 권유가 아닙니다."
+requires-python = ">=3.12,<3.13"
+# 1단계는 표준 라이브러리 + 엔진과 같은 저장 형식(Parquet)·설정(YAML)만 쓴다 (plan/03-04 §8)
+dependencies = [
+    "pyarrow>=16",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+regime-ingest = "regime_ingest.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/regime_ingest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

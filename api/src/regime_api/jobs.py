@@ -140,16 +140,20 @@ class JobManager:
         if self._current is not None and self._current.status not in TERMINAL:
             raise Busy(self._current.run_id, self._current.kind)
 
-    def submit(self, strategies: list[Strategy]) -> Job:
+    def _data_version(self) -> str:
+        """원본 + 워밍업 파일 지문 (NFR-10). 실행·탐색 id 와 기록의 data_version 과 같은 기준."""
         from regime_lab.config import config_hash
-        from regime_lab.data.loader import input_file_hashes
+        from regime_lab.data.loader import input_file_hashes, warmup_file_hashes
 
+        return config_hash({**input_file_hashes(self.paths.store), **warmup_file_hashes(self.paths.cache)})[:8]
+
+    def submit(self, strategies: list[Strategy]) -> Job:
         with self._lock:
             self._check_free()
-            run_id = make_run_id(strategies, self.cfg, config_hash(input_file_hashes(self.paths.store))[:8])
+            run_id = make_run_id(strategies, self.cfg, self._data_version())
             while (self.runs_dir / run_id).exists() or run_id in self._jobs:
                 time.sleep(1.0)  # run_id 는 초 단위 시각을 포함한다
-                run_id = make_run_id(strategies, self.cfg, config_hash(input_file_hashes(self.paths.store))[:8])
+                run_id = make_run_id(strategies, self.cfg, self._data_version())
             job = Job(run_id, [s.name for s in strategies])
             job.ctx = _JobContext(job, self._write)
             self._jobs[run_id] = job
@@ -178,12 +182,9 @@ class JobManager:
 
     # ------------------------------------------------------------------ 탐색 (P1-7)
     def submit_search(self, req: SearchRequest) -> Job:
-        from regime_lab.config import config_hash
-        from regime_lab.data.loader import input_file_hashes
-
         with self._lock:
             self._check_free()
-            data_ver = config_hash(input_file_hashes(self.paths.store))[:8]
+            data_ver = self._data_version()
             sid = make_search_id(req, self.cfg, data_ver)
             while (self.search_dir / sid).exists() or sid in self._jobs:
                 time.sleep(1.0)  # search_id 는 초 단위 시각을 포함한다

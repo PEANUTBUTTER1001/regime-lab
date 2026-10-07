@@ -13,8 +13,10 @@ def _sig(df, name, cfg):
     return get_pattern(name, cfg).signal(compute_indicators(df, cfg))
 
 
-def test_five_core_patterns_registered():
-    assert set(CORE_PATTERNS) == {"ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover"}
+def test_core_and_later_patterns_registered():
+    assert set(CORE_PATTERNS) == {"ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover",
+                                  "three_down_up", "bb_squeeze_break", "pullback_ma20", "granville_buy1", "engulfing",
+                                  "macd_cross", "high_52w", "disparity_rebound", "stochastic_rebound"}
 
 
 def test_ma_cross(cfg):

@@ -10,7 +10,6 @@ import pytest
 from synth import make_frame, make_market
 
 from regime_lab.backtest import METRIC_DEFS, run_backtest, summarize, trade_stats
-from regime_lab.patterns import CORE_PATTERNS
 from regime_lab.runs import Strategy, execute
 
 
@@ -74,7 +73,7 @@ def market(cfg):
     return make_market(cfg, n_tickers=30, seed=0)
 
 
-@pytest.mark.parametrize("name", sorted(CORE_PATTERNS))
+@pytest.mark.parametrize("name", sorted(GOLDEN))  # 핵심 5종 고정값 (후순위 5종은 test_later_patterns)
 def test_win_rate_regression(market, cfg, name):
     r = execute(Strategy.from_dict({"name": name, "patterns": [name]}), market, cfg)["results"][name]
     s, tr = r["summary"], r["trades"]
