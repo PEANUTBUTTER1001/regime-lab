@@ -58,6 +58,20 @@ def test_market_regime_starts_at_backtest_start_with_warmup(cfg):
     assert first_computable_date(attach_index_warmup(store, warm, cfg), cfg).iloc[0] < STORE_START
 
 
+def test_without_warmup_file_same_as_old_start(cfg):
+    """과거 지수 파일이 없으면 market_regime_start 를 앞당겨도 결과가 예전 설정(계산 가능한 첫날)과 같다.
+
+    2020-09-01~ 계산 가능일 전까지는 200일선이 부족해 null 로 남는다 (seongmin-claude #25 리뷰).
+    """
+    store, _, _ = _store_and_warm()
+    first = first_computable_date(store, cfg).iloc[0]
+    old_cfg = {**cfg, "regime": {**cfg["regime"], "market_regime_start": str(first.date())}}
+    new = market_regime(attach_index_warmup(store, None, cfg), cfg)
+    old = market_regime(store, old_cfg)
+    pd.testing.assert_frame_equal(new, old)
+    assert new.loc[new["date"] < first, "market_regime"].isna().all()
+
+
 def test_market_regime_truncation_invariant_with_warmup(cfg):
     """입력 끝을 잘라도 앞 구간 시장 국면이 같다 (FR-D5, 미래참조 없음)."""
     store, warm, _ = _store_and_warm()
@@ -85,7 +99,19 @@ def test_real_index_warmup_market_regime_from_backtest_start(store, paths, cfg):
 
 
 @pytest.mark.data
-@pytest.mark.parametrize("cut", ["2020-10-15", "2021-03-15", "2022-06-30", "2024-02-29"])
+def test_real_without_warmup_file_same_as_2021_07_21(store, cfg):
+    """실데이터: 과거 지수 파일 없이 2020-09-01 설정으로 돌려도 예전 기본값(2021-07-21) 결과와 같다."""
+    from regime_lab.data.loader import load_index
+
+    idx = load_index(store)
+    old_cfg = {**cfg, "regime": {**cfg["regime"], "market_regime_start": "2021-07-21"}}
+    new = market_regime(attach_index_warmup(idx, None, cfg), cfg)
+    pd.testing.assert_frame_equal(new, market_regime(idx, old_cfg))
+    assert new.loc[new["date"] < pd.Timestamp("2021-07-21"), "market_regime"].isna().all()
+
+
+@pytest.mark.data
+@pytest.mark.parametrize("cut",["2020-10-15", "2021-03-15", "2022-06-30", "2024-02-29"])
 def test_real_index_warmup_truncation(store, paths, cfg, cut):
     """실데이터: 지수 끝을 잘라도 앞 구간 시장 국면이 같다 (과거 지수 연결 후에도 미래참조 없음)."""
     from regime_lab.data.loader import load_index
