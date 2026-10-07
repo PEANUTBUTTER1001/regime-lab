@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
+from pathlib import Path
 from datetime import date, datetime
 
 from regime_ingest.collect import RunStats, collect
-from regime_ingest.config import load_config, load_store_path
+from regime_ingest.config import load_config, load_news_config, load_store_path
+from regime_ingest.news_collect import collect_news, validate_config
+from regime_ingest.sources.news import parse_naver
+from regime_ingest.sources.naver_http import make_fetch
 from regime_ingest.sources.opendart import OpenDartList, http_fetch
-from regime_ingest.store import Store
+from regime_ingest.store import Store, NEWS_SCHEMA, NEWS_MANIFEST
 from regime_ingest.timing import KST
 
 
@@ -63,5 +68,41 @@ def status(limit: int = 10) -> dict:
                 "coverage": {s: sum(1 for v in cov.values() if v == s)
                              for s in ("collected", "forward", "partial", "gap")},
                 "runs": store.runs("opendart", limit)}
+    finally:
+        store.close()
+
+
+def news_forward(config_path: Path | None = None) -> dict:
+    try:
+        cfg = load_news_config(config_path)
+        policy = validate_config(cfg)
+    except (KeyError, TypeError, ValueError):
+        return {"source": "naver_news", "status": "failed", "message": "invalid_configuration"}
+    if not policy.active:
+        return {"source": "naver_news", "status": "disabled", "message": "source_inactive"}
+    policy.check()
+    client_id = os.environ.get("NAVER_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("NAVER_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        return {"source": "naver_news", "status": "failed", "message": "credentials_missing"}
+    fetch = make_fetch(client_id, client_secret, timeout=cfg["timeout_sec"],
+                       max_bytes=cfg["response_max_bytes"], user_agent=cfg["user_agent"], now=_now)
+    manifest = {**NEWS_MANIFEST, "license_scope": policy.license_scope}
+    store = Store(load_store_path(), formats={"naver_news": (NEWS_SCHEMA, manifest)})
+    try:
+        return collect_news(store, fetch, parse_naver, cfg, now=_now, sleep=time.sleep, run_id=_run_id())
+    finally:
+        store.close()
+
+
+def news_status(limit: int = 10) -> dict:
+    root = load_store_path()
+    if not (root / "state.sqlite").exists():
+        return {"source": "naver_news", "status": "not_initialized", "runs": []}
+    store = Store(root, formats={"naver_news": (NEWS_SCHEMA, NEWS_MANIFEST)})
+    try:
+        return {"source": "naver_news", "cursor": store.cursor("naver_news", "news_query"),
+                "requests_today": store.requests_on("naver_news", today().isoformat()),
+                "runs": store.runs("naver_news", limit)}
     finally:
         store.close()
