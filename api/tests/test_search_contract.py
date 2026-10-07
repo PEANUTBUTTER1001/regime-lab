@@ -212,9 +212,13 @@ def test_run_with_pattern_params(client):
     bad = {"strategies": [{"name": "pp", "patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"threshold": 90}}}]}
     r = client.post("/api/runs", json=bad)
     assert r.status_code == 422 and "strategies[0].pattern_params.rsi_rebound.threshold" in r.json()["detail"]["fields"]
-    bad2 = {"strategies": [{"name": "pp", "patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"window": 10}}}]}
+    bad2 = {"strategies": [{"name": "pp", "patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"foo": 10}}}]}
     r = client.post("/api/runs", json=bad2)
-    assert r.status_code == 422 and "strategies[0].pattern_params.rsi_rebound.window" in r.json()["detail"]["fields"]
+    assert r.status_code == 422 and "strategies[0].pattern_params.rsi_rebound.foo" in r.json()["detail"]["fields"]
+    bad3 = {"strategies": [{"name": "pp", "patterns": ["ma_cross_5_20"],
+                            "pattern_params": {"ma_cross_5_20": {"fast": 30, "slow": 20}}}]}
+    r = client.post("/api/runs", json=bad3)
+    assert r.status_code == 422 and "strategies[0].pattern_params.ma_cross_5_20.fast" in r.json()["detail"]["fields"]
 
 
 def test_search_preview_with_pattern_axis(client):
@@ -230,4 +234,4 @@ def test_preset_with_pattern_params(client):
     r = client.post("/api/presets", json={"name": "수치", "strategy": {"patterns": ["breakout_vol"],
                                                                      "pattern_params": {"breakout_vol": {"volume_mult": 1.5}}}})
     assert r.status_code == 201, r.text
-    assert r.json()["strategy"]["pattern_params"] == {"breakout_vol": {"volume_mult": 1.5}}
+    assert r.json()["strategy"]["pattern_params"] == {"breakout_vol": {"volume_mult": 1.5, "lookback": 20}}

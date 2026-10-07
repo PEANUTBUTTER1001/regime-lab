@@ -22,7 +22,7 @@ def _s(**kw):
 # ---------------------------------------------------------------- 검증·기록
 @pytest.mark.parametrize("pp,key", [
     ({"ma_cross_5_20": {"fast": 3}}, "pattern_params.ma_cross_5_20"),       # 고르지 않은 패턴
-    ({"rsi_rebound": {"window": 10}}, "pattern_params.rsi_rebound.window"),  # 준비 프레임에 박힌 수치는 조정 불가
+    ({"rsi_rebound": {"smoothing": "sma"}}, "pattern_params.rsi_rebound.smoothing"),  # pattern_limits 에 없는 수치는 조정 불가
     ({"rsi_rebound": {"threshold": 60}}, "pattern_params.rsi_rebound.threshold"),
     ({"rsi_rebound": {"threshold": True}}, "pattern_params.rsi_rebound.threshold"),
     ({"rsi_rebound": {"threshold": "25"}}, "pattern_params.rsi_rebound.threshold"),
@@ -46,7 +46,7 @@ def test_effective_records_adjustable_values_and_round_trips(cfg):
     s = _s(pattern_params={"rsi_rebound": {"threshold": 25}})
     s.validate(cfg)
     eff = s.effective(cfg)
-    assert eff["pattern_params"] == {"rsi_rebound": {"threshold": 25}}
+    assert eff["pattern_params"] == {"rsi_rebound": {"threshold": 25, "window": 14}}  # 조정 가능 수치 전부, 기본값 채움
     s2 = Strategy.from_dict(eff)  # 기록된 값을 그대로 다시 넣어도 통과
     s2.validate(cfg)
     assert s2.effective(cfg) == eff
@@ -154,7 +154,7 @@ def test_preset_keeps_pattern_params(cfg, tmp_path):
     paths = Paths(tmp_path / "s", tmp_path / "d", tmp_path / "c", tmp_path / "runs")
     store = PresetStore(presets_dir(paths), cfg)
     p = store.create("수치 조합", {"name": "x", "patterns": ["rsi_rebound"], "pattern_params": {"rsi_rebound": {"threshold": 25}}})
-    assert p["strategy"]["pattern_params"] == {"rsi_rebound": {"threshold": 25}}
+    assert p["strategy"]["pattern_params"] == {"rsi_rebound": {"threshold": 25, "window": 14}}
     Strategy.from_dict(store.get(p["id"])["strategy"]).validate(cfg)
 
 
@@ -194,3 +194,83 @@ def test_config_axes_and_limits_are_consistent(cfg):
     for pat, params in cfg["pattern_limits"].items():
         for k, (lo, hi) in params.items():
             assert lo <= cfg["patterns"][pat][k] <= hi, (pat, k)
+
+
+# ---------------------------------------------------------------- 기간·배수 열기 (2026-10-07)
+from regime_lab.indicators import bollinger, filled_hl, rolling_max_prev, rolling_mean_prev, rsi, sma  # noqa: E402
+
+PERIOD_CASES = [
+    ("ma_cross_5_20", {"fast": 10, "slow": 60}),
+    ("breakout_20d", {"lookback": 60}),
+    ("breakout_vol", {"lookback": 10}),
+    ("rsi_rebound", {"window": 7}),
+    ("bb_lower_recover", {"window": 40, "k": 2.5}),
+]
+
+
+def _expected(f, name, p, cfg):
+    """정의를 지표 함수로 직접 계산한 기대 신호."""
+    lag = lambda s: s.groupby(f["ticker"].to_numpy(), sort=False).shift(1)  # noqa: E731
+    if name == "ma_cross_5_20":
+        a, b = sma(f, p["fast"]), sma(f, p["slow"])
+        raw = (lag(a) <= lag(b)) & (a > b)
+    elif name == "breakout_20d":
+        raw = f["close"] > rolling_max_prev(f, filled_hl(f)[0], p["lookback"])
+    elif name == "breakout_vol":
+        vm = rolling_mean_prev(f, f["volume"].fillna(0), p["lookback"])
+        raw = (f["close"] > rolling_max_prev(f, filled_hl(f)[0], p["lookback"])) & (f["volume"] >= vm * p["volume_mult"]) & (vm > 0)
+    elif name == "rsi_rebound":
+        r = rsi(f, p["window"], cfg["indicators"]["rsi_smoothing"])
+        raw = (lag(r) < p["threshold"]) & (r >= p["threshold"])
+    else:
+        lo = bollinger(f, p["window"], p["k"], cfg["indicators"]["bb_ddof"])["bb_lower"]
+        raw = (lag(f["close"]) < lag(lo)) & (f["close"] >= lo)
+    return (raw.fillna(False) & ~f["halted"].astype(bool)).tolist()
+
+
+@pytest.fixture(scope="module")
+def pmarket(cfg):
+    return make_market(cfg, n_tickers=15, seed=13).frame
+
+
+@pytest.mark.parametrize("name,pp", PERIOD_CASES)
+def test_changed_periods_follow_definition(pmarket, cfg, name, pp):
+    got = make_pattern(name, cfg, pp).signal(pmarket)
+    assert got.tolist() == _expected(pmarket, name, {**cfg["patterns"][name], **pp}, cfg)
+    assert got.tolist() != make_pattern(name, cfg).signal(pmarket).tolist()  # 기간을 바꾸면 신호가 실제로 바뀐다
+
+
+@pytest.mark.parametrize("name,pp", PERIOD_CASES)
+def test_default_periods_use_precomputed_columns(pmarket, cfg, name, pp):
+    """기본값을 명시하면 준비 프레임 열을 쓰는 경로 = 수치를 안 준 결과 (기존 성과 불변)."""
+    defaults = {k: cfg["patterns"][name][k] for k in pp}
+    assert make_pattern(name, cfg, defaults).signal(pmarket).tolist() == make_pattern(name, cfg).signal(pmarket).tolist()
+
+
+@pytest.mark.parametrize("cut", CUTS)
+@pytest.mark.parametrize("name,pp", PERIOD_CASES)
+def test_changed_periods_truncation_invariance(pmarket, cfg, name, pp, cut):
+    short = pmarket[pmarket["date"] <= pd.Timestamp(cut)].reset_index(drop=True)
+    a = make_pattern(name, cfg, pp).signal(pmarket)[(pmarket["date"] <= pd.Timestamp(cut)).to_numpy()].tolist()
+    assert a == make_pattern(name, cfg, pp).signal(short).tolist()
+
+
+def test_fast_must_be_shorter_than_slow(cfg):
+    for pp in ({"fast": 20, "slow": 20}, {"fast": 30}, {"slow": 4}):
+        with pytest.raises(StrategyError) as e:
+            Strategy.from_dict({"name": "x", "patterns": ["ma_cross_5_20"],
+                                "pattern_params": {"ma_cross_5_20": pp}}).validate(cfg)
+        assert any(k.startswith("pattern_params.ma_cross_5_20") for k in e.value.errors), e.value.errors
+    Strategy.from_dict({"name": "x", "patterns": ["ma_cross_5_20"],
+                        "pattern_params": {"ma_cross_5_20": {"fast": 10, "slow": 60}}}).validate(cfg)
+
+
+def test_search_axes_value_pairs_respect_relations(cfg):
+    """탐색 축의 허용 값끼리 어떻게 골라도 수치 관계 검증을 통과한다 (탐색 도중 실패 방지)."""
+    from itertools import product as _product
+
+    for pat, params in cfg["search"]["pattern_axes"].items():
+        keys = sorted(params)
+        for vals in _product(*(params[k] for k in keys)):
+            Strategy.from_dict({"name": "x", "patterns": [pat],
+                                "pattern_params": {pat: dict(zip(keys, vals))}}).validate(cfg)
