@@ -104,7 +104,7 @@ class Store:
         os.close(fd)
         try:
             self.check_manifest(source)
-            self.recover()  # 잠금을 잡은 쪽만 남은 staging 을 정리한다
+            self.recover(source)  # 잠금을 잡은 출처의 staging 만 정리한다 (다른 출처 writer 의 tmp 는 건드리지 않음)
         except BaseException:
             p.unlink(missing_ok=True)
             raise
@@ -149,9 +149,12 @@ class Store:
         for p in paths:
             self._tmp(p).unlink(missing_ok=True)
 
-    def recover(self):
+    def recover(self, source: str):
+        """source 의 docs/source=<source>/ 아래 남은 tmp 만 정리한다. 잠금이 출처 단위라 정리 범위도 출처 단위여야
+        다른 출처(예: 뉴스)가 동시에 쓰는 미커밋 tmp 를 지우지 않는다 (hchee99-codex 리뷰)."""
+        base = self.root / "docs" / f"source={source}"
         committed = {r[0] for r in self.db.execute("SELECT path FROM doc_files")}
-        for t in (self.root / "docs").rglob("*.parquet.tmp") if (self.root / "docs").exists() else []:
+        for t in base.rglob("*.parquet.tmp") if base.exists() else []:
             final = t.with_suffix("")
             if str(final.relative_to(self.root)) in committed:
                 os.replace(t, final)
