@@ -24,6 +24,10 @@ PATTERN_INFO = {
     "pullback_ma20": ("20-day MA pullback", "Rising 20-day MA, low touches it (+1% / −2%), up candle closing above it"),
     "granville_buy1": ("Granville buy rule 1", "200-day MA slope turns up and close crosses above it on the same day"),
     "engulfing": ("Bullish engulfing", "Up-candle body engulfs the prior down-candle body after a 3-day decline"),
+    "macd_cross": ("MACD golden cross", "MACD(12, 26) crosses above its 9-day signal line"),
+    "high_52w": ("52-week high breakout", "Close rises above the prior 250-day high for the first time"),
+    "disparity_rebound": ("Disparity rebound", "Close / 20-day MA × 100 recovers from below 90 to 90 or above"),
+    "stochastic_rebound": ("Stochastic oversold rebound", "%K(14) crosses above %D(3) after %K was below 20"),
 }
 
 

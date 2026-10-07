@@ -34,7 +34,7 @@ from regime_lab.analysis.validation import validate
 from regime_lab.backtest import METRIC_DEFS, ExitRule, build_trades, equity_curve, simulate_trades, summarize
 from regime_lab.config import Paths, config_hash
 from regime_lab.context import NULL_CONTEXT, RunContext
-from regime_lab.data.loader import input_file_hashes
+from regime_lab.data.loader import input_file_hashes, warmup_file_hashes
 from regime_lab.patterns import CORE_PATTERNS, compute_signals
 from regime_lab.pipeline import Prepared, prep_hash
 from regime_lab.universe import exclusion_summary
@@ -46,7 +46,8 @@ ENGINE_VERSION = "0.2.0"
 
 STRATEGY_KEYS = {"name", "patterns", "combine", "exit", "markets", "period", "min_avg_value_krw", "cap_groups",
                  "pattern_params"}
-EXIT_KEYS = {"stop_loss_pct", "take_profit_pct", "max_hold_days", "trailing_stop_pct"}
+EXIT_KEYS = {"stop_loss_pct", "take_profit_pct", "max_hold_days", "trailing_stop_pct", "breakeven_trigger_pct",
+             "ma_exit_window"}
 CAP_GROUPS = ["large", "mid", "small"]
 NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -121,10 +122,13 @@ class Strategy:
             else:
                 for k in set(self.exit) - EXIT_KEYS:
                     errors[f"exit.{k}"] = "Key not allowed"
-                for k in ("stop_loss_pct", "take_profit_pct", "trailing_stop_pct"):
+                for k in ("stop_loss_pct", "take_profit_pct", "trailing_stop_pct", "breakeven_trigger_pct"):
                     v = self.exit.get(k)
                     if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))):
                         errors[f"exit.{k}"] = "A percent number (e.g. -8) or null"
+                mw = self.exit.get("ma_exit_window")
+                if mw is not None and (isinstance(mw, bool) or not isinstance(mw, int)):
+                    errors["exit.ma_exit_window"] = "Whole number of trading days or null"
                 mh = self.exit.get("max_hold_days", cfg["exit"]["max_hold_days"])
                 if isinstance(mh, bool) or not isinstance(mh, int):
                     errors["exit.max_hold_days"] = "Whole number of trading days"
@@ -205,6 +209,9 @@ class Strategy:
                 elif not param_value_ok(v, cfg["patterns"][pat][k], lim):
                     kind = "A whole number" if is_int_param(cfg["patterns"][pat][k]) else "A number"
                     errors[f"pattern_params.{pat}.{k}"] = f"{kind} from {lim[0]} to {lim[1]}"
+            if not any(e.startswith(f"pattern_params.{pat}") for e in errors):  # 수치끼리의 관계 (예: fast < slow)
+                for k, msg in CORE_PATTERNS[pat].param_errors({**cfg["patterns"][pat], **vals}).items():
+                    errors[f"pattern_params.{pat}.{k}"] = msg
         return errors
 
     def exit_cfg(self, cfg: dict) -> dict:
@@ -339,7 +346,7 @@ def run_and_save(strategies, prep: Prepared, cfg: dict, paths: Paths, tickers: l
     t0 = time.time()
     started = datetime.now().isoformat(timespec="seconds")
     lst = _as_list(strategies)
-    inputs = input_file_hashes(paths.store)
+    inputs = {**input_file_hashes(paths.store), **warmup_file_hashes(paths.cache)}
     data_ver = config_hash(inputs)[:8]
     run_id = run_id or make_run_id(lst, cfg, data_ver)
     out = paths.runs / run_id

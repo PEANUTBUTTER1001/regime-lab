@@ -41,6 +41,7 @@ def options(request: Request):
             "pattern_axes": s.get("pattern_axes", {}),
             "max_candidates": s["max_candidates"], "sec_per_candidate": s["sec_per_candidate"],
             "min_trades": {"default": s["min_trades_default"], "min": lo, "max": hi},
+            "target_win_rate_default": s["target_win_rate_default"],
             "split_date": cfg["analysis"]["split_date"], "fdr_q": cfg["analysis"]["fdr_q"],
             "statuses": list(STATUSES), "disclaimer": DISCLAIMER}
 

@@ -29,3 +29,13 @@ def test_static_keys_used_by_views_exist():
         if bad := sorted(k for k in used if k not in keys):
             missing[f.name] = bad
     assert not missing, f"사전에 없는 키: {missing}"
+
+
+def test_every_adjustable_pattern_value_has_a_label():
+    """조정 가능한 패턴 수치(pattern_limits)마다 화면 이름(pp.<패턴>.<수치>)이 한국어·영어로 있어야 한다."""
+    from regime_lab.config import load_config
+
+    keys = set(_keys())
+    cfg = load_config()
+    missing = [f"pp.{p}.{k}" for p, v in cfg["pattern_limits"].items() for k in v if f"pp.{p}.{k}" not in keys]
+    assert not missing, f"화면 이름 없는 수치: {missing}"
