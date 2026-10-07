@@ -10,7 +10,6 @@ from synth import make_frame, make_market
 
 from regime_lab.indicators import compute_indicators
 from regime_lab.patterns import make_pattern
-from regime_lab.patterns.base import Pattern
 from regime_lab.runs import Strategy
 
 MORE = ["macd_cross", "high_52w", "disparity_rebound", "stochastic_rebound"]
@@ -164,7 +163,6 @@ def test_param_limits(cfg):
                             "pattern_params": {"high_52w": {"lookback": 300}}}).validate(cfg)
 
 
-@pytest.mark.skipif(not hasattr(Pattern, "param_errors"), reason="수치 관계 검사는 PR #18 (Pattern.param_errors) 병합 후")
 def test_macd_fast_shorter_than_slow(cfg):
     with pytest.raises(ValueError):
         Strategy.from_dict({"name": "x", "patterns": ["macd_cross"],
