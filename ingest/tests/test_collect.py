@@ -183,8 +183,35 @@ def test_crash_after_commit_before_rename_is_published_on_open(tmp_path, cfg, mo
     monkeypatch.setattr(store, "publish", lambda paths: None)  # commit 뒤 이름 바꾸기 전에 죽음
     _run(store, FakeDart(items), cfg, date(2021, 1, 1), date(2021, 1, 5))
     assert list((tmp_path / "docs").rglob("*.tmp")) and not list((tmp_path / "docs").rglob("*.parquet"))
-    assert len(Store(tmp_path).read_docs("opendart")) == len(items)  # 다시 열면 확정
-    assert not list((tmp_path / "docs").rglob("*.tmp"))
+    assert len(Store(tmp_path).read_docs("opendart")) == len(items)  # 읽기는 commit 된 tmp 도 본다 (파일은 안 바꿈)
+    assert list((tmp_path / "docs").rglob("*.tmp"))
+    st = _run(Store(tmp_path), FakeDart(items), cfg, date(2021, 1, 1), date(2021, 1, 5), run_id="r2")
+    assert st.skipped_windows == 1  # 잠금을 잡은 다음 실행이 확정
+    assert not list((tmp_path / "docs").rglob("*.tmp")) and len(Store(tmp_path).read_docs("opendart")) == len(items)
+
+
+def test_reader_does_not_delete_active_staging(tmp_path):
+    """hchee99-codex 리뷰: 저장 중(미커밋 tmp)에 다른 프로세스가 Store 를 열거나 읽어도 tmp 를 지우지 않는다."""
+    from regime_ingest.normalize import normalize
+
+    item = make_items(date(2021, 1, 1), date(2021, 1, 1), per_day=1)[0]
+    doc = normalize(item, first_seen_at=datetime(2026, 10, 7, tzinfo=KST), backfilled=True, ingest_run_id="w",
+                    viewer_url="u", license_scope="metadata_only")
+    writer = Store(tmp_path)
+    writer.lock("opendart")
+    paths = writer.stage_docs("opendart", "w", [doc])
+    tmp = paths[0].with_suffix(".parquet.tmp")
+    assert tmp.exists()
+    reader = Store(tmp_path)  # status·두 번째 실행이 여는 것과 같음
+    assert reader.read_docs("opendart") == []  # 미커밋은 보이지 않음
+    assert tmp.exists()  # 지워지지 않음
+    with pytest.raises(Exception):
+        reader.lock("opendart")  # 잠금이 없으면 정리도 못 함
+    assert tmp.exists()
+    writer.mark_seen([doc])
+    writer.commit()
+    writer.publish(paths)
+    assert len(Store(tmp_path).read_docs("opendart")) == 1
 
 
 def test_transient_errors_retry_then_permanent_error_fails(tmp_path, cfg):

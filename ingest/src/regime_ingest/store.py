@@ -8,8 +8,10 @@
 
 문서 파일과 SQLite 상태를 함께 확정하는 순서 (중간에 죽어도 중복·부분 파일이 남지 않게):
   1) docs 를 `*.parquet.tmp` 로 쓴다  2) seen_keys 등과 함께 doc_files 에 최종 이름을 넣고 commit
-  3) tmp → 최종 이름으로 바꾼다. 다음에 Store 를 열 때 recover() 가 남은 tmp 를 정리한다:
-     doc_files 에 있으면(commit 됨) 이름을 바꾸고, 없으면(commit 전 실패) 지운다. 읽기는 *.parquet 만 본다.
+  3) tmp → 최종 이름으로 바꾼다. 남은 tmp 정리(recover)는 **같은 출처의 배타 잠금을 잡은 뒤에만** 한다
+     (lock() 안에서): doc_files 에 있으면(commit 됨) 이름을 바꾸고, 없으면(commit 전 실패) 지운다.
+     읽기(read_docs·status)는 파일을 바꾸지 않는다 — *.parquet 와, commit 됐지만 아직 이름을 못 바꾼 tmp 만 읽는다.
+     그래서 다른 프로세스가 저장하는 중에 읽어도 그쪽 tmp 를 지우지 않는다 (hchee99-codex 리뷰).
 """
 
 from __future__ import annotations
@@ -67,7 +69,6 @@ class Store:
         self.root.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.root / "state.sqlite")
         self.db.executescript(SCHEMA)
-        self.recover()
 
     def close(self):
         self.db.close()
@@ -83,6 +84,7 @@ class Store:
             raise SourceLocked(f"{source} 수집이 이미 실행 중 (잠금 파일 {p})") from None
         os.write(fd, str(os.getpid()).encode())
         os.close(fd)
+        self.recover()  # 잠금을 잡은 쪽만 남은 staging 을 정리한다
         return p
 
     @staticmethod
@@ -138,8 +140,14 @@ class Store:
         return p.with_suffix(p.suffix + ".tmp")
 
     def read_docs(self, source: str) -> list[dict]:
+        """읽기 전용: 최종 파일 + commit 됐지만 이름을 아직 못 바꾼 tmp. 진행 중(미커밋) tmp 는 보지 않는다."""
         base = self.root / "docs" / f"source={source}"
-        files = sorted(base.rglob("*.parquet")) if base.exists() else []
+        if not base.exists():
+            return []
+        committed = {r[0] for r in self.db.execute("SELECT path FROM doc_files")}
+        files = sorted(base.rglob("*.parquet"))
+        files += sorted(t for t in base.rglob("*.parquet.tmp")
+                        if str(t.with_suffix("").relative_to(self.root)) in committed and not t.with_suffix("").exists())
         return [r for f in files for r in pq.read_table(f, schema=DOC_SCHEMA).to_pylist()]
 
     # ---------------------------------------------------------------- 상태
