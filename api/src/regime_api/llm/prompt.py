@@ -80,11 +80,21 @@ def _r(x, nd):
     return None if x is None else round(float(x), nd)
 
 
+# 시장 국면 산출 시작일은 설정·과거 지수 파일(X5)에 따라 달라지므로 날짜를 고정하지 않고 실행의 '국면 없음' 셀로 설명한다
 LIMITATIONS = [
-    "시장 국면은 지수 이력 한계로 2021-07-21 이후 진입 거래만 산출된다.",
     "KOSPI 종목은 소속부 데이터가 없어 관리종목 제외가 KOSDAQ에만 적용된다.",
     "과거 데이터 분석 결과이며 미래 성과를 보장하지 않는다.",
 ]
+
+
+def _regime_limitation(cells: list[dict]) -> str:
+    if not cells:
+        return "집계 거래가 없어 시장 국면별 성과를 산출하지 않았다."
+    n = sum(c.get("trades") or 0 for c in cells if c.get("regime") == "unavailable")
+    if not n:
+        return "이 실행의 집계 거래는 모두 진입 당시 시장 국면이 산출되었다."
+    return (f"진입 당시 시장 국면을 산출하지 못한 거래 {n:,}건(지수 이력 부족 또는 국면 산출 시작일 이전)은 "
+            "'국면 없음' 셀로 분리했다.")
 
 
 def build_facts(result: dict, strategy: str) -> dict:
@@ -155,7 +165,7 @@ def build_facts(result: dict, strategy: str) -> dict:
                             "trades": c["trades"], "mean_excess_pct": _pct(c.get("mean_excess"))}
                            for c in ok_cells],
         },
-        "limitations": LIMITATIONS,
+        "limitations": [_regime_limitation(cells)] + LIMITATIONS,
     }
 
 

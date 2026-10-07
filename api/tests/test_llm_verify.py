@@ -277,6 +277,7 @@ def test_zero_trades_are_not_explained_as_zero_returns(done):
     assert "산출 불가%" not in text and "산출 불가배" not in text
     assert "거래 기간은 산출 불가" in text and "None" not in text
     assert "분석 대상 여부를 산출하지 않았습니다" in text
+    assert "집계 거래가 없어 시장 국면별 성과를 산출하지 않았다" in text and "모두 진입 당시" not in text
     assert verify(text, facts).ok
 
 
@@ -333,3 +334,20 @@ def test_template_explains_enabled_exits_only(done):
     del r["strategies"][0]["strategy_input"]["exit"]  # 청산이 저장되지 않은 구 결과
     old = build_facts(r, "bo")
     assert old["strategy"]["exits_ko"] == [] and "청산 조건" not in render(old)
+
+
+@pytest.mark.parametrize("unavailable", [1234, 0])
+def test_regime_limitation_uses_run_cells_not_fixed_date(done, unavailable):
+    """X5 이후 국면 시작일은 설정·과거 지수 파일에 따라 달라진다 → 고정 날짜 대신 실행의 '국면 없음' 거래 수로 쓴다."""
+    _, _, result, _ = done
+    r = copy.deepcopy(result)
+    if unavailable:
+        r["strategies"][0]["cells_market"].append({"regime": "unavailable", "market": "KOSDAQ", "cap_group": "mid",
+                                                   "trades": unavailable, "mean_excess": .001, "sample_insufficient": False})
+    facts = build_facts(r, "bo")
+    first = facts["limitations"][0]
+    assert "2021-07-21" not in " ".join(facts["limitations"])
+    assert ("거래 1,234건" in first and "'국면 없음' 셀로 분리" in first) if unavailable else ("모두 진입 당시 시장 국면이 산출" in first)
+    text = render(facts)
+    assert first in text and verify(text, facts).ok
+    assert len(re.findall(r"[.!?](?:\s|$)", text)) <= 14
