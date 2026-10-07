@@ -34,7 +34,7 @@ from regime_lab.analysis.validation import validate
 from regime_lab.backtest import METRIC_DEFS, ExitRule, build_trades, equity_curve, simulate_trades, summarize
 from regime_lab.config import Paths, config_hash
 from regime_lab.context import NULL_CONTEXT, RunContext
-from regime_lab.data.loader import input_file_hashes
+from regime_lab.data.loader import input_file_hashes, warmup_file_hashes
 from regime_lab.patterns import CORE_PATTERNS, compute_signals
 from regime_lab.pipeline import Prepared, prep_hash
 from regime_lab.universe import exclusion_summary
@@ -339,7 +339,7 @@ def run_and_save(strategies, prep: Prepared, cfg: dict, paths: Paths, tickers: l
     t0 = time.time()
     started = datetime.now().isoformat(timespec="seconds")
     lst = _as_list(strategies)
-    inputs = input_file_hashes(paths.store)
+    inputs = {**input_file_hashes(paths.store), **warmup_file_hashes(paths.cache)}
     data_ver = config_hash(inputs)[:8]
     run_id = run_id or make_run_id(lst, cfg, data_ver)
     out = paths.runs / run_id
