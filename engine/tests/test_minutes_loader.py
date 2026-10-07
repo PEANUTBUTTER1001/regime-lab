@@ -1,6 +1,7 @@
 """P2-4.1 1분봉 사본 로더 — 월 파일 선택, 기간·종목 필터, 정렬, 지문."""
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,8 @@ import pytest
 from regime_lab.data.minutes import check_manifest, load_manifest, load_minutes, minutes_fingerprint, month_files
 
 EXPORT = Path(__file__).resolve().parents[1] / "scripts" / "export_minutes.py"
+# 한국어 Windows 기본 콘솔 인코딩(CP949)과 무관하게 자식 프로세스 stderr를 UTF-8로 받는다
+UTF8_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
 
 
 def _write(d, ym, rows, manifest=True):
@@ -97,7 +100,7 @@ def test_export_refuses_folder_with_previous_results(mdir):
     """내보내기는 이전 결과가 있는 폴더에 쓰지 않는다 (잔여 월 파일과 섞임 방지)."""
     tsv = b"005930\t2025-09-01 09:00:00\t1\t1\t1\t1\t1\t1\n"
     before = sorted(p.name for p in mdir.iterdir())
-    r = subprocess.run([sys.executable, str(EXPORT), str(mdir)], input=tsv, capture_output=True)
+    r = subprocess.run([sys.executable, str(EXPORT), str(mdir)], input=tsv, capture_output=True, env=UTF8_ENV)
     assert r.returncode == 1 and "이전 결과" in r.stderr.decode("utf-8", "replace")
     assert sorted(p.name for p in mdir.iterdir()) == before
 
@@ -106,7 +109,7 @@ def test_export_then_load_round_trip(tmp_path):
     tsv = ("005930\t2025-09-01 09:00:00\t100\t101\t99\t100\t10\t1000\r\n"
            "0161M0\t2025-10-01 09:00:00\t50\t51\t49\t50\t3\t150\r\n").encode()
     out = tmp_path / "minutes"
-    r = subprocess.run([sys.executable, str(EXPORT), str(out)], input=tsv, capture_output=True)
+    r = subprocess.run([sys.executable, str(EXPORT), str(out)], input=tsv, capture_output=True, env=UTF8_ENV)
     assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
     assert check_manifest(out)["total_rows"] == 2
     assert load_minutes(out)["code"].tolist() == ["005930", "0161M0"]
