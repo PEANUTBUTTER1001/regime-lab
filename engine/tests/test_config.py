@@ -7,7 +7,7 @@ def test_default_config_has_decided_values():
     assert cfg["data"]["backtest_start"] == "2020-09-01"
     assert cfg["universe"]["min_avg_value_krw"] == 500_000_000
     assert cfg["groups"]["marketcap_split"] == [0.30, 0.40, 0.30]
-    assert cfg["regime"]["market_regime_start"] == "2021-07-21"
+    assert cfg["regime"]["market_regime_start"] == "2020-09-01"  # X5 (A2-1 의 2021-07-21 을 앞당김)
     assert cfg["exit"] == {
         "stop_loss_pct": -8, "take_profit_pct": 20, "max_hold_days": 20, "trailing_stop_pct": None,
     }
