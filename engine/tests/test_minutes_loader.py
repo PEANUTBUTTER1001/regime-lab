@@ -71,6 +71,18 @@ def test_columns_empty_and_validation(mdir):
         load_minutes(mdir, start="2025-09-02", end="2025-09-01")
 
 
+def test_empty_result_keeps_dtypes(mdir):
+    """해당 월 파일이 없는 빈 결과도 파일이 있을 때와 열 형식이 같다 (seongmin-claude 리뷰)."""
+    full = load_minutes(mdir)
+    no_month = load_minutes(mdir, start="2026-01-01", end="2026-01-31")
+    no_rows = load_minutes(mdir, codes=["123456"])  # 월 파일은 있으나 조건에 맞는 행이 없음
+    assert no_month.empty and no_rows.empty
+    assert no_month.dtypes.equals(full.dtypes)
+    assert no_rows.dtypes.equals(full.dtypes)
+    part = load_minutes(mdir, start="2026-01-01", columns=["close_p"])
+    assert part.dtypes.equals(full[["code", "dt", "close_p"]].dtypes)
+
+
 def test_fingerprint_changes_with_files(mdir):
     a = minutes_fingerprint(mdir)
     _write(mdir, 202510, [("005930", "2025-10-01 09:00:00", 1, 1, 1, 1, 1, 1)])

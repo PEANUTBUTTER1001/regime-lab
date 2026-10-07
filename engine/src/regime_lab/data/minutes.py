@@ -100,7 +100,12 @@ def load_minutes(minutes_dir: Path, codes: Sequence[str] | None = None, start: s
     keep = [f for ym, f in files.items()
             if (lo is None or ym >= lo.year * 100 + lo.month) and (hi is None or ym <= hi.year * 100 + hi.month)]
     if not keep:
-        return pd.DataFrame({c: pd.Series(dtype="object" if c == "code" else "float64") for c in cols})
+        if not files:
+            return pd.DataFrame({c: pd.Series(dtype="object" if c == "code" else "float64") for c in cols})
+        # 해당 월 파일이 없어도 열 형식은 파일이 있을 때와 같게 (사본의 Parquet 스키마로 빈 표를 만든다)
+        df = pq.read_schema(next(iter(files.values()))).empty_table().select(cols).to_pandas()
+        df["code"] = df["code"].astype(str)
+        return df
 
     dataset = ds.dataset([str(f) for f in keep], format="parquet")
     cond = None
