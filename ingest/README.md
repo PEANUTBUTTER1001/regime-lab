@@ -69,7 +69,7 @@ Register-ScheduledTask -TaskName "regime-ingest-opendart" -Action $act -Trigger 
 | `observed` (기본) | `first_seen_at ≤ t` 이고 `available_at ≤ t` | 수집기가 실제로 가지고 있던 것 — 브리핑·분봉 |
 | `historical_assumed` | `available_at ≤ t` | 소급 정책을 받아들인 일봉 연구. 당시 보유 증거가 아니므로 결과를 따로 보고 |
 
-엔진·API 는 이 패키지를 import 하지 않으므로 같은 규칙을 Parquet 위에서 다시 구현하거나(P3-8) 공용 위치를 G2 에서 정한다.
+엔진·API 는 이 패키지를 import 하지 않으므로 문서-봉 결합(P4-2, hchee99)이 같은 규칙을 Parquet 위에서 쓰거나 공용 위치를 G2 에서 정한다. 봉 경계·확정 시각·거래일 달력은 P2-4 `bars.py`(Seonghwanaa)가 제공한다.
 
 ## 시각 규칙 (plan §4)
 
