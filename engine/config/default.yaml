@@ -49,6 +49,11 @@ patterns:
   pullback_ma20: {touch_tolerance_pct: 1.0, max_penetration_pct: 2.0}
   granville_buy1: {slope_days: 5}
   engulfing: {min_body_ratio: 1.0, trend_days: 3}
+  # 추가 4종 (2026-10-07 hongsungmin0315 요청, SRS FR-P1 범위 확장 승인 필요). 패턴 안에서 계산 → 준비 프레임 열 추가 없음
+  macd_cross: {fast: 12, slow: 26, signal: 9}
+  high_52w: {lookback: 250}
+  disparity_rebound: {window: 20, threshold: 90.0}
+  stochastic_rebound: {k_window: 14, d_window: 3, oversold: 20.0}
 
 pattern_limits:                     # P1-4 조합별로 바꿀 수 있는 패턴 수치와 허용 범위 [최소, 최대]. 기본값은 위 patterns 절.
   breakout_vol: {volume_mult: [1.0, 5.0]}   # 준비 프레임(지표 열)에 들어가지 않는 수치만 연다 → PREP_VERSION 영향 없음
@@ -58,6 +63,10 @@ pattern_limits:                     # P1-4 조합별로 바꿀 수 있는 패턴
   pullback_ma20: {touch_tolerance_pct: [0, 5], max_penetration_pct: [0, 5]}
   granville_buy1: {slope_days: [1, 20]}
   engulfing: {min_body_ratio: [1, 3], trend_days: [1, 20]}
+  macd_cross: {fast: [2, 50], slow: [5, 100], signal: [2, 30]}            # fast < slow
+  high_52w: {lookback: [60, 250]}                                         # 워밍업 250거래일 안
+  disparity_rebound: {window: [5, 120], threshold: [70, 98]}
+  stochastic_rebound: {k_window: [5, 50], d_window: [2, 10], oversold: [5, 40]}
 
 exit:                               # A8 기본값
   stop_loss_pct: -8
@@ -106,6 +115,10 @@ search:                             # D-1 역방향 탐색 (docs/역방향_백�
     pullback_ma20: {touch_tolerance_pct: [0.5, 1.0, 2.0], max_penetration_pct: [1.0, 2.0, 3.0]}
     granville_buy1: {slope_days: [3, 5, 10]}
     engulfing: {min_body_ratio: [1.0, 1.5, 2.0], trend_days: [3, 5, 10]}
+    macd_cross: {fast: [8, 12], slow: [26, 52], signal: [9]}
+    high_52w: {lookback: [120, 250]}
+    disparity_rebound: {window: [20, 60], threshold: [85.0, 90.0, 95.0]}
+    stochastic_rebound: {k_window: [9, 14], d_window: [3], oversold: [20.0, 30.0]}
   defaults:                         # 요청에서 축을 생략했을 때
     patterns: [ma_cross_5_20, breakout_20d, breakout_vol, rsi_rebound, bb_lower_recover]  # 핵심 5종 (10종 전체는 후보 상한 초과)
     combine: [and, or]
