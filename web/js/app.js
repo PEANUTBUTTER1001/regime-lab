@@ -114,4 +114,8 @@ async function loadMeta() {
 
 window.addEventListener('hashchange', route);
 window.addEventListener('rl:lang', route); // 언어 변경 시 현재 화면을 새 언어로 다시 그린다
+// 작은 화면·언어 변경으로 고지가 여러 줄이 되어도 실행 버튼과 마지막 콘텐츠를 가리지 않는다.
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty('--disclaimer-height', `${entry.target.getBoundingClientRect().height}px`);
+}).observe(document.getElementById('disclaimer'));
 loadMeta().then(route);

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from regime_api.llm.prompt import PARAM_KO
+
 JUDGEMENT_KO = {
     "maintained": "전반·후반 모두 평균 초과수익이 양수이고 순위가 유지되었습니다",
     "weakened": "전반·후반 모두 평균 초과수익이 양수이지만 순위가 낮아졌습니다",
@@ -15,14 +17,14 @@ JUDGEMENT_KO = {
 }
 
 
-def _n(v) -> str:
+def _n(v, unit: str = "") -> str:
     if v is None:
         return "산출 불가"
     if isinstance(v, bool):
         return "예" if v else "아니오"
     if isinstance(v, int):
-        return f"{v:,}"
-    return str(v)
+        return f"{v:,}{unit}"
+    return f"{v}{unit}"
 
 
 def _regime_sentence(c: dict) -> str:
@@ -30,31 +32,47 @@ def _regime_sentence(c: dict) -> str:
     cells = c.get("sufficient") or []
     if not cells:
         return f"거래 {_n(c['min_cell_trades'])}건 이상인 국면 × 시장 × 시총 셀이 없어 국면별 성과는 해설하지 않습니다."
-    parts = ", ".join(f"{x['regime_ko']}·{x['market_ko']}·{x['cap_group_ko']} {_n(x['mean_excess_pct'])}%" for x in cells)
+    parts = ", ".join(f"{x['regime_ko']}·{x['market_ko']}·{x['cap_group_ko']} {_n(x['mean_excess_pct'], '%')}" for x in cells)
     return (f"거래 {_n(c['min_cell_trades'])}건 이상인 셀 {_n(c['sufficient_cells'])}개 중 평균 초과수익이 양수인 셀은 "
             f"{_n(c['sufficient_positive_cells'])}개, 음수인 셀은 {_n(c['sufficient_negative_cells'])}개입니다 ({parts}).")
 
 
 def render(facts: dict) -> str:
     m, v, c = facts["metrics"], facts["validation"], facts["cells"]
-    target = "분석 대상으로 분류되었습니다" if v["analysis_target"] else "분석 대상으로 분류되지 않았습니다"
+    target = ("분석 대상 여부를 산출하지 않았습니다" if v["analysis_target"] is None else
+              "분석 대상으로 분류되었습니다" if v["analysis_target"] else "분석 대상으로 분류되지 않았습니다")
+    st = facts["strategy"]
+    params = [f"{pname} · {PARAM_KO.get(p, {}).get(k, k)} {_n(value)}"
+              for p, pname in zip(st.get("patterns") or [], st.get("patterns_ko") or [])
+              for k, value in st.get("pattern_params", {}).get(p, {}).items()]
+    conditions = ""
+    if st.get("patterns_ko"):
+        conditions = "선택한 패턴은 " + ", ".join(st["patterns_ko"])
+        conditions += ("이며, 실행에 저장된 조정 수치는 " + ", ".join(params) + "입니다. "
+                       if params else "입니다. ")
+    split = f"기간 분할 기준일은 {v['split_date']}입니다. " if v.get("split_date") else "기간 분할 기준일은 저장된 근거에서 확인할 수 없습니다. "
+    judgement = JUDGEMENT_KO.get(v["split_judgement"], v["split_judgement"]) or "산출 불가입니다"
+    period = (f"{m['period_start']}부터 {m['period_end']}까지 " if m['period_start'] and m['period_end']
+              else "거래 기간은 산출 불가이며, ")
     lines = [
         "## 요약",
-        f"{m['period_start']}부터 {m['period_end']}까지 집계 거래 {_n(m['trades'])}건의 비용 차감 후 평균 수익률은 "
-        f"{_n(m['mean_ret_pct'])}%, 중앙값은 {_n(m['median_ret_pct'])}%, 승률은 {_n(m['win_rate_pct'])}%입니다. "
-        f"같은 기간 소속 시장 지수 대비 평균 초과수익은 {_n(m['mean_excess_pct'])}%이고, 손익비는 {_n(m['payoff_ratio'])}배, "
-        f"동일가중 자산곡선의 최대낙폭은 {_n(m['mdd_pct'])}%입니다. " + _regime_sentence(c),
+        conditions + period + f"집계 거래 {_n(m['trades'])}건의 비용 차감 후 평균 수익률은 "
+        f"{_n(m['mean_ret_pct'], '%')}, 중앙값은 {_n(m['median_ret_pct'], '%')}, 승률은 {_n(m['win_rate_pct'], '%')}입니다. "
+        f"같은 기간 소속 시장 지수 대비 평균 초과수익은 {_n(m['mean_excess_pct'], '%')}이고, 손익비는 {_n(m['payoff_ratio'], '배')}, "
+        f"동일가중 자산곡선의 최대낙폭은 {_n(m['mdd_pct'], '%')}이며, "
+        f"거래별 샤프는 {_n(m['sharpe_per_trade'])}(단위 없는 비율)입니다. " + _regime_sentence(c),
         "",
         "## 검증 결과",
-        f"이 실행의 FDR 가족 크기는 {_n(v['fdr_family_size'])}이며, 단측 t-검정 p-value는 {_n(v['p_value'])}로 "
-        f"FDR 통과 여부는 '{_n(v['fdr_pass'])}'입니다. 기간 분할은 {JUDGEMENT_KO.get(v['split_judgement'], v['split_judgement'])} "
-        f"(전반 {_n(v['first_half_trades'])}건 {_n(v['first_half_mean_excess_pct'])}%, "
-        f"후반 {_n(v['second_half_trades'])}건 {_n(v['second_half_mean_excess_pct'])}%). "
+        split + f"이 실행의 FDR 가족 크기는 {_n(v['fdr_family_size'])}이며, 단측 t-검정 p-value는 {_n(v['p_value'])}로 "
+        f"FDR 통과 여부는 '{_n(v['fdr_pass'])}'입니다. 기간 분할은 {judgement} "
+        f"(전반 {_n(v['first_half_trades'])}건 {_n(v['first_half_mean_excess_pct'], '%')}, "
+        f"후반 {_n(v['second_half_trades'])}건 {_n(v['second_half_mean_excess_pct'], '%')}). "
         f"무작위 벤치마크 대비 백분위는 {_n(v['random_percentile'])}입니다. 세 검증 결과에 따라 이 전략은 {target}.",
         "",
         "## 한계",
         f"국면 × 시장 × 시총 셀 {_n(c['total_cells'])}개 중 {_n(c['insufficient_cells'])}개는 거래 {_n(c['min_cell_trades'])}건 "
-        f"미만이라 결론에 쓰지 않습니다. 기준일 보유 중인 거래 {_n(m['excluded_trades'])}건은 집계에서 제외했습니다. "
+        f"미만이라 결론에 쓰지 않습니다. 기준일 보유 중인 거래 {_n(m['excluded_trades'])}건은 집계에서 제외했으며, "
+        f"체결 제약으로 진입하지 못한 신호 {_n(m['skipped_entries'])}건과 구분합니다. "
         + " ".join(facts["limitations"]),
     ]
     return "\n".join(lines)

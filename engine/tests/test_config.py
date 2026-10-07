@@ -26,6 +26,19 @@ def test_override_and_hash():
     assert config_hash(base) == config_hash(load_config())
 
 
-def test_paths_resolve():
+def test_paths_resolve(tmp_path, monkeypatch):
+    """팀원 로컬 경로와 무관하게 상대·절대 경로 및 local 우선순위를 검증한다."""
+    from regime_lab import config
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setattr(config, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    example = "store: store\nsql_dump: dump.sql\ncache: cache\nruns: runs\n"
+    (config_dir / "paths.example.yaml").write_text(example, encoding="utf-8")
     p = load_paths()
-    assert p.store.name == "store"
+    assert p.store == tmp_path / "store"
+    assert p.sql_dump == tmp_path / "dump.sql"
+    absolute = (tmp_path / "local-data").as_posix()
+    (config_dir / "paths.local.yaml").write_text(example.replace("store: store", f"store: {absolute}"), encoding="utf-8")
+    assert load_paths().store == tmp_path / "local-data"
