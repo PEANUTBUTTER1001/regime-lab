@@ -58,7 +58,7 @@ def test_openapi_lists_new_paths(client):
 
 def test_options(client):
     o = client.get("/api/searches/options").json()
-    assert len(o["patterns"]) == 10 and o["max_candidates"] == 200  # 핵심 5종 + 후순위 5종(X6)
+    assert len(o["patterns"]) == 14 and o["max_candidates"] == 200  # 핵심 5종 + 후순위 5종(X6) + 추가 4종
     assert o["defaults"]["patterns"] == ["ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover"]
     assert o["min_trades"] == {"default": 300, "min": 30, "max": 5000}
     assert 0 <= o["target_win_rate_default"] <= 1

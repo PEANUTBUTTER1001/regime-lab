@@ -668,6 +668,24 @@ const D = {
   'pp.granville_buy1.slope_days': ['기울기 비교 일수', 'Slope days'],
   'pp.engulfing.min_body_ratio': ['몸통 최소 배수', 'Min body ratio'],
   'pp.engulfing.trend_days': ['직전 하락 비교 일수', 'Prior-decline days'],
+  // 추가 패턴 4종
+  'pat.macd_cross': ['MACD 골든크로스', 'MACD golden cross'],
+  'pat.high_52w': ['52주 신고가 돌파', '52-week high breakout'],
+  'pat.disparity_rebound': ['이격도 과매도 반등', 'Disparity rebound'],
+  'pat.stochastic_rebound': ['스토캐스틱 과매도 반등', 'Stochastic oversold rebound'],
+  'rule.macd_cross': ['MACD(12·26)가 9일 시그널선을 위로 교차', 'MACD(12, 26) crosses above its 9-day signal line'],
+  'rule.high_52w': ['종가가 직전 250거래일 최고가를 처음 넘음', 'Close rises above the prior 250-day high for the first time'],
+  'rule.disparity_rebound': ['종가÷20일선×100 이 90 미만에서 90 이상으로 회복', 'Close / 20-day MA × 100 recovers from below 90 to 90 or above'],
+  'rule.stochastic_rebound': ['%K(14)가 20 미만에서 %D(3)를 위로 교차', '%K(14) crosses above %D(3) after being below 20'],
+  'pp.macd_cross.fast': ['MACD 단기 EMA(일)', 'MACD fast EMA (days)'],
+  'pp.macd_cross.slow': ['MACD 장기 EMA(일)', 'MACD slow EMA (days)'],
+  'pp.macd_cross.signal': ['시그널 EMA(일)', 'Signal EMA (days)'],
+  'pp.high_52w.lookback': ['신고가 비교 기간(일)', 'High lookback (days)'],
+  'pp.disparity_rebound.window': ['이동평균 기간(일)', 'MA window (days)'],
+  'pp.disparity_rebound.threshold': ['이격도 문턱', 'Disparity threshold'],
+  'pp.stochastic_rebound.k_window': ['%K 기간(일)', '%K window (days)'],
+  'pp.stochastic_rebound.d_window': ['%D 기간(일)', '%D window (days)'],
+  'pp.stochastic_rebound.oversold': ['과매도 문턱', 'Oversold threshold'],
 };
 
 export function t(key, vars = {}) {
