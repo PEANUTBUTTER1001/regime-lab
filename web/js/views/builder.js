@@ -168,7 +168,8 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
   renderPP();
   const patternChecks = meta.patterns.map((p) => {
     const box = h('input', { type: 'checkbox', checked: f.patterns.includes(p.name), 'aria-label': patLabel(p), 'aria-describedby': described('patterns') });
-    const lab = h('label', { class: `check${f.patterns.includes(p.name) ? ' selected' : ''}` }, box, h('span', {}, patLabel(p), h('small', {}, patRule(p))));
+    const rule = meta.pattern_params?.[p.name] ? t('pp.baseRule', { r: patRule(p) }) : patRule(p);
+    const lab = h('label', { class: `check${f.patterns.includes(p.name) ? ' selected' : ''}` }, box, h('span', {}, patLabel(p), h('small', {}, rule)));
     box.addEventListener('change', () => {
       f.patterns = meta.patterns.map((q) => q.name).filter((n) => (n === p.name ? box.checked : f.patterns.includes(n)));
       lab.classList.toggle('selected', box.checked); renderPP(); save();
@@ -346,6 +347,7 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     if (Object.keys(e).length) {
       toast(t('b.checkFields', { n: Object.keys(e).length }));
       el.querySelector('.field-error:not(.hidden)')?.scrollIntoView({ block: 'center' });
+      el.querySelector('[aria-invalid="true"]')?.focus({ preventScroll: true });
       return;
     }
     runBtn.disabled = true;

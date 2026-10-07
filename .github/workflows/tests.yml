@@ -1,0 +1,83 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.project }} / Python 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [engine, api, ingest]
+    env:
+      QUALITY_PROJECT: ${{ matrix.project }}
+      OPENAI_API_KEY: ""
+      GEMINI_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      DART_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Official action revision: https://github.com/astral-sh/setup-uv
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.11.29"
+          python-version: "3.12"
+          enable-cache: false
+      - name: Install locked dependencies
+        run: uv sync --frozen --project ${{ matrix.project }}
+      - name: Test without original data or live LLM
+        run: uv run --frozen --project ${{ matrix.project }} python -m pytest ${{ matrix.project }} -ra --junitxml=cache/ci/${{ matrix.project }}.xml
+      - name: Report counts and require core tests
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          project = os.environ['QUALITY_PROJECT']
+          report = Path('cache/ci') / f'{project}.xml'
+          summary = Path(os.environ['GITHUB_STEP_SUMMARY'])
+          if not report.exists():
+              with summary.open('a', encoding='utf-8') as out:
+                  out.write(f'## {project}\nTest report missing; tests did not complete.\n')
+              raise SystemExit(1)
+          cases = ET.parse(report).getroot().findall('.//testcase')
+          skipped = [c for c in cases if c.find('skipped') is not None]
+          failed = [c for c in cases if c.find('failure') is not None or c.find('error') is not None]
+          required = {
+              'engine': ('test_search', 'test_win_rate'),
+              'api': ('test_llm_verify', 'test_search_contract'),
+              'ingest': ('test_collect', 'test_contract'),
+          }[project]
+          missing = [name for name in required if not any(c.get('classname', '').endswith('.' + name) for c in cases)]
+          core_skipped = [c for c in skipped if any(c.get('classname', '').endswith('.' + name) for name in required)]
+          with summary.open('a', encoding='utf-8') as out:
+              out.write(f'## {project}\n\n| Passed | Failed/errors | Skipped |\n|---:|---:|---:|\n')
+              out.write(f'| {len(cases) - len(skipped) - len(failed)} | {len(failed)} | {len(skipped)} |\n\n')
+              out.write('Original data is absent; skipped data tests are not verified.\n')
+              for case in skipped:
+                  reason = case.find('skipped').get('message', '').replace('\n', ' ')
+                  out.write(f"- `{case.get('classname')}.{case.get('name')}`: {reason}\n")
+              if missing or core_skipped:
+                  out.write(f'\nCore tests missing: {missing}; core tests skipped: {len(core_skipped)}.\n')
+          if not cases or missing or core_skipped:
+              raise SystemExit(1)
+          PY
