@@ -293,10 +293,11 @@ def test_api_key_never_leaks(monkeypatch):
     assert mask(f"https://x/list.json?crtfc_key={key}&a=1", key) == "https://x/list.json?crtfc_key=***&a=1"
     import urllib.request
 
-    def boom(req, timeout):
-        raise OSError(f"HTTP Error 500 for url {req.full_url}")
+    class Boom:
+        def open(self, req, timeout):
+            raise OSError(f"connection reset for url {req.full_url}")
 
-    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *h: Boom())
     fetch = http_fetch("https://opendart.example/api/list.json", key, "ua", 1)
     with pytest.raises(OSError) as e:
         fetch({"page_no": 1})

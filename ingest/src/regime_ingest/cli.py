@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("backfill", help="과거 소급 (1개월 창, 끊기면 커서부터 이어 받음)")
     b.add_argument("--source", choices=["opendart"], default="opendart")
     b.add_argument("--from", dest="start", type=_date, required=True)
-    b.add_argument("--to", dest="end", type=_date, default=date.today())
+    b.add_argument("--to", dest="end", type=_date, default=None, help="기본: KST 오늘")
     b.add_argument("--refetch", action="store_true", help="이미 collected 인 창도 다시 받음 (정정 재확인)")
     r = sub.add_parser("run", help="순방향 수집 (오늘 공시, OS 스케줄러로 주기 실행)")
     r.add_argument("--source", choices=["opendart"], default="opendart")
@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     from regime_ingest import app
 
     if a.cmd == "backfill":
-        if a.start > a.end:
+        if a.end is not None and a.start > a.end:
             p.error("--from 이 --to 보다 늦음")
         st = app.backfill(a.start, a.end, a.refetch)
         out = {**st.record(""), "skipped_windows": st.skipped_windows}

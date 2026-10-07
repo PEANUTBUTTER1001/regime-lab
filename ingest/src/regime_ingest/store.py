@@ -27,16 +27,23 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from regime_ingest.dedup import Seen
+from regime_ingest.normalize import POLICY_VERSION, SCHEMA_VERSION
+from regime_ingest.ports import SourceLocked
+
+MANIFEST = {"schema_version": SCHEMA_VERSION, "policy_version": POLICY_VERSION}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ingest_runs (run_id TEXT PRIMARY KEY, source TEXT, mode TEXT, window_from TEXT,
   window_to TEXT, started_at TEXT, finished_at TEXT, requests INTEGER, received INTEGER, new INTEGER,
   duplicate INTEGER, changed INTEGER, errors INTEGER, status TEXT, message TEXT);
--- coverage.state: collected(소급으로 그 날 전체) · forward(순방향으로 일부) · partial(잘못된 행) · gap(실패)
-CREATE TABLE IF NOT EXISTS coverage (source TEXT, day TEXT, corp_cls TEXT, state TEXT, run_id TEXT,
+-- coverage.state: collected(소급으로 그 날 전체) · forward(순방향으로 일부, observed_at 까지) · partial(잘못된 행)
+--                 · gap(실패). coverage 는 현재 상태, coverage_log 는 덮어쓰지 않는 이력 (과거 스냅샷 재현용, 계약 §5)
+CREATE TABLE IF NOT EXISTS coverage (source TEXT, day TEXT, corp_cls TEXT, state TEXT, run_id TEXT, observed_at TEXT,
   PRIMARY KEY (source, day, corp_cls));
+CREATE TABLE IF NOT EXISTS coverage_log (source TEXT, day TEXT, corp_cls TEXT, state TEXT, run_id TEXT,
+  observed_at TEXT);
 CREATE TABLE IF NOT EXISTS cursors (source TEXT, mode TEXT, value TEXT, PRIMARY KEY (source, mode));
-CREATE TABLE IF NOT EXISTS seen_keys (doc_id TEXT PRIMARY KEY, version INTEGER, content_hash TEXT);
+CREATE TABLE IF NOT EXISTS seen_keys (doc_id TEXT PRIMARY KEY, version INTEGER, content_hash TEXT, available_at TEXT);
 CREATE TABLE IF NOT EXISTS report_history (corp_code TEXT, report_base TEXT, rcept_no TEXT, doc_id TEXT,
   PRIMARY KEY (corp_code, report_base, rcept_no));
 CREATE TABLE IF NOT EXISTS doc_files (path TEXT PRIMARY KEY, run_id TEXT);
@@ -59,16 +66,27 @@ DOC_SCHEMA = pa.schema([
 ])
 
 
-class SourceLocked(RuntimeError):
-    pass
-
-
 class Store:
     def __init__(self, root: Path):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.root / "state.sqlite")
         self.db.executescript(SCHEMA)
+
+    def rollback(self):
+        self.db.rollback()
+
+    def check_manifest(self, source: str):
+        """docs/source=<s>/_manifest.json 의 스키마·정책 버전이 지금 코드와 같아야 쓴다 (다르면 섞지 않고 거부)."""
+        d = self.root / "docs" / f"source={source}"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / "_manifest.json"
+        if p.exists():
+            got = json.loads(p.read_text(encoding="utf-8"))
+            if {k: got.get(k) for k in MANIFEST} != MANIFEST:
+                raise RuntimeError(f"저장소 manifest {got} 가 코드 {MANIFEST} 와 다름 — 새 ext_store 를 쓰거나 이전을 먼저 정함")
+        else:
+            p.write_text(json.dumps(MANIFEST, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def close(self):
         self.db.close()
@@ -84,7 +102,12 @@ class Store:
             raise SourceLocked(f"{source} 수집이 이미 실행 중 (잠금 파일 {p})") from None
         os.write(fd, str(os.getpid()).encode())
         os.close(fd)
-        self.recover()  # 잠금을 잡은 쪽만 남은 staging 을 정리한다
+        try:
+            self.check_manifest(source)
+            self.recover()  # 잠금을 잡은 쪽만 남은 staging 을 정리한다
+        except BaseException:
+            p.unlink(missing_ok=True)
+            raise
         return p
 
     @staticmethod
@@ -156,12 +179,13 @@ class Store:
         for i in range(0, len(doc_ids), 500):
             chunk = doc_ids[i:i + 500]
             q = f"SELECT doc_id, version, content_hash FROM seen_keys WHERE doc_id IN ({','.join('?' * len(chunk))})"
-            out.update({k: Seen(v, h) for k, v, h in self.db.execute(q, chunk)})
+            q = q.replace("content_hash FROM", "content_hash, available_at FROM")
+            out.update({k: Seen(v, h, a or "") for k, v, h, a in self.db.execute(q, chunk)})
         return out
 
     def mark_seen(self, docs: list[dict]):
-        self.db.executemany("INSERT OR REPLACE INTO seen_keys VALUES (?, ?, ?)",
-                            [(d["doc_id"], d["version"], d["content_hash"]) for d in docs])
+        self.db.executemany("INSERT OR REPLACE INTO seen_keys VALUES (?, ?, ?, ?)",
+                            [(d["doc_id"], d["version"], d["content_hash"], d["available_at"]) for d in docs])
 
     def report_history(self, keys: set[tuple[str, str]]) -> dict[tuple[str, str], list[tuple[str, str]]]:
         out: dict = defaultdict(list)
@@ -175,9 +199,10 @@ class Store:
         self.db.executemany("INSERT OR IGNORE INTO report_history VALUES (?, ?, ?, ?)",
                             [(c, b, r, d) for (c, b), r, d in rows])
 
-    def set_coverage(self, source: str, days: list[str], corp_cls: str, state: str, run_id: str):
-        self.db.executemany("INSERT OR REPLACE INTO coverage VALUES (?, ?, ?, ?, ?)",
-                            [(source, d, corp_cls, state, run_id) for d in days])
+    def set_coverage(self, source: str, days: list[str], corp_cls: str, state: str, run_id: str, observed_at: str):
+        rows = [(source, d, corp_cls, state, run_id, observed_at) for d in days]
+        self.db.executemany("INSERT OR REPLACE INTO coverage VALUES (?, ?, ?, ?, ?, ?)", rows)
+        self.db.executemany("INSERT INTO coverage_log VALUES (?, ?, ?, ?, ?, ?)", rows)
 
     def coverage(self, source: str) -> dict[tuple[str, str], str]:
         return {(d, c): s for d, c, s in self.db.execute(

@@ -29,7 +29,12 @@ def _client() -> tuple[OpenDartList, dict]:
     return OpenDartList(http_fetch(cfg["base_url"], key, cfg["user_agent"], float(cfg["timeout_sec"])), cfg), cfg
 
 
-def backfill(start: date, end: date, refetch: bool = False) -> RunStats:
+def today() -> date:
+    return _now().date()  # KST 기준 오늘 (OS 시간대와 무관)
+
+
+def backfill(start: date, end: date | None = None, refetch: bool = False) -> RunStats:
+    end = end or today()
     client, cfg = _client()
     store = Store(load_store_path())
     try:
@@ -42,9 +47,9 @@ def backfill(start: date, end: date, refetch: bool = False) -> RunStats:
 def forward() -> RunStats:
     client, cfg = _client()
     store = Store(load_store_path())
-    today = _now().date()
+    day = today()
     try:
-        return collect(store, client, cfg, today, today, mode="forward", now=_now, run_id=_run_id())
+        return collect(store, client, cfg, day, day, mode="forward", now=_now, run_id=_run_id())
     finally:
         store.close()
 
@@ -54,6 +59,7 @@ def status(limit: int = 10) -> dict:
     try:
         cov = store.coverage("opendart")
         return {"store": str(store.root), "backfill_cursor": store.cursor("opendart", "backfill"),
+                "manifest": (store.root / "docs" / "source=opendart" / "_manifest.json").exists(),
                 "coverage": {s: sum(1 for v in cov.values() if v == s)
                              for s in ("collected", "forward", "partial", "gap")},
                 "runs": store.runs("opendart", limit)}

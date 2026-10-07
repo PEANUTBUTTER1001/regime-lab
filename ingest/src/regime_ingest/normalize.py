@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime
+from datetime import date, datetime
 
 from regime_ingest.timing import available_at, parse_yyyymmdd
 
@@ -18,6 +18,10 @@ REQUIRED = ("rcept_no", "corp_code", "corp_name", "report_nm", "rcept_dt")
 AMEND_TAGS = frozenset({"기재정정", "첨부정정", "첨부추가", "변경등록", "연장결정", "발행조건확정", "정정명령부과", "정정제출요구"})
 _TAG = re.compile(r"^\s*\[([^\]]+)\]\s*")
 _STOCK_CODE = re.compile(r"^[0-9A-Z]{6}$")  # KRX 단축코드 6자리 (영문 포함 코드 있음)
+_RCEPT_NO = re.compile(r"^\d{14}$")
+_CORP_CODE = re.compile(r"^\d{8}$")
+SCHEMA_VERSION = 1          # 문서 필드 구성 (계약 §3). 바꾸면 manifest 가 다른 저장소에 섞이지 않게 막는다
+POLICY_VERSION = "2026-10-07.v1"  # 정규화·시각 규칙 (소급 = 접수일 다음 날 00:00 KST, 변경 버전 = 관측 시각)
 
 
 def split_report_name(report_nm: str) -> tuple[list[str], str]:
@@ -30,20 +34,31 @@ def split_report_name(report_nm: str) -> tuple[list[str], str]:
 
 
 def content_hash(item: dict) -> str:
-    """같은 접수번호의 내용이 바뀌었는지 판별하는 지문 (보고서명·제출인·비고·종목코드)."""
-    key = {k: (item.get(k) or "").strip() for k in ("report_nm", "flr_nm", "rm", "stock_code", "corp_name")}
+    """같은 접수번호의 내용이 바뀌었는지 판별하는 지문 — 의미 필드만 (조회일·페이지·run_id 제외, 계약 §3)."""
+    key = {k: (item.get(k) or "").strip()
+           for k in ("report_nm", "flr_nm", "rm", "stock_code", "corp_name", "corp_code", "corp_cls", "rcept_dt")}
     return hashlib.sha256(json.dumps(key, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
 
 
 def normalize(item: dict, *, first_seen_at: datetime, backfilled: bool, ingest_run_id: str,
-              viewer_url: str, license_scope: str) -> dict:
-    missing = [k for k in REQUIRED if not (item.get(k) or "").strip()]
+              viewer_url: str, license_scope: str, window: tuple[date, date] | None = None,
+              corp_cls: str | None = None) -> dict:
+    """window·corp_cls 를 주면 접수일이 조회 창 안인지, 시장이 조회한 시장인지도 검사한다 (계약 §3)."""
+    if not isinstance(item, dict):
+        raise ValueError("항목이 객체가 아님")
+    missing = [k for k in REQUIRED if not str(item.get(k) or "").strip()]
     if missing:
         raise ValueError(f"필수 필드 없음: {missing}")
     rcept_no = item["rcept_no"].strip()
-    if not rcept_no.isdigit():
-        raise ValueError(f"접수번호 형식이 아님: {rcept_no!r}")
+    if not _RCEPT_NO.match(rcept_no):
+        raise ValueError("접수번호가 숫자 14자리가 아님")
+    if not _CORP_CODE.match(item["corp_code"].strip()):
+        raise ValueError("회사코드가 숫자 8자리가 아님")
     published = parse_yyyymmdd(item["rcept_dt"].strip())
+    if window and not window[0] <= published <= window[1]:
+        raise ValueError("접수일이 조회 창 밖")
+    if corp_cls and (item.get("corp_cls") or "").strip() != corp_cls:
+        raise ValueError("시장 구분이 조회한 시장과 다름")
     tags, base = split_report_name(item["report_nm"])
     raw_code = (item.get("stock_code") or "").strip()
     code = raw_code if _STOCK_CODE.match(raw_code) else ""

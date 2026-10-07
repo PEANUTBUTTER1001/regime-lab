@@ -24,6 +24,5 @@ __pycache__/
 
 #DB
 data/
-# 외부 자료 수집 (P3-7, plan/03-04 §7.4) — 수집 결과·로컬 경로
-/ext_store/
+# 외부 자료 수집 (P3-7) — 로컬 경로 (수집 결과 ext_store 는 저장소 밖에 둔다)
 ingest/config/paths.local.yaml
