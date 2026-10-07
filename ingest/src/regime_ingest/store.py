@@ -3,8 +3,13 @@
 <ext_store>/
   raw/<source>/<YYYY-MM-DD>/<run_id>.jsonl.gz     원본 응답(목록 메타데이터), 추가만
   docs/source=<source>/date=<YYYY-MM>/part-<run_id>.parquet   정규화 문서, 추가만 (버전은 새 행)
-  state.sqlite                                     ingest_runs · coverage · cursors · seen_keys · report_chain
+  state.sqlite                                     ingest_runs · coverage · cursors · seen_keys · report_history · doc_files
   locks/<source>.lock                              같은 출처 동시 실행 방지
+
+문서 파일과 SQLite 상태를 함께 확정하는 순서 (중간에 죽어도 중복·부분 파일이 남지 않게):
+  1) docs 를 `*.parquet.tmp` 로 쓴다  2) seen_keys 등과 함께 doc_files 에 최종 이름을 넣고 commit
+  3) tmp → 최종 이름으로 바꾼다. 다음에 Store 를 열 때 recover() 가 남은 tmp 를 정리한다:
+     doc_files 에 있으면(commit 됨) 이름을 바꾸고, 없으면(commit 전 실패) 지운다. 읽기는 *.parquet 만 본다.
 """
 
 from __future__ import annotations
@@ -29,8 +34,9 @@ CREATE TABLE IF NOT EXISTS coverage (source TEXT, day TEXT, corp_cls TEXT, state
   PRIMARY KEY (source, day, corp_cls));
 CREATE TABLE IF NOT EXISTS cursors (source TEXT, mode TEXT, value TEXT, PRIMARY KEY (source, mode));
 CREATE TABLE IF NOT EXISTS seen_keys (doc_id TEXT PRIMARY KEY, version INTEGER, content_hash TEXT);
-CREATE TABLE IF NOT EXISTS report_chain (corp_code TEXT, report_base TEXT, doc_id TEXT,
-  PRIMARY KEY (corp_code, report_base));
+CREATE TABLE IF NOT EXISTS report_history (corp_code TEXT, report_base TEXT, rcept_no TEXT, doc_id TEXT,
+  PRIMARY KEY (corp_code, report_base, rcept_no));
+CREATE TABLE IF NOT EXISTS doc_files (path TEXT PRIMARY KEY, run_id TEXT);
 CREATE TABLE IF NOT EXISTS request_days (source TEXT, day TEXT, requests INTEGER, PRIMARY KEY (source, day));
 """
 
@@ -42,7 +48,7 @@ DOC_SCHEMA = pa.schema([
     ("original_url", pa.string()), ("published_at", pa.string()), ("published_at_basis", pa.string()),
     ("time_precision", pa.string()), ("modified_at", pa.string()), ("first_seen_at", pa.string()),
     ("available_at", pa.string()), ("backfilled", pa.bool_()), ("tickers", pa.list_(TICKER)),
-    ("ticker_status", pa.string()), ("content_hash", pa.string()), ("cluster_id", pa.string()),
+    ("ticker_status", pa.string()), ("stock_code_raw", pa.string()), ("content_hash", pa.string()), ("cluster_id", pa.string()),
     ("license_scope", pa.string()), ("ingest_run_id", pa.string()), ("rcept_no", pa.string()),
     ("corp_code", pa.string()), ("corp_name", pa.string()), ("corp_cls", pa.string()), ("flr_nm", pa.string()),
     ("rm", pa.string()), ("report_tags", pa.list_(pa.string())), ("report_base", pa.string()),
@@ -60,6 +66,7 @@ class Store:
         self.root.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.root / "state.sqlite")
         self.db.executescript(SCHEMA)
+        self.recover()
 
     def close(self):
         self.db.close()
@@ -89,17 +96,45 @@ class Store:
             for r in records:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
-    def save_docs(self, source: str, run_id: str, docs: list[dict]):
+    def stage_docs(self, source: str, run_id: str, docs: list[dict]) -> list[Path]:
+        """1단계: 달별 tmp 파일을 쓰고 doc_files 에 최종 이름을 넣는다 (commit 은 호출자). 최종 경로 목록을 돌려준다."""
         by_month = defaultdict(list)
         for d in docs:
             by_month[d["published_at"][:7]].append(d)
-        for month, rows in by_month.items():
+        final = []
+        for month, rows in sorted(by_month.items()):
             d = self.root / "docs" / f"source={source}" / f"date={month}"
             d.mkdir(parents=True, exist_ok=True)
             p, i = d / f"part-{run_id}.parquet", 1
-            while p.exists():  # 같은 실행이 같은 달을 여러 번 쓰면 조각을 늘린다 (덮어쓰지 않음)
+            while p.exists() or self._tmp(p).exists():  # 같은 실행이 같은 달을 여러 번 쓰면 조각을 늘린다
                 p, i = d / f"part-{run_id}-{i}.parquet", i + 1
-            pq.write_table(pa.Table.from_pylist(rows, schema=DOC_SCHEMA), p)
+            pq.write_table(pa.Table.from_pylist(rows, schema=DOC_SCHEMA), self._tmp(p))
+            self.db.execute("INSERT INTO doc_files VALUES (?, ?)", (str(p.relative_to(self.root)), run_id))
+            final.append(p)
+        return final
+
+    def publish(self, paths: list[Path]):
+        """3단계 (commit 뒤): tmp → 최종 이름."""
+        for p in paths:
+            os.replace(self._tmp(p), p)
+
+    def discard(self, paths: list[Path]):
+        """commit 전 실패: tmp 를 지운다 (rollback 과 짝)."""
+        for p in paths:
+            self._tmp(p).unlink(missing_ok=True)
+
+    def recover(self):
+        committed = {r[0] for r in self.db.execute("SELECT path FROM doc_files")}
+        for t in (self.root / "docs").rglob("*.parquet.tmp") if (self.root / "docs").exists() else []:
+            final = t.with_suffix("")
+            if str(final.relative_to(self.root)) in committed:
+                os.replace(t, final)
+            else:
+                t.unlink()
+
+    @staticmethod
+    def _tmp(p: Path) -> Path:
+        return p.with_suffix(p.suffix + ".tmp")
 
     def read_docs(self, source: str) -> list[dict]:
         base = self.root / "docs" / f"source={source}"
@@ -119,12 +154,17 @@ class Store:
         self.db.executemany("INSERT OR REPLACE INTO seen_keys VALUES (?, ?, ?)",
                             [(d["doc_id"], d["version"], d["content_hash"]) for d in docs])
 
-    def report_chain(self) -> dict[tuple[str, str], str]:
-        return {(c, b): d for c, b, d in self.db.execute("SELECT corp_code, report_base, doc_id FROM report_chain")}
+    def report_history(self, keys: set[tuple[str, str]]) -> dict[tuple[str, str], list[tuple[str, str]]]:
+        out: dict = defaultdict(list)
+        for c, b in keys:
+            for r, d in self.db.execute("SELECT rcept_no, doc_id FROM report_history WHERE corp_code = ? AND "
+                                        "report_base = ?", (c, b)):
+                out[(c, b)].append((r, d))
+        return dict(out)
 
-    def save_report_chain(self, chain: dict[tuple[str, str], str]):
-        self.db.executemany("INSERT OR REPLACE INTO report_chain VALUES (?, ?, ?)",
-                            [(c, b, d) for (c, b), d in chain.items()])
+    def add_report_history(self, rows: list[tuple[tuple[str, str], str, str]]):
+        self.db.executemany("INSERT OR IGNORE INTO report_history VALUES (?, ?, ?, ?)",
+                            [(c, b, r, d) for (c, b), r, d in rows])
 
     def set_coverage(self, source: str, days: list[str], corp_cls: str, state: str, run_id: str):
         self.db.executemany("INSERT OR REPLACE INTO coverage VALUES (?, ?, ?, ?, ?)",

@@ -17,6 +17,7 @@ REQUIRED = ("rcept_no", "corp_code", "corp_name", "report_nm", "rcept_dt")
 # 보고서명 앞의 대괄호 표시 중 원공시를 고치거나 보탠 것 (OpenDART 보고서명 관례). 정정 연결은 1-4 실측(10건)으로 확정 예정
 AMEND_TAGS = frozenset({"기재정정", "첨부정정", "첨부추가", "변경등록", "연장결정", "발행조건확정", "정정명령부과", "정정제출요구"})
 _TAG = re.compile(r"^\s*\[([^\]]+)\]\s*")
+_STOCK_CODE = re.compile(r"^[0-9A-Z]{6}$")  # KRX 단축코드 6자리 (영문 포함 코드 있음)
 
 
 def split_report_name(report_nm: str) -> tuple[list[str], str]:
@@ -44,7 +45,8 @@ def normalize(item: dict, *, first_seen_at: datetime, backfilled: bool, ingest_r
         raise ValueError(f"접수번호 형식이 아님: {rcept_no!r}")
     published = parse_yyyymmdd(item["rcept_dt"].strip())
     tags, base = split_report_name(item["report_nm"])
-    code = (item.get("stock_code") or "").strip()
+    raw_code = (item.get("stock_code") or "").strip()
+    code = raw_code if _STOCK_CODE.match(raw_code) else ""
     url = viewer_url + rcept_no
     return {
         "doc_id": f"{SOURCE}:{rcept_no}",
@@ -64,7 +66,8 @@ def normalize(item: dict, *, first_seen_at: datetime, backfilled: bool, ingest_r
         "available_at": available_at(published, first_seen_at, backfilled).isoformat(),
         "backfilled": backfilled,
         "tickers": [{"code": code, "method": "native", "evidence": "stock_code", "confidence": 1.0}] if code else [],
-        "ticker_status": "resolved" if code else "none",
+        "ticker_status": "resolved" if code else ("invalid_code" if raw_code else "none"),
+        "stock_code_raw": raw_code,
         "content_hash": content_hash(item),
         "cluster_id": None,
         "license_scope": license_scope,

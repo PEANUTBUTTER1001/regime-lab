@@ -41,10 +41,11 @@ class RunStats:
                 "finished_at": finished_at}
 
 
-def _collect_window(store: Store, client: OpenDartList, cfg: dict, bgn: date, end: date, *, backfilled: bool,
-                    now: Callable[[], datetime], stats: RunStats):
-    """한 창의 모든 corp_cls 를 받아 확정한다. RateLimited·DartError 는 호출자에게 넘긴다(확정 전)."""
+def _fetch_window(client: OpenDartList, store: Store, cfg: dict, bgn: date, end: date, *, backfilled: bool,
+                  now: Callable[[], datetime], stats: RunStats) -> tuple[dict[str, dict], int]:
+    """한 창의 모든 corp_cls 를 받아 정규화한다. (문서, 잘못된 행 수). RateLimited·DartError 는 그대로 올린다."""
     docs: dict[str, dict] = {}
+    bad = 0
     raw_day = now().astimezone(KST).date().isoformat()
     for cls in cfg["corp_cls"]:
         for page, body in client.pages(bgn, end, cls):
@@ -58,11 +59,17 @@ def _collect_window(store: Store, client: OpenDartList, cfg: dict, bgn: date, en
                     d = normalize(it, first_seen_at=seen_at, backfilled=backfilled, ingest_run_id=stats.run_id,
                                   viewer_url=cfg["viewer_url"], license_scope=cfg["license_scope"])
                 except ValueError as e:
-                    stats.errors += 1
+                    bad += 1
                     if len(stats.error_samples) < 5:
-                        stats.error_samples.append(str(e))
+                        stats.error_samples.append(f"{bgn}~{end} {cls}: {e}")
                     continue
                 docs.setdefault(d["doc_id"], d)  # 페이지가 밀려 같은 공시가 두 번 와도 처음 것만
+    return docs, bad
+
+
+def _commit_window(store: Store, cfg: dict, docs: dict[str, dict], bgn: date, end: date, *, complete: bool,
+                   advance_cursor: bool, stats: RunStats):
+    """중복·버전 → 정정 후보 → 문서(tmp)·상태 → commit → 문서 확정. commit 전 실패면 tmp 를 지우고 되돌린다."""
     seen = store.seen(list(docs))
     keep = []
     for d in docs.values():
@@ -70,17 +77,32 @@ def _collect_window(store: Store, client: OpenDartList, cfg: dict, bgn: date, en
         setattr(stats, kind, getattr(stats, kind) + 1)
         if row is not None:
             keep.append(row)
-    store.save_report_chain(link_amendments(keep, store.report_chain()))
-    store.save_docs(SOURCE, stats.run_id, keep)
-    store.mark_seen(keep)
-    for cls in cfg["corp_cls"]:
-        store.set_coverage(SOURCE, [x.isoformat() for x in days(bgn, end)], cls, "collected", stats.run_id)
+    staged: list = []
+    try:
+        hist = store.report_history({(d["corp_code"], d["report_base"]) for d in keep})
+        store.add_report_history(link_amendments(keep, hist))
+        staged = store.stage_docs(SOURCE, stats.run_id, keep)
+        store.mark_seen(keep)
+        state = "collected" if complete else "partial"  # 잘못된 행이 있던 창은 완료로 치지 않는다
+        for cls in cfg["corp_cls"]:
+            store.set_coverage(SOURCE, [x.isoformat() for x in days(bgn, end)], cls, state, stats.run_id)
+        if advance_cursor:
+            store.set_cursor(SOURCE, "backfill", end.isoformat())
+        store.commit()
+    except BaseException:
+        store.db.rollback()
+        store.discard(staged)
+        raise
+    store.publish(staged)
 
 
 def collect(store: Store, client: OpenDartList, cfg: dict, start: date, end: date, *, mode: str,
             now: Callable[[], datetime], run_id: str) -> RunStats:
     """mode='backfill': [start, end] 를 창으로 나눠 커서 다음 날부터 받는다 (backfilled=True).
-    mode='forward': [start, end](보통 오늘 하루)를 바로 받는다. available_at = 처음 본 시각."""
+    mode='forward': [start, end](보통 오늘 하루)를 바로 받는다. available_at = 처음 본 시각.
+
+    커서는 '여기까지 빠짐없이 완료'를 뜻한다. 잘못된 행이 있던 창(partial)이나 실패 창(gap) 뒤로는 커서를 넘기지
+    않으므로 다음 실행이 그 창부터 다시 받는다 (이미 받은 문서는 중복으로 걸러져 늘지 않는다)."""
     if mode not in ("backfill", "forward"):
         raise ValueError(mode)
     stats = RunStats(run_id, mode, start.isoformat(), end.isoformat(), now().isoformat())
@@ -100,23 +122,24 @@ def collect(store: Store, client: OpenDartList, cfg: dict, start: date, end: dat
             if cur and date.fromisoformat(cur) >= start:
                 start = max(start, date.fromisoformat(cur) + timedelta(days=1))
         windows = month_windows(start, end, int(cfg["window_months"])) if start <= end else []
+        contiguous = mode == "backfill"
         for bgn, wend in windows:
             try:
-                _collect_window(store, client, cfg, bgn, wend, backfilled=(mode == "backfill"), now=now,
-                                stats=stats)
+                docs, bad = _fetch_window(client, store, cfg, bgn, wend, backfilled=(mode == "backfill"), now=now,
+                                          stats=stats)
             except (RateLimited, DartError) as e:
-                store.db.rollback()
                 for cls in cfg["corp_cls"]:  # 실패 창은 '공백' — 0건과 구분 (plan/03-04 §7.3)
                     store.set_coverage(SOURCE, [x.isoformat() for x in days(bgn, wend)], cls, "gap", run_id)
+                store.commit()
                 stats.status = "partial" if isinstance(e, RateLimited) else "failed"
                 stats.message = f"{bgn}~{wend}: {e}"
                 break
-            if mode == "backfill":
-                store.set_cursor(SOURCE, "backfill", wend.isoformat())
-            store.commit()
+            stats.errors += bad
+            contiguous = contiguous and bad == 0
+            _commit_window(store, cfg, docs, bgn, wend, complete=(bad == 0), advance_cursor=contiguous, stats=stats)
         if stats.errors and stats.status == "ok":
             stats.status = "partial"
-            stats.message = "; ".join(stats.error_samples)
+            stats.message = "잘못된 행이 있는 창은 partial 로 남김 (커서 미전진): " + "; ".join(stats.error_samples)
     finally:
         stats.requests = client.requests - base_requests
         store.set_requests(SOURCE, req_day, client.requests)

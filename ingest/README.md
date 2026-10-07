@@ -29,10 +29,15 @@ uv run --project ingest python -m pytest ingest                                 
 |---|---|
 | `raw/opendart/<수집일>/<run_id>.jsonl.gz` | 받은 응답 그대로 (추가만) |
 | `docs/source=opendart/date=<YYYY-MM>/part-*.parquet` | 정규화 문서 (plan §5 스키마). 내용이 바뀐 공시는 `version` + 1 새 행 |
-| `state.sqlite` | `ingest_runs`·`coverage`(일 × 시장, collected/gap)·`cursors`·`seen_keys`·`report_chain`·`request_days` |
+| `state.sqlite` | `ingest_runs`·`coverage`(일 × 시장, collected/partial/gap)·`cursors`·`seen_keys`·`report_history`·`doc_files`·`request_days` |
+
+- 커서 = "여기까지 빠짐없이 완료". 잘못된 행이 있던 창(`partial`)·실패 창(`gap`) 뒤로는 커서를 넘기지 않아 다음 실행이 다시 받는다
+- 문서 파일은 `*.parquet.tmp` → SQLite commit → 이름 확정 순서. 중간에 죽으면 다음 실행 시작 때 정리된다
 
 ## 시각 규칙 (plan §4)
 
 - 소급분(`backfilled=true`, 날짜만): `available_at` = 접수일 **다음 날 00:00 KST** → 다음 거래일 첫 봉부터 연결
 - 순방향: `available_at` = 처음 본 시각(`first_seen_at`)
-- 정정 공시(`[기재정정]` 등)는 같은 회사·같은 기본 보고서명의 직전 공시를 `amends_candidate_doc_id`(후보, `amends_basis=same_corp_base_title`)로 남긴다. 제목만으로 원공시 관계를 확정하지 않으며, 확정 규칙은 P3-6 계약·plan §11 1-4 실측 뒤
+- 같은 접수번호의 **내용 변경 버전**(version ≥ 2)은 소급 모드여도 처음 본 시각부터 → 과거 as_of 결과 불변
+- 종목코드는 6자리 대문자 영숫자만 연결(`resolved`), 형식이 틀리면 `invalid_code`(원값은 `stock_code_raw`)
+- 정정 공시(`[기재정정]` 등)는 같은 회사·같은 기본 보고서명의 공시 중 **자기보다 앞선 접수번호**의 가장 늦은 것을 `amends_candidate_doc_id`(후보, `amends_basis=same_corp_base_title`)로 남긴다(수집 순서와 무관). 제목만으로 원공시 관계를 확정하지 않으며, 확정 규칙은 P3-6 계약·plan §11 1-4 실측 뒤

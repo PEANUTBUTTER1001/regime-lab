@@ -109,6 +109,74 @@ def test_daily_request_limit_stops_with_partial(tmp_path, cfg):
     assert st2.status == "partial" and st2.requests == 0  # 같은 날은 더 요청하지 않음
 
 
+def test_retries_respect_daily_limit(cfg):
+    """리뷰 #21-4: 재시도도 하루 상한 안에서만 (상한 1이면 900 고정 응답에도 요청은 1회)."""
+    fake = FakeDart([], fail={i: {"status": "900", "message": "x"} for i in range(1, 10)})
+    client = OpenDartList(fake, {**cfg, "daily_request_limit": 1}, sleep=lambda s: None)
+    with pytest.raises(DartError):
+        client._call({})
+    assert len(fake.calls) == 1 and client.requests == 1
+
+
+def test_changed_backfill_version_not_backdated(tmp_path, cfg):
+    """리뷰 #21-1 (수집 흐름): 소급으로 다시 받은 변경 버전은 과거 as_of 에 보이지 않는다."""
+    items = make_items(date(2026, 1, 1), date(2026, 1, 3))
+    _run(Store(tmp_path), FakeDart(items), cfg, date(2026, 1, 1), date(2026, 1, 3))
+    changed = [dict(i) for i in items]
+    changed[0]["rm"] = "정"
+    store = Store(tmp_path)
+    store.set_cursor("opendart", "backfill", "2025-12-31")
+    store.commit()
+    _run(store, FakeDart(changed), cfg, date(2026, 1, 1), date(2026, 1, 3), run_id="r2")
+    rows = {d["version"]: d for d in Store(tmp_path).read_docs("opendart") if d["rcept_no"] == items[0]["rcept_no"]}
+    assert rows[1]["available_at"] == "2026-01-02T00:00:00+09:00"
+    assert rows[2]["available_at"] == rows[2]["first_seen_at"] > "2026-10-07"  # 수집 시각(합성 시계 2026-10-07)
+
+
+def test_amendment_before_later_collected_original(tmp_path, cfg):
+    """리뷰 #21-2 (수집 흐름): 3월을 먼저 받고 2월 정정 공시를 넣어도 3월 공시를 후보로 잡지 않는다."""
+    corp = {"corp_code": "00000001", "corp_name": "합성회사1", "stock_code": "000001", "corp_cls": "Y", "flr_nm": "x", "rm": ""}
+    later = {**corp, "report_nm": "사업보고서 (2020.12)", "rcept_no": "20210301000001", "rcept_dt": "20210301"}
+    amend = {**corp, "report_nm": "[기재정정]사업보고서 (2020.12)", "rcept_no": "20210201000001", "rcept_dt": "20210201"}
+    _run(Store(tmp_path), FakeDart([later]), cfg, date(2021, 3, 1), date(2021, 3, 31))
+    store = Store(tmp_path)
+    _run(store, FakeDart([later, amend]), cfg, date(2021, 2, 1), date(2021, 2, 28), mode="forward", run_id="r2")
+    docs = {d["rcept_no"]: d for d in Store(tmp_path).read_docs("opendart")}
+    assert docs["20210201000001"]["amends_candidate_doc_id"] is None
+
+
+def test_crash_between_parquet_and_commit_recovers(tmp_path, cfg, monkeypatch):
+    """리뷰 추가: 문서 파일을 쓴 뒤 commit 전에 죽으면 tmp 만 남고, 다음 실행에서 지워져 중복 없이 다시 받는다."""
+    items = make_items(date(2021, 1, 1), date(2021, 1, 5))
+    store = Store(tmp_path)
+    real = store.mark_seen
+
+    def die(docs):
+        raise KeyboardInterrupt("강제 종료")
+
+    monkeypatch.setattr(store, "mark_seen", die)
+    with pytest.raises(KeyboardInterrupt):
+        _run(store, FakeDart(items), cfg, date(2021, 1, 1), date(2021, 1, 5))
+    monkeypatch.setattr(store, "mark_seen", real)
+    assert not list((tmp_path / "docs").rglob("*.parquet"))  # 확정 파일 없음
+    store.db.close()
+    (tmp_path / "locks" / "opendart.lock").unlink(missing_ok=True)
+    st = _run(Store(tmp_path), FakeDart(items), cfg, date(2021, 1, 1), date(2021, 1, 5), run_id="r2")
+    assert st.new == len(items)
+    assert len(Store(tmp_path).read_docs("opendart")) == len(items)  # 중복 없음
+    assert not list((tmp_path / "docs").rglob("*.tmp"))
+
+
+def test_crash_after_commit_before_rename_is_published_on_open(tmp_path, cfg, monkeypatch):
+    items = make_items(date(2021, 1, 1), date(2021, 1, 5))
+    store = Store(tmp_path)
+    monkeypatch.setattr(store, "publish", lambda paths: None)  # commit 뒤 이름 바꾸기 전에 죽음
+    _run(store, FakeDart(items), cfg, date(2021, 1, 1), date(2021, 1, 5))
+    assert list((tmp_path / "docs").rglob("*.tmp")) and not list((tmp_path / "docs").rglob("*.parquet"))
+    assert len(Store(tmp_path).read_docs("opendart")) == len(items)  # 다시 열면 확정
+    assert not list((tmp_path / "docs").rglob("*.tmp"))
+
+
 def test_transient_errors_retry_then_permanent_error_fails(tmp_path, cfg):
     items = make_items(date(2021, 1, 1), date(2021, 1, 3))
     fake = FakeDart(items, fail={1: {"status": "800", "message": "점검"}, 2: OSError("timeout")})
@@ -129,11 +197,22 @@ def test_no_data_window_is_collected_not_gap(tmp_path, cfg):
     assert set(Store(tmp_path).coverage("opendart").values()) == {"collected"}  # 진짜 0건 ≠ 공백
 
 
-def test_bad_items_are_counted_not_stored(tmp_path, cfg):
-    items = make_items(date(2021, 1, 1), date(2021, 1, 2))
-    items[0] = {**items[0], "rcept_no": "A" + items[0]["rcept_no"]}  # 형식이 깨진 접수번호
-    st = _run(Store(tmp_path), FakeDart(items), cfg, date(2021, 1, 1), date(2021, 1, 2))
+def test_bad_items_keep_window_partial_and_cursor(tmp_path, cfg):
+    """리뷰 #21-3: 잘못된 행이 있는 창은 collected 가 아니고 커서도 넘기지 않는다 → 다음 실행이 다시 받는다."""
+    items = make_items(date(2021, 1, 1), date(2021, 2, 28))
+    bad = [dict(i) for i in items]
+    bad[3] = {**bad[3], "report_nm": None}  # 1월 창에 잘못된 행
+    st = _run(Store(tmp_path), FakeDart(bad), cfg, date(2021, 1, 1), date(2021, 2, 28))
     assert st.errors == 1 and st.status == "partial" and st.new == len(items) - 1
+    store = Store(tmp_path)
+    assert store.cursor("opendart", "backfill") is None  # 1월이 불완전 → 2월이 완료여도 커서 안 넘김
+    cov = store.coverage("opendart")
+    assert cov[("2021-01-10", "Y")] == "partial" and cov[("2021-02-10", "Y")] == "collected"
+    st2 = _run(store, FakeDart(items), cfg, date(2021, 1, 1), date(2021, 2, 28), run_id="r2")  # 고쳐진 응답
+    assert st2.status == "ok" and st2.new == 1 and st2.duplicate == len(items) - 1
+    store = Store(tmp_path)
+    assert store.cursor("opendart", "backfill") == "2021-02-28"
+    assert set(store.coverage("opendart").values()) == {"collected"}
 
 
 def test_lock_prevents_concurrent_run(tmp_path, cfg):

@@ -82,12 +82,44 @@ def test_link_amendments_by_company_and_base_name():
     orig = _norm({**ITEM, "report_nm": "사업보고서 (2023.12)", "rcept_no": "20240311000100", "rcept_dt": "20240311"})
     amend = _norm()
     other = _norm({**ITEM, "corp_code": "00000002", "rcept_no": "20240312000999"})  # 다른 회사 정정 → 원공시 없음
-    chain = link_amendments([amend, other, orig], {})
+    added = link_amendments([amend, other, orig], {})
     assert amend["amends_candidate_doc_id"] == orig["doc_id"] and other["amends_candidate_doc_id"] is None
     assert orig["amends_candidate_doc_id"] is None
     assert amend["amends_basis"] == "same_corp_base_title" and other["amends_basis"] is None
-    assert chain[("00126380", "사업보고서 (2023.12)")] == amend["doc_id"]
-    # 이전 실행에서 이어 받은 원공시
+    assert (("00126380", "사업보고서 (2023.12)"), amend["rcept_no"], amend["doc_id"]) in added
+    # 이전 실행에서 이어 받은 이력: 자기보다 앞선 접수번호 중 가장 늦은 것
+    hist = {("00126380", "사업보고서 (2023.12)"): [(orig["rcept_no"], orig["doc_id"]), (amend["rcept_no"], amend["doc_id"])]}
     amend2 = _norm({**ITEM, "rcept_no": "20240401000001", "rcept_dt": "20240401"})
-    link_amendments([amend2], chain)
+    link_amendments([amend2], hist)
     assert amend2["amends_candidate_doc_id"] == amend["doc_id"]
+
+
+def test_amendment_candidate_never_self_or_future():
+    """리뷰 #21-2: 뒤 기간을 먼저 수집해 이력에 미래 접수번호가 있어도 후보는 자기보다 앞선 것만."""
+    key = ("00126380", "사업보고서 (2023.12)")
+    future = ("20240301000001", "opendart:20240301000001")
+    amend = _norm({**ITEM, "rcept_no": "20240201000001", "rcept_dt": "20240201"})
+    link_amendments([amend], {key: [future]})
+    assert amend["amends_candidate_doc_id"] is None and amend["amends_basis"] is None
+    past = ("20240115000001", "opendart:20240115000001")
+    link_amendments([amend], {key: [future, past, (amend["rcept_no"], amend["doc_id"])]})
+    assert amend["amends_candidate_doc_id"] == past[1]  # 자기 자신·미래 제외
+
+
+def test_changed_version_is_available_only_from_first_seen():
+    """리뷰 #21-1: 소급 모드에서 내용이 바뀐 새 버전도 available_at 을 접수일로 앞당기지 않는다."""
+    d = _norm({**ITEM, "rm": "연정"}, backfilled=True)
+    assert d["available_at"] == "2024-03-13T00:00:00+09:00"  # 첫 버전 규칙
+    kind, row = classify(d, {d["doc_id"]: Seen(1, "old")})
+    assert kind == "changed" and row["version"] == 2
+    assert row["available_at"] == SEEN_AT.isoformat() == row["first_seen_at"]
+
+
+@pytest.mark.parametrize("code,status,kept", [("005930", "resolved", "005930"), ("0001A0", "resolved", "0001A0"),
+                                              ("BAD", "invalid_code", None), ("00593", "invalid_code", None),
+                                              ("005930a", "invalid_code", None), ("", "none", None)])
+def test_stock_code_format(code, status, kept):
+    """리뷰 #21-5: 6자리 대문자 영숫자만 종목 연결 (KRX 영문 포함 코드 허용)."""
+    d = _norm({**ITEM, "stock_code": code})
+    assert d["ticker_status"] == status and d["stock_code_raw"] == code
+    assert [t["code"] for t in d["tickers"]] == ([kept] if kept else [])

@@ -63,9 +63,9 @@ class OpenDartList:
         self._last: float | None = None
 
     def _call(self, params: dict) -> dict:
-        if self.requests >= int(self.cfg["daily_request_limit"]):
-            raise RateLimited("limit", "하루 요청 상한 도달 (daily_request_limit)")
         for attempt in range(int(self.cfg["max_retries"]) + 1):
+            if self.requests >= int(self.cfg["daily_request_limit"]):  # 재시도도 요청 1회로 센다
+                raise RateLimited("limit", "하루 요청 상한 도달 (daily_request_limit)")
             if self._last is not None:
                 wait = float(self.cfg["request_interval_sec"]) - (self.monotonic() - self._last)
                 if wait > 0:
