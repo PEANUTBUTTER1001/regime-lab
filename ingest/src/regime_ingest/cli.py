@@ -1,0 +1,47 @@
+"""regime-ingest 명령 (진입). 입력 검증 → 조립 호출 → 출력만 한다 (R4)."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import date
+
+
+def _date(s: str) -> date:
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"YYYY-MM-DD 형식이 아님: {s}") from None
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="regime-ingest", description="외부 자료 수집 (OpenDART 공시 목록, metadata_only)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    b = sub.add_parser("backfill", help="과거 소급 (1개월 창, 끊기면 커서부터 이어 받음)")
+    b.add_argument("--source", choices=["opendart"], default="opendart")
+    b.add_argument("--from", dest="start", type=_date, required=True)
+    b.add_argument("--to", dest="end", type=_date, default=date.today())
+    r = sub.add_parser("run", help="순방향 수집 (오늘 공시, OS 스케줄러로 주기 실행)")
+    r.add_argument("--source", choices=["opendart"], default="opendart")
+    s = sub.add_parser("status", help="커서·수집 범위·최근 실행")
+    s.add_argument("--limit", type=int, default=10)
+    a = p.parse_args(argv)
+
+    from regime_ingest import app
+
+    if a.cmd == "backfill":
+        if a.start > a.end:
+            p.error("--from 이 --to 보다 늦음")
+        out = app.backfill(a.start, a.end).record("")
+    elif a.cmd == "run":
+        out = app.forward().record("")
+    else:
+        out = app.status(a.limit)
+    json.dump(out, sys.stdout, ensure_ascii=False, indent=2, default=str)
+    print()
+    return 0 if out.get("status", "ok") in ("ok", "skipped") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
