@@ -70,7 +70,7 @@ def _fetch_window(client: OpenDartList, store: Store, cfg: dict, bgn: date, end:
 
 
 def _commit_window(store: Store, cfg: dict, docs: dict[str, dict], bgn: date, end: date, *, complete: bool,
-                   advance_cursor: bool, stats: RunStats):
+                   advance_cursor: bool, stats: RunStats, forward: bool):
     """중복·버전 → 정정 후보 → 문서(tmp)·상태 → commit → 문서 확정. commit 전 실패면 tmp 를 지우고 되돌린다."""
     seen = store.seen(list(docs))
     keep = []
@@ -85,7 +85,9 @@ def _commit_window(store: Store, cfg: dict, docs: dict[str, dict], bgn: date, en
         store.add_report_history(link_amendments(keep, hist))
         staged = store.stage_docs(SOURCE, stats.run_id, keep)
         store.mark_seen(keep)
-        state = "collected" if complete else "partial"  # 잘못된 행이 있던 창은 완료로 치지 않는다
+        # 잘못된 행이 있던 창은 완료로 치지 않는다. 순방향은 그날이 끝나기 전 일부만 본 것이라 'forward' 로 남겨
+        # 소급이 그 날을 건너뛰지 않게 한다 (collected 는 소급으로 그 날 전체를 받은 경우만)
+        state = "partial" if not complete else ("forward" if forward else "collected")
         for cls in cfg["corp_cls"]:
             store.set_coverage(SOURCE, [x.isoformat() for x in days(bgn, end)], cls, state, stats.run_id)
         if advance_cursor:
@@ -146,7 +148,8 @@ def collect(store: Store, client: OpenDartList, cfg: dict, start: date, end: dat
                 break
             stats.errors += bad
             contiguous = contiguous and bad == 0
-            _commit_window(store, cfg, docs, bgn, wend, complete=(bad == 0), advance_cursor=contiguous, stats=stats)
+            _commit_window(store, cfg, docs, bgn, wend, complete=(bad == 0), advance_cursor=contiguous, stats=stats,
+                           forward=(mode == "forward"))
         if stats.errors and stats.status == "ok":
             stats.status = "partial"
             stats.message = "잘못된 행이 있는 창은 partial 로 남김 (커서 미전진): " + "; ".join(stats.error_samples)

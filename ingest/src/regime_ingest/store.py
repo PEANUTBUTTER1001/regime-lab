@@ -30,6 +30,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS ingest_runs (run_id TEXT PRIMARY KEY, source TEXT, mode TEXT, window_from TEXT,
   window_to TEXT, started_at TEXT, finished_at TEXT, requests INTEGER, received INTEGER, new INTEGER,
   duplicate INTEGER, changed INTEGER, errors INTEGER, status TEXT, message TEXT);
+-- coverage.state: collected(소급으로 그 날 전체) · forward(순방향으로 일부) · partial(잘못된 행) · gap(실패)
 CREATE TABLE IF NOT EXISTS coverage (source TEXT, day TEXT, corp_cls TEXT, state TEXT, run_id TEXT,
   PRIMARY KEY (source, day, corp_cls));
 CREATE TABLE IF NOT EXISTS cursors (source TEXT, mode TEXT, value TEXT, PRIMARY KEY (source, mode));

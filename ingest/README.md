@@ -23,13 +23,39 @@ uv run --project ingest regime-ingest status                                    
 uv run --project ingest python -m pytest ingest                                    # 테스트 (네트워크·키 없음)
 ```
 
+## 순방향 스케줄 (P3-7.5, plan §6.1·§7.1)
+
+OS 스케줄러로 `run` 을 주기 실행한다(API 서버와 독립). 같은 출처가 이미 돌고 있으면 새 실행은 `skipped` 로 기록하고 끝난다(잠금).
+주기는 거래일 07:00~20:00 KST 5분, 그 밖은 1시간 (요청 수 추정: 하루 공시 약 400건 → 1회 약 8요청 × 약 170회 ≈ 1,400요청/일, 상한 10,000 안).
+**등록은 수집 PC 담당자가 직접** 한다 — 아래는 예시이며 저장소 스크립트가 자동 등록하지 않는다. 키는 OS 의 사용자 환경변수로 둔다.
+
+macOS·Linux (`crontab -e`, 시스템 시간대가 KST 라고 가정):
+
+```cron
+*/5 7-19 * * 1-5  cd /path/to/regime-lab && uv run --project ingest regime-ingest run >> ~/regime-ingest.log 2>&1
+0 0-6,20-23 * * *  cd /path/to/regime-lab && uv run --project ingest regime-ingest run >> ~/regime-ingest.log 2>&1
+```
+
+Windows (작업 스케줄러, PowerShell — `DART_API_KEY` 는 사용자 환경변수로 미리 설정):
+
+```powershell
+$act = New-ScheduledTaskAction -Execute "uv" -Argument "run --project ingest regime-ingest run" -WorkingDirectory "C:\path\to\regime-lab"
+$day = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 07:00
+$day.Repetition = (New-ScheduledTaskTrigger -Once -At 07:00 -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Hours 13)).Repetition
+Register-ScheduledTask -TaskName "regime-ingest-opendart" -Action $act -Trigger $day
+```
+
+- 휴장일에도 돌지만 공시가 없으면 `013`(데이터 없음) 한 번씩만 요청한다. 휴장일 목록 출처는 D-5
+- 상태 확인: `regime-ingest status` — 최근 실행의 `status`(ok/partial/failed/skipped)·요청 수, 날짜별 collected/partial/gap 수
+- 순방향 실행은 오늘 날짜를 `forward`(일부만 봄)로 남긴다. 소급(`backfill`)은 `collected` 만 건너뛰므로 나중에 그 날 전체를 다시 받아 빠진 공시를 채운다. 순방향으로 이미 본 공시는 중복으로 걸러져 `available_at`(처음 본 시각)이 그대로다
+
 ## 저장 (`<ext_store>/`)
 
 | 경로 | 내용 |
 |---|---|
 | `raw/opendart/<수집일>/<run_id>.jsonl.gz` | 받은 응답 그대로 (추가만) |
 | `docs/source=opendart/date=<YYYY-MM>/part-*.parquet` | 정규화 문서 (plan §5 스키마). 내용이 바뀐 공시는 `version` + 1 새 행 |
-| `state.sqlite` | `ingest_runs`·`coverage`(일 × 시장, collected/partial/gap)·`cursors`·`seen_keys`·`report_history`·`doc_files`·`request_days` |
+| `state.sqlite` | `ingest_runs`·`coverage`(일 × 시장, collected/forward/partial/gap)·`cursors`·`seen_keys`·`report_history`·`doc_files`·`request_days` |
 
 - 커서 = "여기까지 빠짐없이 완료". 잘못된 행이 있던 창(`partial`)·실패 창(`gap`) 뒤로는 커서를 넘기지 않아 다음 실행이 다시 받는다
 - 문서 파일은 `*.parquet.tmp` → SQLite commit → 이름 확정 순서. 중간에 죽으면 다음 실행 시작 때 정리된다

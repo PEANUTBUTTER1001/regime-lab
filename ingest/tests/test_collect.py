@@ -274,3 +274,19 @@ def test_api_key_never_leaks(monkeypatch):
     with pytest.raises(OSError) as e:
         fetch({"page_no": 1})
     assert key not in str(e.value) and "***" in str(e.value)
+
+
+def test_forward_day_is_not_treated_as_fully_collected(tmp_path, cfg):
+    """순방향은 그날 일부만 본 것 → coverage=forward. 밤에 소급하면 그 날을 다시 받아 늦게 나온 공시를 채우고,
+    아침에 본 공시는 중복으로 걸러져 available_at(처음 본 시각)이 그대로다."""
+    morning = make_items(date(2026, 10, 7), date(2026, 10, 7), per_day=2)
+    st = _run(Store(tmp_path), FakeDart(morning), cfg, date(2026, 10, 7), date(2026, 10, 7), mode="forward")
+    assert st.new == 2 and set(Store(tmp_path).coverage("opendart").values()) == {"forward"}
+    first = {d["doc_id"]: d["available_at"] for d in Store(tmp_path).read_docs("opendart")}
+    full_day = make_items(date(2026, 10, 7), date(2026, 10, 7), per_day=5)  # 오후에 3건 더
+    fake = FakeDart(full_day)
+    st = _run(Store(tmp_path), fake, cfg, date(2026, 10, 7), date(2026, 10, 7), run_id="r2")
+    assert fake.calls and st.skipped_windows == 0 and st.new == 3 and st.duplicate == 2
+    docs = Store(tmp_path).read_docs("opendart")
+    assert len(docs) == 5 and all(d["available_at"] == first[d["doc_id"]] for d in docs if d["doc_id"] in first)
+    assert set(Store(tmp_path).coverage("opendart").values()) == {"collected"}

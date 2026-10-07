@@ -54,7 +54,8 @@ def status(limit: int = 10) -> dict:
     try:
         cov = store.coverage("opendart")
         return {"store": str(store.root), "backfill_cursor": store.cursor("opendart", "backfill"),
-                "coverage": {s: sum(1 for v in cov.values() if v == s) for s in ("collected", "gap")},
+                "coverage": {s: sum(1 for v in cov.values() if v == s)
+                             for s in ("collected", "forward", "partial", "gap")},
                 "runs": store.runs("opendart", limit)}
     finally:
         store.close()
