@@ -39,7 +39,7 @@ from regime_lab.context import NULL_CONTEXT, RunCancelled, RunContext
 from regime_lab.patterns import CORE_PATTERNS
 from regime_lab.patterns.base import combine_signals
 from regime_lab.patterns.base import make_pattern
-from regime_lab.data.loader import input_file_hashes
+from regime_lab.data.loader import input_file_hashes, warmup_file_hashes
 from regime_lab.pipeline import Prepared, prep_hash
 from regime_lab.runs import DISCLAIMER, ENGINE_VERSION, Strategy, StrategyError, entry_mask, execute, is_int_param
 
@@ -445,7 +445,7 @@ def run_and_save_search(req: SearchRequest, prep: Prepared, cfg: dict, paths: Pa
     """
     t0 = time.time()
     started = datetime.now().isoformat(timespec="seconds")
-    inputs = input_file_hashes(paths.store)
+    inputs = {**input_file_hashes(paths.store), **warmup_file_hashes(paths.cache)}
     data_ver = config_hash(inputs)[:8]
     search_id = search_id or make_search_id(req, cfg, data_ver)
     root = searches_dir(paths)

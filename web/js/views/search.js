@@ -18,7 +18,7 @@ const pctLabel = (v) => (v == null ? t('sx.none') : `${v > 0 ? '+' : ''}${v}%`);
 
 function defaults(meta, opt) {
   return {
-    name: 'my_search', target: 55, minTrades: opt.min_trades.default,
+    name: 'my_search', target: Math.round(opt.target_win_rate_default * 1000) / 10, minTrades: opt.min_trades.default,
     patterns: [...(opt.defaults.patterns || opt.patterns)], combine: [...opt.defaults.combine],
     stop: [...opt.defaults.stop_loss_pct], profit: [...opt.defaults.take_profit_pct], hold: [...opt.defaults.max_hold_days],
     markets: [...meta.markets], start: meta.backtest_start, end: meta.data_as_of,

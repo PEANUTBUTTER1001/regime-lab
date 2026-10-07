@@ -96,5 +96,6 @@ def test_backtest_truncation(sample_prepared, paths, cfg, cut):
         b = b[(b["exit_date"] < pd.Timestamp(cut)) & (b["exit_reason"] != "end_of_data")][cols]
         b = b.reset_index(drop=True)
         assert len(a) > 0 or name in ("bb_lower_recover", "rsi_rebound", "three_down_up", "bb_squeeze_break",
-                                      "pullback_ma20", "granville_buy1", "engulfing")
+                                      "pullback_ma20", "granville_buy1", "engulfing",
+                                      "high_52w", "disparity_rebound", "stochastic_rebound")
         pd.testing.assert_frame_equal(a.astype(str), b.astype(str), obj=name)
