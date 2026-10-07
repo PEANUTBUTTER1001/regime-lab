@@ -1,5 +1,27 @@
 # PROGRESS
 
+## 2026-10-07 16:28:05 KST (+09:00) — PEANUTBUTTER1001 M2·M3·X1·F2 PR 보완 (develop #17~#23 병합 뒤)
+
+- 시작 시각: 2026-10-07 16:28:05 KST (+09:00)
+- 목표: 최신 develop을 합친 `chore/M2-M3-X1-F2-quality`에서 report-v3가 #18·#19의 패턴·수치·선택 청산을 한국어로 설명하게 하고, CI에 ingest를 넣고, 전체 테스트를 다시 확인한다.
+- 승인 근거: 이 채팅의 보완 범위 제안과 사용자 답변 'a 포함 / b 포함'(A: CI에 ingest, B: 보고서에 선택 청산). 커밋·푸시·PR은 범위 밖.
+
+### 단계 상태
+
+| 단계 | 상태 | 비고 |
+|---|---|---|
+| 1. report-v3 패턴·수치 이름표 (#18·#19) | 🟢 완료 | `PATTERN_KO` 14종, `PARAM_KO`에 핵심 5종 기간·배수와 새 4종 수치 추가. 이름은 i18n 한국어와 같게(볼린저 수축 '(거래일)'→'(일)') |
+| 2. report-v3 선택 청산 설명 (B) | 🟢 완료 | 근거에 `strategy.exits_ko`(켜진 청산만, 엔진 검사 순서), 프롬프트 규칙 12, 템플릿은 패턴·수치·청산을 한 문장으로 이어 14문장 제한 유지. 버전은 미배포 v3 유지 |
+| 3. 이름표 누락 방지 테스트 | 🟢 완료 | 설정 `patterns`·`pattern_limits`·`exit_limits` 대비 이름표 일치·i18n 동일 검사, 켜진 청산만 설명·구 결과 처리 검사. `test_llm_verify` 25 passed |
+| 4. CI에 ingest 포함 (A) | 🟢 완료 | matrix에 ingest, `DART_API_KEY` 빈 값, 프로젝트별 핵심 테스트(ingest: test_collect·test_contract). 로컬 ingest 67 passed, 요약 스크립트 3개 프로젝트 통과·핵심 테스트 skip 시 실패 확인. `actions/checkout@v7`·setup-uv 고정 커밋 존재 확인 |
+| 5. `docs/구현_계획.md` §0 갱신 | 🟢 완료 | Git 상태(3243696·927ceef), 10-07 검증 수, F2 ingest, 8002 서버 미실행, report-v3 보완 내용 |
+| 6. 전체 테스트 (원본 있음·없음) | 🟢 완료 | 원본 있음: engine 338·API 90 passed(skip 0). 원본 없음: engine 300 passed·38 skipped, API 53 passed·37 skipped, ingest 67 passed. `git diff --check` 통과 |
+
+- 참고: 저장소 안 `engine/cache/qa/`·`api/cache/qa/`에 접근 권한이 없는 10-02 임시 폴더가 남아 `python -m pytest <engine|api>` 수집이 막혀 `--ignore=<engine|api>/cache`를 붙여 실행했다. Git 제외 폴더이며 CI에는 없다. 지우지 않았다.
+- 최종 결과: 승인 범위 6단계 완료. 커밋·푸시·PR은 사용자 몫. AnyIO deprecation 경고 1건은 그대로.
+
+---
+
 ## 2026-10-07 12:32 KST (+09:00) — hongsungmin0315 백테스트 담당: 재현성 보강·조건 확장(패턴 수치·선택 청산·매수 패턴 4종)
 
 - 시작 시각: 2026-10-07 (기록 시각 2026-10-07 12:32). Claude Code 작업. 이날부터 Agent Relay 채널은 읽지 않고 사용자와만 진행

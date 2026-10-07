@@ -16,20 +16,38 @@ SYSTEM = """당신은 과거 백테스트 결과를 한국어로 해설하는 �
 8. 형식: 세 개의 소제목 '## 요약', '## 검증 결과', '## 한계' 아래에 짧은 문단으로 쓰세요. 백틱·굵게·목록 기호 같은 마크다운 강조는 쓰지 마세요. 전체 14문장 이내.
 9. 투자 권유가 아니라는 고지 문구는 화면이 따로 표시하므로 쓰지 않아도 됩니다.
 10. 전략 조건: 한국어 패턴 이름을 쓰고, pattern_params에 저장된 조정 수치가 있으면 아래 항목명 매핑의 한국어 이름과 함께 설명하세요. 패턴 이름만 보고 기본 수치(예: RSI 30, 하락 3일)를 가정하지 마세요. 저장되지 않은 수치는 확인할 수 없습니다.
-11. 손익비는 배수이고 샤프는 단위 없는 비율입니다. metric_descriptions에 따라 집계 제외 거래와 진입을 건너뛴 신호를 구분하세요. validation.split_date가 있으면 그 기준일을 설명하고, 없으면 날짜를 추정하지 마세요. 산출 불가(null) 값은 0이나 미통과로 바꾸지 마세요."""
+11. 손익비는 배수이고 샤프는 단위 없는 비율입니다. metric_descriptions에 따라 집계 제외 거래와 진입을 건너뛴 신호를 구분하세요. validation.split_date가 있으면 그 기준일을 설명하고, 없으면 날짜를 추정하지 마세요. 산출 불가(null) 값은 0이나 미통과로 바꾸지 마세요.
+12. 청산 조건은 strategy.exits_ko 의 한국어 이름·값·단위로 설명하세요. 목록에 없는 청산(꺼진 규칙)은 쓰지 마세요. 엔진은 목록 순서대로 검사해 먼저 걸린 규칙으로 청산합니다."""
 
 # 본문에 코드값 대신 쓰도록 AI 에 함께 넘기는 한국어 이름 (화면 i18n 한국어 값과 같다)
 PATTERN_KO = {"ma_cross_5_20": "5/20 골든크로스", "breakout_20d": "20일 고가 돌파", "breakout_vol": "거래량 동반 돌파",
               "rsi_rebound": "RSI 회복", "bb_lower_recover": "볼린저 하단 회복",
               "three_down_up": "연속 하락 뒤 반등", "bb_squeeze_break": "볼린저 수축 돌파",
-              "pullback_ma20": "20일선 눌림목", "granville_buy1": "그랜빌 매수 1법칙", "engulfing": "상승 장악형"}
+              "pullback_ma20": "20일선 눌림목", "granville_buy1": "그랜빌 매수 1법칙", "engulfing": "상승 장악형",
+              "macd_cross": "MACD 골든크로스", "high_52w": "52주 신고가 돌파",
+              "disparity_rebound": "이격도 과매도 반등", "stochastic_rebound": "스토캐스틱 과매도 반등"}
 PARAM_KO = {
-    "breakout_vol": {"volume_mult": "거래량 배수"}, "rsi_rebound": {"threshold": "RSI 문턱"},
+    "ma_cross_5_20": {"fast": "단기 이평(일)", "slow": "장기 이평(일)"},
+    "breakout_20d": {"lookback": "고가 비교 기간(일)"},
+    "breakout_vol": {"volume_mult": "거래량 배수", "lookback": "고가·거래량 비교 기간(일)"},
+    "rsi_rebound": {"threshold": "RSI 문턱", "window": "RSI 기간(일)"},
+    "bb_lower_recover": {"window": "볼린저 기간(일)", "k": "볼린저 배수(σ)"},
     "three_down_up": {"down_days": "연속 하락 일수"},
-    "bb_squeeze_break": {"squeeze_lookback": "수축 비교 기간(거래일)"},
+    "bb_squeeze_break": {"squeeze_lookback": "수축 비교 기간(일)"},
     "pullback_ma20": {"touch_tolerance_pct": "접근 허용(%)", "max_penetration_pct": "최대 침투(%)"},
     "granville_buy1": {"slope_days": "기울기 비교 일수"},
     "engulfing": {"min_body_ratio": "몸통 최소 배수", "trend_days": "직전 하락 비교 일수"},
+    "macd_cross": {"fast": "MACD 단기 EMA(일)", "slow": "MACD 장기 EMA(일)", "signal": "시그널 EMA(일)"},
+    "high_52w": {"lookback": "신고가 비교 기간(일)"},
+    "disparity_rebound": {"window": "이동평균 기간(일)", "threshold": "이격도 문턱"},
+    "stochastic_rebound": {"k_window": "%K 기간(일)", "d_window": "%D 기간(일)", "oversold": "과매도 문턱"},
+}
+# 청산 규칙: 엔진의 검사 순서대로 (손절 → 익절 → 트레일링 → 본전 → 이평 이탈 → 최대 보유). (이름, 값 단위)
+EXIT_KO = {
+    "stop_loss_pct": ("손절", "%"), "take_profit_pct": ("익절", "%"),
+    "trailing_stop_pct": ("트레일링 스톱(보유 중 최고 기준가 대비)", "%"),
+    "breakeven_trigger_pct": ("본전 스톱(발동 수익률)", "%"),
+    "ma_exit_window": ("이동평균 이탈 청산", "일선"), "max_hold_days": ("최대 보유", "거래일"),
 }
 SYSTEM += "\n조정 수치 항목명: " + "; ".join(
     f"{p}: " + ", ".join(f"{k}={label}" for k, label in vals.items()) for p, vals in PARAM_KO.items())
@@ -77,6 +95,7 @@ def build_facts(result: dict, strategy: str) -> dict:
     ok_cells = [c for c in cells if not c.get("sample_insufficient")]
     ok_excess = [c.get("mean_excess") for c in ok_cells if c.get("mean_excess") is not None]
     patterns = inp.get("patterns") or []
+    ex = inp.get("exit") or {}
     return {
         "strategy": {
             "name": strategy, "patterns": inp.get("patterns"), "combine": inp.get("combine"),
@@ -86,6 +105,8 @@ def build_facts(result: dict, strategy: str) -> dict:
             "exit": inp.get("exit"), "markets": inp.get("markets"), "period": inp.get("period"),
             "min_avg_value_krw": inp.get("min_avg_value_krw"), "cap_groups": inp.get("cap_groups"),
             "pattern_params": inp.get("pattern_params") or {},
+            "exits_ko": [{"rule_ko": name, "value": ex[k], "unit": unit}
+                         for k, (name, unit) in EXIT_KO.items() if ex.get(k) is not None],
         },
         "data_as_of": result.get("data_as_of"),
         "units": "수익률·승률·초과수익·MDD는 % 단위, 손익비는 배수, 샤프는 단위 없는 비율",

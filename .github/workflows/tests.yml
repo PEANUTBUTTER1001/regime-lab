@@ -22,12 +22,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [engine, api]
+        project: [engine, api, ingest]
     env:
       QUALITY_PROJECT: ${{ matrix.project }}
       OPENAI_API_KEY: ""
       GEMINI_API_KEY: ""
       ANTHROPIC_API_KEY: ""
+      DART_API_KEY: ""
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,7 +62,11 @@ jobs:
           cases = ET.parse(report).getroot().findall('.//testcase')
           skipped = [c for c in cases if c.find('skipped') is not None]
           failed = [c for c in cases if c.find('failure') is not None or c.find('error') is not None]
-          required = ('test_llm_verify', 'test_search_contract') if project == 'api' else ('test_search', 'test_win_rate')
+          required = {
+              'engine': ('test_search', 'test_win_rate'),
+              'api': ('test_llm_verify', 'test_search_contract'),
+              'ingest': ('test_collect', 'test_contract'),
+          }[project]
           missing = [name for name in required if not any(c.get('classname', '').endswith('.' + name) for c in cases)]
           core_skipped = [c for c in skipped if any(c.get('classname', '').endswith('.' + name) for name in required)]
           with summary.open('a', encoding='utf-8') as out:

@@ -45,11 +45,12 @@ def render(facts: dict) -> str:
     params = [f"{pname} · {PARAM_KO.get(p, {}).get(k, k)} {_n(value)}"
               for p, pname in zip(st.get("patterns") or [], st.get("patterns_ko") or [])
               for k, value in st.get("pattern_params", {}).get(p, {}).items()]
-    conditions = ""
-    if st.get("patterns_ko"):
-        conditions = "선택한 패턴은 " + ", ".join(st["patterns_ko"])
-        conditions += ("이며, 실행에 저장된 조정 수치는 " + ", ".join(params) + "입니다. "
-                       if params else "입니다. ")
+    exits = [f"{x['rule_ko']} {_n(x['value'], x['unit'])}" for x in st.get("exits_ko") or []]
+    # 14문장 제한 안에 들도록 패턴·조정 수치·청산을 한 문장으로 잇는다
+    parts = [p for p in ("선택한 패턴은 " + ", ".join(st["patterns_ko"]) if st.get("patterns_ko") else "",
+                         "실행에 저장된 조정 수치는 " + ", ".join(params) if params else "",
+                         "청산 조건은 " + ", ".join(exits) if exits else "") if p]
+    conditions = "이며, ".join(parts) + "입니다. " if parts else ""
     split = f"기간 분할 기준일은 {v['split_date']}입니다. " if v.get("split_date") else "기간 분할 기준일은 저장된 근거에서 확인할 수 없습니다. "
     judgement = JUDGEMENT_KO.get(v["split_judgement"], v["split_judgement"]) or "산출 불가입니다"
     period = (f"{m['period_start']}부터 {m['period_end']}까지 " if m['period_start'] and m['period_end']
