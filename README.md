@@ -65,7 +65,13 @@ uv sync --project api
 uv run --project engine python engine/scripts/extract_sqldump.py
 ```
 
-3. 분석용 데이터를 미리 계산해 둡니다(약 40초). 이후 서버는 1초 안에 데이터를 불러옵니다.
+3. 과거 지수(2019-08~2020-08)를 받아 둡니다(인터넷 필요, 몇 초). 받아 두면 시장 국면이 2020-09-01부터 계산됩니다. 건너뛰면 지수 이력 부족으로 2021-07-21부터 계산됩니다.
+
+```bash
+uv run --project engine --with finance-datareader python engine/scripts/fetch_index_history.py
+```
+
+4. 분석용 데이터를 미리 계산해 둡니다(약 40초). 이후 서버는 1초 안에 데이터를 불러옵니다.
 
 ```bash
 uv run --project engine regime-lab prepare
