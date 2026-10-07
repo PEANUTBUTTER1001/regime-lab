@@ -29,11 +29,12 @@ def _client() -> tuple[OpenDartList, dict]:
     return OpenDartList(http_fetch(cfg["base_url"], key, cfg["user_agent"], float(cfg["timeout_sec"])), cfg), cfg
 
 
-def backfill(start: date, end: date) -> RunStats:
+def backfill(start: date, end: date, refetch: bool = False) -> RunStats:
     client, cfg = _client()
     store = Store(load_store_path())
     try:
-        return collect(store, client, cfg, start, end, mode="backfill", now=_now, run_id=_run_id())
+        return collect(store, client, cfg, start, end, mode="backfill", now=_now, run_id=_run_id(),
+                       refetch=refetch)
     finally:
         store.close()
 

@@ -22,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--source", choices=["opendart"], default="opendart")
     b.add_argument("--from", dest="start", type=_date, required=True)
     b.add_argument("--to", dest="end", type=_date, default=date.today())
+    b.add_argument("--refetch", action="store_true", help="이미 collected 인 창도 다시 받음 (정정 재확인)")
     r = sub.add_parser("run", help="순방향 수집 (오늘 공시, OS 스케줄러로 주기 실행)")
     r.add_argument("--source", choices=["opendart"], default="opendart")
     s = sub.add_parser("status", help="커서·수집 범위·최근 실행")
@@ -33,7 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "backfill":
         if a.start > a.end:
             p.error("--from 이 --to 보다 늦음")
-        out = app.backfill(a.start, a.end).record("")
+        st = app.backfill(a.start, a.end, a.refetch)
+        out = {**st.record(""), "skipped_windows": st.skipped_windows}
     elif a.cmd == "run":
         out = app.forward().record("")
     else:

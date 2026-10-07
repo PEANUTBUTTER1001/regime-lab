@@ -26,6 +26,15 @@ def test_available_at_backfill_is_next_day_midnight():
     assert available_at(date(2024, 12, 31), SEEN_AT, True) == datetime(2025, 1, 1, tzinfo=KST)  # 연도 넘김
 
 
+def test_kst_is_fixed_offset_without_tzdata():
+    """codex 리뷰: Windows 에 tzdata 가 없어도 동작 — 고정 UTC+9, 결과 문자열은 +09:00."""
+    import regime_ingest.timing as timing
+
+    assert KST.utcoffset(None).total_seconds() == 9 * 3600
+    assert "zoneinfo" not in timing.__dict__ and "ZoneInfo" not in timing.__dict__
+    assert datetime(2024, 7, 1, 12, tzinfo=KST).isoformat().endswith("+09:00")  # 여름에도 같은 오프셋
+
+
 def test_available_at_forward_is_first_seen():
     assert available_at(date(2026, 10, 7), SEEN_AT, backfilled=False) == SEEN_AT
     with pytest.raises(ValueError):

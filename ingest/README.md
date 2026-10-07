@@ -17,7 +17,7 @@ export DART_API_KEY=...   # 키는 환경변수로만. 파일·채팅·커밋에
 ## 명령
 
 ```bash
-uv run --project ingest regime-ingest backfill --from 2021-01-01 --to 2026-10-06   # 5년 소급 (끊기면 다시 실행 → 커서부터)
+uv run --project ingest regime-ingest backfill --from 2021-01-01 --to 2026-10-06   # 5년 소급 (끊기면 다시 실행 → 안 받은 창만, --refetch 는 전부 다시)
 uv run --project ingest regime-ingest run                                          # 순방향 (오늘 공시, OS 스케줄러로 주기 실행)
 uv run --project ingest regime-ingest status                                       # 커서·수집 범위·최근 실행
 uv run --project ingest python -m pytest ingest                                    # 테스트 (네트워크·키 없음)

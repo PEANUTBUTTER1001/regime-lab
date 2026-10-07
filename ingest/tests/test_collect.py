@@ -28,9 +28,9 @@ class Clock:
         return self.t
 
 
-def _run(store, fake, cfg, start, end, mode="backfill", run_id="r1", **kw):
+def _run(store, fake, cfg, start, end, mode="backfill", run_id="r1", refetch=False, **kw):
     client = OpenDartList(fake, {**cfg, **kw}, sleep=lambda s: None)
-    return collect(store, client, {**cfg, **kw}, start, end, mode=mode, now=Clock(), run_id=run_id)
+    return collect(store, client, {**cfg, **kw}, start, end, mode=mode, now=Clock(), run_id=run_id, refetch=refetch)
 
 
 def _stable(docs):
@@ -58,12 +58,25 @@ def test_rerun_same_window_is_idempotent(tmp_path, cfg):
     items = make_items(date(2021, 1, 1), date(2021, 1, 31))
     _run(Store(tmp_path), FakeDart(items), cfg, date(2021, 1, 1), date(2021, 1, 31))
     before = _stable(Store(tmp_path).read_docs("opendart"))
-    store = Store(tmp_path)
-    store.set_cursor("opendart", "backfill", "2020-12-31")  # 커서를 되돌려 같은 창을 다시 받게 함
-    store.commit()
-    st = _run(store, FakeDart(items), cfg, date(2021, 1, 1), date(2021, 1, 31), run_id="r2")
+    skip = FakeDart(items)
+    st = _run(Store(tmp_path), skip, cfg, date(2021, 1, 1), date(2021, 1, 31), run_id="r2")
+    assert st.skipped_windows == 1 and skip.calls == [] and st.status == "ok"  # 이미 collected → 요청 0
+    st = _run(Store(tmp_path), FakeDart(items), cfg, date(2021, 1, 1), date(2021, 1, 31), run_id="r3", refetch=True)
     assert st.new == 0 and st.duplicate == len(items) and st.changed == 0
     assert _stable(Store(tmp_path).read_docs("opendart")) == before
+
+
+def test_earlier_uncollected_range_is_not_skipped(tmp_path, cfg):
+    """codex 리뷰: 2월만 받은 뒤 1~2월을 요청하면 1월을 받아야 한다 (예전: 전역 커서가 2월 말이라 조용히 누락)."""
+    items = make_items(date(2021, 1, 1), date(2021, 2, 28))
+    _run(Store(tmp_path), FakeDart(items), cfg, date(2021, 2, 1), date(2021, 2, 28))
+    fake = FakeDart(items)
+    st = _run(Store(tmp_path), fake, cfg, date(2021, 1, 1), date(2021, 2, 28), run_id="r2")
+    assert st.status == "ok" and st.skipped_windows == 1 and st.new == sum(1 for i in items if i["rcept_dt"] < "202102")
+    assert {c["bgn_de"][:6] for c in fake.calls} == {"202101"}  # 2월은 요청하지 않음
+    cov = Store(tmp_path).coverage("opendart")
+    assert len(cov) == 59 * 2 and set(cov.values()) == {"collected"}
+    assert Store(tmp_path).cursor("opendart", "backfill") == "2021-02-28"
 
 
 def test_changed_content_adds_new_version(tmp_path, cfg):
@@ -124,10 +137,7 @@ def test_changed_backfill_version_not_backdated(tmp_path, cfg):
     _run(Store(tmp_path), FakeDart(items), cfg, date(2026, 1, 1), date(2026, 1, 3))
     changed = [dict(i) for i in items]
     changed[0]["rm"] = "정"
-    store = Store(tmp_path)
-    store.set_cursor("opendart", "backfill", "2025-12-31")
-    store.commit()
-    _run(store, FakeDart(changed), cfg, date(2026, 1, 1), date(2026, 1, 3), run_id="r2")
+    _run(Store(tmp_path), FakeDart(changed), cfg, date(2026, 1, 1), date(2026, 1, 3), run_id="r2", refetch=True)
     rows = {d["version"]: d for d in Store(tmp_path).read_docs("opendart") if d["rcept_no"] == items[0]["rcept_no"]}
     assert rows[1]["available_at"] == "2026-01-02T00:00:00+09:00"
     assert rows[2]["available_at"] == rows[2]["first_seen_at"] > "2026-10-07"  # 수집 시각(합성 시계 2026-10-07)
@@ -209,7 +219,8 @@ def test_bad_items_keep_window_partial_and_cursor(tmp_path, cfg):
     cov = store.coverage("opendart")
     assert cov[("2021-01-10", "Y")] == "partial" and cov[("2021-02-10", "Y")] == "collected"
     st2 = _run(store, FakeDart(items), cfg, date(2021, 1, 1), date(2021, 2, 28), run_id="r2")  # 고쳐진 응답
-    assert st2.status == "ok" and st2.new == 1 and st2.duplicate == len(items) - 1
+    jan = sum(1 for i in items if i["rcept_dt"] < "202102")
+    assert st2.status == "ok" and st2.new == 1 and st2.duplicate == jan - 1 and st2.skipped_windows == 1  # 2월은 건너뜀
     store = Store(tmp_path)
     assert store.cursor("opendart", "backfill") == "2021-02-28"
     assert set(store.coverage("opendart").values()) == {"collected"}

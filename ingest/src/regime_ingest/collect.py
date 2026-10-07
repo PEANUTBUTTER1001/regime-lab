@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from regime_ingest.dedup import classify, link_amendments
 from regime_ingest.normalize import SOURCE, normalize
@@ -32,12 +32,14 @@ class RunStats:
     duplicate: int = 0
     changed: int = 0
     errors: int = 0
+    skipped_windows: int = 0
     status: str = "ok"
     message: str = ""
     error_samples: list[str] = field(default_factory=list)
 
     def record(self, finished_at: str) -> dict:
-        return {**{k: v for k, v in self.__dict__.items() if k != "error_samples"}, "source": SOURCE,
+        return {**{k: v for k, v in self.__dict__.items() if k not in ("error_samples", "skipped_windows")},
+                "source": SOURCE,
                 "finished_at": finished_at}
 
 
@@ -96,13 +98,19 @@ def _commit_window(store: Store, cfg: dict, docs: dict[str, dict], bgn: date, en
     store.publish(staged)
 
 
+def _window_done(cov: dict, cfg: dict, bgn: date, end: date) -> bool:
+    return all(cov.get((x.isoformat(), cls)) == "collected" for x in days(bgn, end) for cls in cfg["corp_cls"])
+
+
 def collect(store: Store, client: OpenDartList, cfg: dict, start: date, end: date, *, mode: str,
-            now: Callable[[], datetime], run_id: str) -> RunStats:
+            now: Callable[[], datetime], run_id: str, refetch: bool = False) -> RunStats:
     """mode='backfill': [start, end] 를 창으로 나눠 커서 다음 날부터 받는다 (backfilled=True).
     mode='forward': [start, end](보통 오늘 하루)를 바로 받는다. available_at = 처음 본 시각.
 
-    커서는 '여기까지 빠짐없이 완료'를 뜻한다. 잘못된 행이 있던 창(partial)이나 실패 창(gap) 뒤로는 커서를 넘기지
-    않으므로 다음 실행이 그 창부터 다시 받는다 (이미 받은 문서는 중복으로 걸러져 늘지 않는다)."""
+    소급은 **날짜별 수집 범위(coverage)** 로 건너뛸 창을 정한다: 모든 날 × 시장이 collected 인 창만 건너뛰고,
+    partial·gap·기록 없음인 창은 다시 받는다(이미 받은 문서는 중복으로 걸러져 늘지 않는다). 그래서 요청 범위의
+    앞쪽이 비어 있으면 뒤쪽을 먼저 받았더라도 채운다. refetch=True 면 collected 창도 다시 받는다(정정 재확인용).
+    커서는 상태 표시용으로, 이번 실행에서 요청 시작일부터 빠짐없이 완료한 마지막 날이다."""
     if mode not in ("backfill", "forward"):
         raise ValueError(mode)
     stats = RunStats(run_id, mode, start.isoformat(), end.isoformat(), now().isoformat())
@@ -117,13 +125,15 @@ def collect(store: Store, client: OpenDartList, cfg: dict, start: date, end: dat
         store.commit()
         return stats
     try:
-        if mode == "backfill":
-            cur = store.cursor(SOURCE, "backfill")
-            if cur and date.fromisoformat(cur) >= start:
-                start = max(start, date.fromisoformat(cur) + timedelta(days=1))
         windows = month_windows(start, end, int(cfg["window_months"])) if start <= end else []
+        cov = store.coverage(SOURCE) if mode == "backfill" and not refetch else {}
         contiguous = mode == "backfill"
         for bgn, wend in windows:
+            if cov and _window_done(cov, cfg, bgn, wend):
+                stats.skipped_windows += 1
+                if contiguous:
+                    store.set_cursor(SOURCE, "backfill", wend.isoformat())
+                continue
             try:
                 docs, bad = _fetch_window(client, store, cfg, bgn, wend, backfilled=(mode == "backfill"), now=now,
                                           stats=stats)

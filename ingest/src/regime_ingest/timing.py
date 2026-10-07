@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, time, timedelta, timezone
 
-KST = ZoneInfo("Asia/Seoul")
+# 한국 표준시는 1988년 이후 서머타임이 없어 UTC+9 고정과 같다. zoneinfo 는 Windows 에 시간대 자료(tzdata)가
+# 없으면 실패하므로 새 의존성 없이 고정 오프셋을 쓴다 (codex-01a0fb4b 리뷰, 2026-10-07).
+KST = timezone(timedelta(hours=9), "KST")
 
 
 def parse_yyyymmdd(s: str) -> date:
