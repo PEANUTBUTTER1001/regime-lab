@@ -12,7 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MAX_STRATEGIES = 5  # 한 요청의 최대 전략 수 (비교 실행, 핵심 5종 기준)
 
-PatternName = Literal["ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover"]
+PatternName = Literal["ma_cross_5_20", "breakout_20d", "breakout_vol", "rsi_rebound", "bb_lower_recover",
+                      "three_down_up", "bb_squeeze_break", "pullback_ma20", "granville_buy1", "engulfing",  # X6 후순위 5종
+                      "macd_cross", "high_52w", "disparity_rebound", "stochastic_rebound"]  # 추가 4종
 Market = Literal["KOSPI", "KOSDAQ"]
 CapGroup = Literal["large", "mid", "small"]
 DATE = r"^\d{4}-\d{2}-\d{2}$"
@@ -26,7 +28,9 @@ class ExitIn(_Strict):
     stop_loss_pct: float | None = Field(None, description="손절 %, -50 ~ -1 또는 null(미사용)")
     take_profit_pct: float | None = Field(None, description="익절 %, +1 ~ +200 또는 null(미사용)")
     max_hold_days: int = Field(20, description="최대 보유 거래일, 1 ~ 250 (필수)")
-    trailing_stop_pct: None = Field(None, description="이번 릴리스는 null 만 허용")
+    trailing_stop_pct: float | None = Field(None, description="트레일링 스톱 %, 보유 중 최고 기준가 대비 -50 ~ -1 또는 null(미사용)")
+    breakeven_trigger_pct: float | None = Field(None, description="본전 스톱 발동 수익률 %, +1 ~ +100 또는 null(미사용)")
+    ma_exit_window: int | None = Field(None, description="이동평균 이탈 청산 기간(거래일), 5 ~ 250 또는 null(미사용)")
 
 
 class PeriodIn(_Strict):
@@ -41,11 +45,16 @@ class FilterIn(_Strict):
     cap_groups: list[CapGroup] | None = Field(None, description="시총 그룹. 생략 시 전체")
 
 
+PatternParams = dict[PatternName, dict[str, int | float]]  # 정수는 정수 그대로 (일수 같은 수치는 엔진이 정수만 받음)
+
+
 class StrategyIn(FilterIn):
     name: str = Field(pattern=r"^[A-Za-z0-9_\-]{1,64}$", description="전략 이름 (영문·숫자·_·-)")
     patterns: list[PatternName] = Field(min_length=1, description="핵심 패턴 1개 이상")
     combine: Literal["and", "or"] = "or"
     exit: ExitIn | None = Field(None, description="청산 규칙. 생략 시 기본값(-8 / +20 / 20거래일)")
+    pattern_params: PatternParams | None = Field(
+        None, description="P1-4 조합별 패턴 수치 {패턴: {수치: 값}}. 바꿀 수 있는 수치·범위는 GET /meta 의 pattern_params")
 
 
 class RunRequest(_Strict):
@@ -72,6 +81,8 @@ class SearchAxesIn(_Strict):
     stop_loss_pct: list[float | None] | None = Field(None, description="손절 % 목록 (허용 값은 GET /searches/options)")
     take_profit_pct: list[float | None] | None = Field(None, description="익절 % 목록")
     max_hold_days: list[int] | None = Field(None, description="최대 보유 거래일 목록")
+    pattern_params: dict[PatternName, dict[str, list[int | float]]] | None = Field(
+        None, description="P1-4 패턴 수치 축 {패턴: {수치: [값...]}}. 허용 값은 GET /searches/options 의 pattern_axes")
 
 
 class SearchRequestIn(_Strict):
@@ -88,6 +99,7 @@ class PresetStrategyIn(FilterIn):
     patterns: list[PatternName] = Field(min_length=1)
     combine: Literal["and", "or"] = "or"
     exit: ExitIn | None = None
+    pattern_params: PatternParams | None = None
 
 
 class FromSearchIn(_Strict):

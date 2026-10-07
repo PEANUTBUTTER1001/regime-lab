@@ -9,15 +9,52 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const patLabel = (p) => (has(`pat.${p.name}`) ? t(`pat.${p.name}`) : p.label);
 const patRule = (p) => (has(`rule.${p.name}`) ? t(`rule.${p.name}`) : p.rule);
 
+// 저장한 조합(기본값을 채운 전략) → 빌더 입력값 (P1-10)
+export function fromStrategy(st, meta) {
+  const ex = st.exit || {};
+  const base = defaults(meta);
+  return {
+    ...base, name: st.name, patterns: [...st.patterns], combine: st.combine,
+    useStop: ex.stop_loss_pct != null, stop: ex.stop_loss_pct ?? base.stop,
+    useProfit: ex.take_profit_pct != null, profit: ex.take_profit_pct ?? base.profit, hold: ex.max_hold_days,
+    useTrail: ex.trailing_stop_pct != null, trail: ex.trailing_stop_pct ?? base.trail,
+    useBe: ex.breakeven_trigger_pct != null, be: ex.breakeven_trigger_pct ?? base.be,
+    useMa: ex.ma_exit_window != null, maWin: ex.ma_exit_window ?? base.maWin,
+    markets: [...st.markets], start: st.period.start, end: st.period.end, minValue: st.min_avg_value_krw, caps: [...st.cap_groups],
+    pp: JSON.parse(JSON.stringify(st.pattern_params || {})),
+  };
+}
+
+// 빌더 입력이 불러온 조합과 다른가 (저장하지 않은 변경 경고용)
+export function isDirty() {
+  const lp = state.loadedPreset;
+  if (!state.draft) return false;
+  return !lp || JSON.stringify(toBody(state.draft)) !== lp.body;
+}
+
 function defaults(meta) {
   const ex = meta.exit_defaults;
   return {
     name: 'my_strategy', patterns: ['breakout_20d'], combine: 'or',
     useStop: ex.stop_loss_pct != null, stop: ex.stop_loss_pct ?? -8,
     useProfit: ex.take_profit_pct != null, profit: ex.take_profit_pct ?? 20, hold: ex.max_hold_days,
+    useTrail: false, trail: -10, useBe: false, be: 5, useMa: false, maWin: 20,
     markets: [...meta.markets], start: meta.backtest_start, end: meta.data_as_of,
-    minValue: meta.min_avg_value_krw, caps: [...meta.cap_groups],
+    minValue: meta.min_avg_value_krw, caps: [...meta.cap_groups], pp: {},
   };
+}
+
+// 고른 패턴의 바꾼 수치만 (기본값과 같으면 싣지 않는다 → 손대지 않은 조합은 기존 요청과 같다) (P1-4)
+function changedParams(f, meta) {
+  const out = {};
+  for (const p of f.patterns) {
+    for (const [k, v] of Object.entries(f.pp?.[p] || {})) {
+      const lim = meta.pattern_params?.[p]?.[k];
+      if (!lim || v === '' || v == null || Number(v) === lim.default) continue;
+      (out[p] ||= {})[k] = Number(v);
+    }
+  }
+  return out;
 }
 
 function validate(f, meta) {
@@ -28,6 +65,13 @@ function validate(f, meta) {
   const num = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? null : Number(v));
   if (f.useStop) { const v = num(f.stop); if (v == null || v < lim.stop_loss_pct[0] || v > lim.stop_loss_pct[1]) e['exit.stop_loss_pct'] = t('v.range', { a: lim.stop_loss_pct[0], b: lim.stop_loss_pct[1] }); }
   if (f.useProfit) { const v = num(f.profit); if (v == null || v < lim.take_profit_pct[0] || v > lim.take_profit_pct[1]) e['exit.take_profit_pct'] = t('v.range', { a: lim.take_profit_pct[0], b: lim.take_profit_pct[1] }); }
+  // 선택 청산 (2026-10-07): 범위는 /api/meta 의 exit_limits
+  for (const [use, key, val, intOnly] of [['useTrail', 'trailing_stop_pct', 'trail', false], ['useBe', 'breakeven_trigger_pct', 'be', false], ['useMa', 'ma_exit_window', 'maWin', true]]) {
+    const r = lim[key];
+    if (!f[use] || !r) continue;
+    const v = num(f[val]);
+    if (v == null || (intOnly && !Number.isInteger(v)) || v < r[0] || v > r[1]) e[`exit.${key}`] = t('v.range', { a: r[0], b: r[1] });
+  }
   const hd = num(f.hold);
   if (hd == null || !Number.isInteger(hd) || hd < lim.max_hold_days[0] || hd > lim.max_hold_days[1]) e['exit.max_hold_days'] = t('v.hold', { a: lim.max_hold_days[0], b: lim.max_hold_days[1] });
   if (!f.markets.length) e.markets = t('v.markets');
@@ -39,33 +83,60 @@ function validate(f, meta) {
   const mv = num(f.minValue);
   if (mv == null || !Number.isInteger(mv) || mv < meta.min_avg_value_krw) e.min_avg_value_krw = t('v.value', { v: fmt.int(meta.min_avg_value_krw) });
   if (!f.caps.length) e.cap_groups = t('v.caps');
+  for (const p of f.patterns) {
+    for (const [k, v] of Object.entries(f.pp?.[p] || {})) {
+      const lim = meta.pattern_params?.[p]?.[k];
+      if (lim && v !== '' && (Number.isNaN(Number(v)) || Number(v) < lim.min || Number(v) > lim.max)) {
+        e[`pattern_params.${p}.${k}`] = t('pp.range', { a: lim.min, b: lim.max });
+      }
+    }
+  }
   return e;
 }
 
-function toBody(f) {
+export function toBody(f, meta = state.meta) {
+  const pp = meta ? changedParams(f, meta) : {};
   return {
+    ...(Object.keys(pp).length ? { pattern_params: pp } : {}),
     name: f.name, patterns: f.patterns, combine: f.combine,
     exit: { stop_loss_pct: f.useStop ? Number(f.stop) : null, take_profit_pct: f.useProfit ? Number(f.profit) : null,
-      max_hold_days: Number(f.hold), trailing_stop_pct: null },
+      max_hold_days: Number(f.hold), trailing_stop_pct: f.useTrail ? Number(f.trail) : null,
+      // 본전·이평 이탈은 켰을 때만 싣는다 → 안 쓰면 예전과 같은 요청 (저장 조합 변경 여부 비교 유지)
+      ...(f.useBe ? { breakeven_trigger_pct: Number(f.be) } : {}),
+      ...(f.useMa ? { ma_exit_window: Number(f.maWin) } : {}) },
     markets: f.markets, period: { start: f.start, end: f.end }, min_avg_value_krw: Number(f.minValue), cap_groups: f.caps,
   };
 }
 
-export async function renderBuilder(el) {
+export async function renderBuilder(el, query = new URLSearchParams()) {
   let meta = state.meta;
   if (!meta || meta.status !== 'ready') {
     el.append(h('h1', { text: t('b.title') }), loading(t('b.loadingData')));
     try { meta = await api.meta(); state.meta = meta; } catch (e) {
-      el.replaceChildren(h('h1', { text: t('b.title') }), errorView(e, { onRetry: () => { el.replaceChildren(); renderBuilder(el); } }));
+      el.replaceChildren(h('h1', { text: t('b.title') }), errorView(e, { onRetry: () => { el.replaceChildren(); renderBuilder(el, query); } }));
       return;
     }
     if (meta.status !== 'ready') {
-      const tm = setTimeout(() => { el.replaceChildren(); renderBuilder(el); }, 2000);
+      const tm = setTimeout(() => { el.replaceChildren(); renderBuilder(el, query); }, 2000);
       return () => clearTimeout(tm);
     }
     el.replaceChildren();
   }
 
+  // 저장 목록에서 불러오기: #/builder?preset=<id> → 입력값을 채우고 주소에서 매개변수를 지운다 (P1-10)
+  const presetId = query.get('preset');
+  if (presetId) {
+    try {
+      const p = await api.preset(presetId);
+      const loaded = fromStrategy(p.strategy, meta);
+      state.draft = loaded;
+      state.loadedPreset = { id: p.id, name: p.name, revision: p.revision, body: JSON.stringify(toBody(loaded)) };
+      toast(t('pb.loaded', { n: p.name }));
+    } catch (e) {
+      toast(`${has(`err.${e.code}`) ? t(`err.${e.code}`) : e.message} (${e.code})`);
+    }
+    history.replaceState(null, '', '#/builder');
+  }
   const f = { ...defaults(meta), ...(state.draft || {}) };
   const errs = {};
   const errEls = {};
@@ -77,19 +148,37 @@ export async function renderBuilder(el) {
   const seg = h('div', { class: 'segment', role: 'group', 'aria-label': t('b.logic') },
     ['and', 'or'].map((c) => h('button', { type: 'button', 'aria-pressed': String(f.combine === c), 'data-c': c,
       onclick: () => { f.combine = c; seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.c === c))); save(); } }, c.toUpperCase())));
+  // 세부 조건 (P1-4): 고른 패턴 중 조합별로 바꿀 수 있는 수치. 범위·기본값은 /api/meta 의 pattern_params
+  f.pp = f.pp || {};
+  const ppBox = h('div', {});
+  function renderPP() {
+    const items = f.patterns.flatMap((p) => Object.entries(meta.pattern_params?.[p] || {}).map(([k, lim]) => [p, k, lim]));
+    if (!items.length) { ppBox.replaceChildren(); return; }
+    ppBox.replaceChildren(h('details', { open: Object.keys(changedParams(f, meta)).length ? true : null },
+      h('summary', {}, t('pp.details')),
+      items.map(([p, k, lim]) => {
+        const id = `pp-${p}-${k}`;
+        const key = `pattern_params.${p}.${k}`;
+        const input = h('input', { id, inputmode: 'decimal', value: String(f.pp[p]?.[k] ?? lim.default), 'aria-describedby': described(key),
+          oninput: (e) => { (f.pp[p] ||= {})[k] = e.target.value.trim(); save(); } });
+        return h('div', {}, h('label', { for: id }, `${has(`pat.${p}`) ? t(`pat.${p}`) : p} · ${t(`pp.${p}.${k}`)}`), input,
+          h('p', { class: 'hint', text: t('pp.hint', { d: lim.default, a: lim.min, b: lim.max }) }), errorSlot(key));
+      })));
+  }
+  renderPP();
   const patternChecks = meta.patterns.map((p) => {
     const box = h('input', { type: 'checkbox', checked: f.patterns.includes(p.name), 'aria-label': patLabel(p), 'aria-describedby': described('patterns') });
     const lab = h('label', { class: `check${f.patterns.includes(p.name) ? ' selected' : ''}` }, box, h('span', {}, patLabel(p), h('small', {}, patRule(p))));
     box.addEventListener('change', () => {
       f.patterns = meta.patterns.map((q) => q.name).filter((n) => (n === p.name ? box.checked : f.patterns.includes(n)));
-      lab.classList.toggle('selected', box.checked); save();
+      lab.classList.toggle('selected', box.checked); renderPP(); save();
     });
     return lab;
   });
   const buyCard = h('article', { class: 'card' }, h('h2', {}, t('b.buy')),
     h('p', { class: 'card-sub', text: t('b.buySub') }),
     h('span', { class: 'label' }, t('b.logic')), seg,
-    h('div', { class: 'checks', role: 'group', 'aria-label': t('b.patterns') }, patternChecks), errorSlot('patterns'));
+    h('div', { class: 'checks', role: 'group', 'aria-label': t('b.patterns') }, patternChecks), errorSlot('patterns'), ppBox);
 
   // ---------------------------------------------------------------- Exit rules
   const numInput = (id, key, value, mode = 'decimal') => h('input', { id, inputmode: mode, value: String(value ?? ''), 'aria-describedby': described(key),
@@ -97,6 +186,9 @@ export async function renderBuilder(el) {
   const stopIn = numInput('stop', 'exit.stop_loss_pct', f.stop);
   const profitIn = numInput('profit', 'exit.take_profit_pct', f.profit);
   const holdIn = numInput('hold', 'exit.max_hold_days', f.hold, 'numeric');
+  const trailIn = numInput('trail', 'exit.trailing_stop_pct', f.trail);
+  const beIn = numInput('be', 'exit.breakeven_trigger_pct', f.be);
+  const maIn = numInput('maWin', 'exit.ma_exit_window', f.maWin, 'numeric');
   const useToggle = (key, input, word) => {
     const box = h('input', { type: 'checkbox', checked: f[key], 'aria-label': t('b.useLabel', { x: word }) });
     input.disabled = !f[key];
@@ -114,8 +206,13 @@ export async function renderBuilder(el) {
     h('div', { class: 'field-two' },
       h('div', {}, h('label', { for: 'hold' }, t('b.hold')), holdIn,
         h('p', { class: 'hint', text: t('b.holdHint', { a: lim.max_hold_days[0], b: lim.max_hold_days[1] }) }), errorSlot('exit.max_hold_days')),
-      h('div', {}, h('label', { for: 'trail' }, t('b.trail')), h('input', { id: 'trail', value: t('b.trailOff'), disabled: true, 'aria-describedby': 'trail-hint' }),
-        h('p', { class: 'hint', id: 'trail-hint', text: t('b.trailHint') }))),
+      h('div', {}, h('label', { for: 'trail' }, t('b.trail')), trailIn, useToggle('useTrail', trailIn, t('b.trailWord')),
+        h('p', { class: 'hint', text: t('b.trailHint2', { a: lim.trailing_stop_pct[0], b: lim.trailing_stop_pct[1] }) }), errorSlot('exit.trailing_stop_pct'))),
+    h('div', { class: 'field-two' },
+      h('div', {}, h('label', { for: 'be' }, t('b.be')), beIn, useToggle('useBe', beIn, t('b.beWord')),
+        h('p', { class: 'hint', text: t('b.beHint', { a: lim.breakeven_trigger_pct[0], b: lim.breakeven_trigger_pct[1] }) }), errorSlot('exit.breakeven_trigger_pct')),
+      h('div', {}, h('label', { for: 'maWin' }, t('b.maExit')), maIn, useToggle('useMa', maIn, t('b.maWord')),
+        h('p', { class: 'hint', text: t('b.maHint', { a: lim.ma_exit_window[0], b: lim.ma_exit_window[1] }) }), errorSlot('exit.ma_exit_window'))),
     h('div', { class: 'callout info', style: { marginTop: '16px' } }, t('b.exitCallout')));
 
   // ---------------------------------------------------------------- Universe & period
@@ -155,12 +252,56 @@ export async function renderBuilder(el) {
         h('span', {}, h('b', {}, t('b.validation')), t('b.validationVal')))),
     runBtn);
 
+  // ---------------------------------------------------------------- 저장한 조합 (P1-10)
+  const presetStatus = h('p', { class: 'card-sub', 'aria-live': 'polite' });
+  const presetName = h('input', { id: 'pname', maxlength: '60', value: state.loadedPreset?.name || '', 'aria-describedby': 'pname-err' });
+  const presetErr = h('p', { class: 'field-error hidden', id: 'pname-err' });
+  const saveNewBtn = h('button', { class: 'secondary', type: 'button' }, t('pb.saveNew'));
+  const overwriteBtn = h('button', { class: 'secondary', type: 'button' }, t('pb.overwrite'));
+  function renderPresetStatus() {
+    const lp = state.loadedPreset;
+    overwriteBtn.disabled = !lp;
+    presetStatus.textContent = lp ? t(isDirty() ? 'pb.statusDirty' : 'pb.statusClean', { n: lp.name }) : t('pb.statusNone');
+  }
+  function presetFail(e) {
+    presetErr.textContent = has(`errmsg.${e.code}`) ? t(`errmsg.${e.code}`)
+      : e.code === 'validation_failed' ? Object.entries(e.detail?.fields || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') : e.message;
+    presetErr.classList.remove('hidden');
+    presetName.setAttribute('aria-invalid', 'true');
+  }
+  async function savePreset(overwrite) {
+    presetErr.classList.add('hidden');
+    presetName.setAttribute('aria-invalid', 'false');
+    const e = validate(f, meta);
+    if (Object.keys(e).length) { Object.assign(errs, e); showErrors(e); toast(t('b.checkFields', { n: Object.keys(e).length })); return; }
+    const name = presetName.value.trim();
+    if (!name) { presetFail({ code: 'name_required', message: t('pb.nameRequired') }); return; }
+    const body = toBody(f);
+    saveNewBtn.disabled = true; overwriteBtn.disabled = true;
+    try {
+      const lp = state.loadedPreset;
+      const p = overwrite
+        ? await api.updatePreset(lp.id, { revision: lp.revision, name, strategy: body })
+        : await api.savePreset({ name, strategy: body });
+      // 서버가 전략 이름을 조합 id 로 바꾸므로 빌더 입력도 맞춘다
+      f.name = p.strategy.name; nameIn.value = f.name; state.draft = { ...f };
+      state.loadedPreset = { id: p.id, name: p.name, revision: p.revision, body: JSON.stringify(toBody(f)) };
+      toast(t(overwrite ? 'pb.overwritten' : 'pb.saved', { n: p.name }));
+    } catch (err) { presetFail(err); } finally { saveNewBtn.disabled = false; renderPresetStatus(); }
+  }
+  saveNewBtn.addEventListener('click', () => savePreset(false));
+  overwriteBtn.addEventListener('click', () => savePreset(true));
+  const presetCard = h('article', { class: 'card', style: { marginTop: '18px' } }, h('h2', {}, t('pb.title')), presetStatus,
+    h('label', { for: 'pname' }, t('pb.name')), presetName, presetErr,
+    h('div', { class: 'actions', style: { justifyContent: 'flex-start' } }, saveNewBtn, overwriteBtn,
+      h('a', { class: 'secondary', href: '#/presets' }, t('pb.list'))));
+
   el.append(
     h('div', { class: 'topline' },
       h('div', {}, h('div', { class: 'eyebrow' }, t('b.eyebrow')), h('h1', { text: t('b.title') }),
         h('p', { class: 'lead', text: t('b.lead') })),
       h('div', { class: 'notice' }, t('b.notice', { c: cost, d: meta.data_as_of }))),
-    h('div', { class: 'grid-three' }, buyCard, exitCard, uniCard), runbar);
+    h('div', { class: 'grid-three' }, buyCard, exitCard, uniCard), presetCard, runbar);
 
   // ---------------------------------------------------------------- behaviour
   let previewTimer;
@@ -192,6 +333,7 @@ export async function renderBuilder(el) {
   }
   function save(universeChanged = false) {
     state.draft = { ...f };
+    renderPresetStatus();
     if (Object.keys(errs).length) showErrors(validate(f, meta));
     if (universeChanged) { clearTimeout(previewTimer); previewTimer = setTimeout(refreshPreview, 350); }
   }
@@ -220,14 +362,17 @@ export async function renderBuilder(el) {
         showErrors(server);
         toast(t('b.serverRejected'));
       } else if (err.code === 'busy') {
-        toast(t('b.busy'));
-        location.hash = `#/runs/${err.detail.run_id}/progress`;
+        // 실행·탐색이 작업 슬롯을 공유한다 (P1-7). 진행 중인 쪽의 진행 화면을 연다
+        const search = err.detail?.kind === 'search';
+        toast(search ? t('b.busySearch') : t('b.busy'));
+        location.hash = search ? `#/searches/${err.detail.id}/progress` : `#/runs/${err.detail.run_id}/progress`;
       } else {
         toast(`${err.message} (${err.code})`);
       }
     }
   });
 
+  renderPresetStatus();
   refreshPreview();
   return () => clearTimeout(previewTimer);
 }
