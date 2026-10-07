@@ -127,3 +127,18 @@ def input_file_hashes(store: Path) -> dict[str, str]:
             h.update(f"{f.name}:{st.st_size}:{int(st.st_mtime)};".encode())
         out[f"raw/{sub}"] = f"n={len(files)};sha256={h.hexdigest()[:16]}"
     return out
+
+
+def warmup_file_hashes(cache: Path) -> dict[str, str]:
+    """결과에 영향을 주는 파생 입력(cache/warmup/*.parquet: 워밍업 보정 가격·첫 거래일·과거 지수 X5)의 지문 (NFR-10).
+
+    원본(store) 지문만으로는 워밍업 파일이 있을 때와 없을 때의 실행을 구분할 수 없다. 파일이 없으면 n=0 으로 남긴다.
+    """
+    files = sorted((cache / "warmup").glob("*.parquet")) if (cache / "warmup").is_dir() else []
+    if not files:
+        return {"cache/warmup": "n=0"}
+    out = {}
+    for f in files:
+        st = f.stat()
+        out[f"cache/warmup/{f.name}"] = f"size={st.st_size};mtime={int(st.st_mtime)}"
+    return out

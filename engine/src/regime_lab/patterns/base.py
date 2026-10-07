@@ -36,6 +36,11 @@ class Pattern(ABC):
     @abstractmethod
     def _raw_signal(self, f: pd.DataFrame) -> pd.Series: ...
 
+    @classmethod
+    def param_errors(cls, p: dict) -> dict[str, str]:
+        """수치끼리의 관계 검증 (P1-4, 예: 단기 기간 < 장기 기간). p 는 기본값을 채운 전체 수치. {수치: 사유}."""
+        return {}
+
     @staticmethod
     def prev(f: pd.DataFrame, col: str) -> pd.Series:
         return f.groupby(f["ticker"].to_numpy(), sort=False)[col].shift(1)

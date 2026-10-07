@@ -28,7 +28,9 @@ class ExitIn(_Strict):
     stop_loss_pct: float | None = Field(None, description="손절 %, -50 ~ -1 또는 null(미사용)")
     take_profit_pct: float | None = Field(None, description="익절 %, +1 ~ +200 또는 null(미사용)")
     max_hold_days: int = Field(20, description="최대 보유 거래일, 1 ~ 250 (필수)")
-    trailing_stop_pct: None = Field(None, description="이번 릴리스는 null 만 허용")
+    trailing_stop_pct: float | None = Field(None, description="트레일링 스톱 %, 보유 중 최고 기준가 대비 -50 ~ -1 또는 null(미사용)")
+    breakeven_trigger_pct: float | None = Field(None, description="본전 스톱 발동 수익률 %, +1 ~ +100 또는 null(미사용)")
+    ma_exit_window: int | None = Field(None, description="이동평균 이탈 청산 기간(거래일), 5 ~ 250 또는 null(미사용)")
 
 
 class PeriodIn(_Strict):

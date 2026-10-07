@@ -126,3 +126,26 @@ def test_existing_search_id_is_rejected(market, req, cfg, paths):
     run_and_save_search(req, market, cfg, paths, search_id="dup")
     with pytest.raises(FileExistsError):
         run_and_save_search(req, market, cfg, paths, search_id="dup")
+
+
+def test_record_includes_warmup_file_fingerprint(market, req, cfg, paths):
+    """NFR-10: 워밍업 파일(cache/warmup/*.parquet, X5 과거 지수 포함)의 유무·변경이 기록과 data_version 에 남는다."""
+    import os
+
+    d0 = run_and_save_search(req, market, cfg, paths, search_id="w0")
+    m0 = json.loads((d0 / "meta.json").read_text(encoding="utf-8"))
+    assert m0["input_files"]["cache/warmup"] == "n=0"
+
+    w = paths.cache / "warmup"
+    w.mkdir(parents=True)
+    (w / "index_warmup.parquet").write_bytes(b"x" * 10)
+    d1 = run_and_save_search(req, market, cfg, paths, search_id="w1")
+    m1 = json.loads((d1 / "meta.json").read_text(encoding="utf-8"))
+    assert "cache/warmup/index_warmup.parquet" in m1["input_files"] and "cache/warmup" not in m1["input_files"]
+    assert m1["data_version"] != m0["data_version"]
+
+    (w / "index_warmup.parquet").write_bytes(b"x" * 11)
+    os.utime(w / "index_warmup.parquet", (1, 1))
+    d2 = run_and_save_search(req, market, cfg, paths, search_id="w2")
+    m2 = json.loads((d2 / "meta.json").read_text(encoding="utf-8"))
+    assert m2["data_version"] != m1["data_version"]

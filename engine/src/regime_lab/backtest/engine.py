@@ -4,7 +4,11 @@
 - 진입: 신호일 t 의 다음 거래일 e 시가 (수정주가). 원주가 시가(e) ≥ 원주가 종가(t) × (1+limit_up) 이면 스킵(limit_up).
   e 가 거래정지이거나 거래량 0 이면 스킵(halted_entry). 다음 거래일이 없으면 스킵(no_next_day).
 - 종목당 1포지션. 보유 중(진입일 ~ 청산 체결일 전날) 신호는 무시한다.
-- 청산 검사: 진입일부터 매일 종가로 손절 → 익절 → 최대 보유 순으로 검사. 먼저 충족된 날의 다음 거래일 시가에 청산.
+- 청산 검사: 진입일부터 매일 종가로 손절 → 익절 → 트레일링 → 본전 → 이평 이탈 → 최대 보유 순으로 검사.
+  먼저 충족된 날의 다음 거래일 시가에 청산. 트레일링·본전·이평 이탈은 선택 규칙(기본 꺼짐, 2026-10-07 추가)이다.
+  · 트레일링: 종가(d) ≤ 보유 중 최고 기준가 × (1 + trailing_stop_pct/100). 최고 기준가 = max(진입가, 진입일~d 종가)
+  · 본전: 최고 기준가가 진입가 × (1 + breakeven_trigger_pct/100) 이상이 된 뒤 종가(d) ≤ 진입가
+  · 이평 이탈: 종가(d) < SMA_N(d), N = ma_exit_window (종목별 t일까지 종가 평균)
 - 청산 체결일이 거래정지·거래량 0·하한가(원주가 시가 ≤ 전일 원주가 종가 × (1+limit_down)) 이면 다음 거래일 재시도.
 - 상장폐지 종목은 데이터 마지막 거래일 종가로 청산(delisted). 기준일까지 보유 중이면 기준일 종가 평가(end_of_data, 집계 제외).
 - 비용: 왕복 비용률을 거래 수익률에서 차감.
@@ -18,8 +22,10 @@ import numpy as np
 import pandas as pd
 
 from regime_lab.context import NULL_CONTEXT, RunContext
+from regime_lab.indicators import sma
 
-EXIT_REASONS = ["stop_loss", "take_profit", "time", "delisted", "end_of_data"]
+EXIT_REASONS = ["stop_loss", "take_profit", "time", "delisted", "end_of_data", "trailing_stop", "breakeven_stop",
+                "ma_exit"]
 SKIP_REASONS = ["limit_up", "halted_entry", "no_next_day"]
 EPS = 1e-9  # 경계값(정확히 -8%, +20%)이 부동소수 오차로 빠지지 않도록 하는 허용 오차
 
@@ -29,25 +35,32 @@ class ExitRule:
     stop_loss_pct: float | None
     take_profit_pct: float | None
     max_hold_days: int
-    trailing_stop_pct: None = None
+    trailing_stop_pct: float | None = None   # 음수: 최고 기준가 대비 -x%
+    breakeven_trigger_pct: float | None = None  # 양수: 최고 기준가 수익이 +x% 를 넘은 뒤 본전 이하면 청산
+    ma_exit_window: int | None = None        # 종가가 N일 이동평균 아래로 내려가면 청산
+
+    @property
+    def extra(self) -> bool:
+        return any(v is not None for v in (self.trailing_stop_pct, self.breakeven_trigger_pct, self.ma_exit_window))
 
     @classmethod
     def from_cfg(cls, exit_cfg: dict, limits: dict) -> "ExitRule":
-        if exit_cfg.get("trailing_stop_pct") is not None:
-            raise ValueError("trailing_stop_pct must be null in this release")
         mh = exit_cfg.get("max_hold_days")
         if mh is None:
             raise ValueError("max_hold_days is required")
         lo, hi = limits["max_hold_days"]
         if not (lo <= int(mh) <= hi):
             raise ValueError(f"max_hold_days must be {lo} to {hi}: {mh}")
-        for k in ("stop_loss_pct", "take_profit_pct"):
+        for k in ("stop_loss_pct", "take_profit_pct", "trailing_stop_pct", "breakeven_trigger_pct", "ma_exit_window"):
             v = exit_cfg.get(k)
             if v is not None:
                 lo, hi = limits[k]
                 if not (lo <= v <= hi):
                     raise ValueError(f"{k} must be {lo} to {hi}: {v}")
-        return cls(exit_cfg.get("stop_loss_pct"), exit_cfg.get("take_profit_pct"), int(mh))
+        mw = exit_cfg.get("ma_exit_window")
+        return cls(exit_cfg.get("stop_loss_pct"), exit_cfg.get("take_profit_pct"), int(mh),
+                   exit_cfg.get("trailing_stop_pct"), exit_cfg.get("breakeven_trigger_pct"),
+                   None if mw is None else int(mw))
 
 
 def _tradeable(i: int, a: dict, limit_down: float) -> bool:
@@ -66,6 +79,9 @@ def _simulate_ticker(a: dict, sig_idx: np.ndarray, rule: ExitRule, ex: dict, del
     limit_up, limit_down = ex["limit_up_pct"] / 100, ex["limit_down_pct"] / 100
     sl = None if rule.stop_loss_pct is None else rule.stop_loss_pct / 100
     tp = None if rule.take_profit_pct is None else rule.take_profit_pct / 100
+    tr = None if rule.trailing_stop_pct is None else rule.trailing_stop_pct / 100
+    be = None if rule.breakeven_trigger_pct is None else rule.breakeven_trigger_pct / 100
+    ma = a.get("ma_exit")
     trades, skips = [], []
     free_from = 0  # 이 행 이상의 신호만 새 포지션 가능
     for t in sig_idx:
@@ -83,13 +99,22 @@ def _simulate_ticker(a: dict, sig_idx: np.ndarray, rule: ExitRule, ex: dict, del
             continue
         entry = a["open"][e]
         reason, decide = None, None
+        peak = entry
         for d in range(e, n):
-            r = a["close"][d] / entry - 1
+            c = a["close"][d]
+            r = c / entry - 1
             held = d - e + 1
+            peak = max(peak, c)
             if sl is not None and r <= sl + EPS:
                 reason = "stop_loss"
             elif tp is not None and r >= tp - EPS:
                 reason = "take_profit"
+            elif tr is not None and c <= peak * (1 + tr) + EPS * peak:
+                reason = "trailing_stop"
+            elif be is not None and peak / entry - 1 >= be - EPS and r <= EPS:
+                reason = "breakeven_stop"
+            elif ma is not None and c < ma[d]:  # ma 결측(NaN)이면 비교가 거짓
+                reason = "ma_exit"
             elif held >= rule.max_hold_days:
                 reason = "time"
             if reason:
@@ -141,6 +166,11 @@ def simulate_trades(
 
     f = frame.reset_index(drop=True)
     sig = signal.reset_index(drop=True).fillna(False).astype(bool)
+    ma_all = None
+    if rule.ma_exit_window is not None:  # 이평 이탈 청산: 20·200일선은 준비 프레임 열, 그 밖의 기간은 종목별로 계산
+        n = rule.ma_exit_window
+        col = {int(cfg["patterns"]["ma_cross_5_20"]["slow"]): "sma20", int(cfg["regime"]["ma_window"]): "sma200"}.get(n)
+        ma_all = (f[col] if col in f else sma(f, n)).to_numpy(float)
     cand = sig & f["date"].ge(pd.Timestamp(cfg["data"]["backtest_start"]))
     if "eligible" in f:
         cand &= f["eligible"].astype(bool)
@@ -162,6 +192,8 @@ def simulate_trades(
         if len(local) == 0:
             continue
         a = _ticker_arrays(f.iloc[s:e])
+        if ma_all is not None:
+            a["ma_exit"] = ma_all[s:e]
         trades, skips = _simulate_ticker(a, local, rule, ex, tick[s] in delisted_tickers)
         rows += [(s + t, s + en, None if d is None else s + d, s + x, px_in, px_out, why, rt, ac)
                  for t, en, d, x, px_in, px_out, why, rt, ac in trades]
