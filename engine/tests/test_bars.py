@@ -52,6 +52,34 @@ def test_session_outliers_and_nxt_flag(cfg):
     assert stats["outliers"] == 1 and stats["off_session"] == 2
 
 
+def test_close_outside_range_is_outlier(cfg):
+    """N7: 종가가 고가 위·저가 아래인 행도 제외 (seongmin-claude #44 리뷰)."""
+    rows = [("005930", "2026-09-01 09:00:00", 100, 103, 99, 150, 1, 150),   # 종가 > 고가
+            ("005930", "2026-09-01 09:01:00", 100, 103, 99, 98, 1, 248),    # 종가 < 저가
+            ("005930", "2026-09-01 09:02:00", 100, 103, 99, 101, 1, 349)]
+    out, stats = normalize_minutes(_raw(rows), cfg)
+    assert out["dt"].dt.strftime("%H:%M").tolist() == ["09:02"] and stats["outliers"] == 2
+
+
+def test_empty_bars_keep_dtypes(cfg):
+    """빈 결과도 봉이 있을 때와 열 형식이 같다 (seongmin-claude #44 리뷰)."""
+    full, _ = normalize_minutes(_raw(_day("005930", "2026-09-01", [("09:00", 1)])), cfg)
+    empty, _ = normalize_minutes(_raw([]), cfg)
+    some, none = aggregate_bars(full, "1h", cfg), aggregate_bars(empty.astype(full.dtypes.to_dict()), "1h", cfg)
+    assert none.empty and none.dtypes.equals(some.dtypes)
+
+
+def test_confirmed_bars_accepts_timezone_aware_as_of(cfg):
+    """as_of 가 +09:00·UTC 처럼 시간대가 있어도 KST 로 맞춰 시간대 없는 값과 같은 결과 (seongmin-claude #44 리뷰)."""
+    minutes, _ = normalize_minutes(_raw(_day("005930", "2026-09-01", [("09:00", 1), ("10:30", 1), ("15:30", 1)])), cfg)
+    bars = aggregate_bars(minutes, "1h", cfg)
+    naive = confirmed_bars(bars, "2026-09-01 11:00")
+    assert naive["slot"].tolist() == [1, 2]
+    for t in ("2026-09-01T11:00:00+09:00", "2026-09-01T02:00:00+00:00", pd.Timestamp("2026-09-01 02:00", tz="UTC")):
+        pd.testing.assert_frame_equal(confirmed_bars(bars, t), naive)
+    assert confirmed_bars(bars, "2026-09-01T01:59:59+00:00")["slot"].tolist() == [1]
+
+
 def test_slot_edges_from_config(cfg):
     assert slot_edges("1h", cfg).tolist() == [540, 600, 660, 720, 780, 840, 900, 931]
     assert slot_edges("3h", cfg).tolist() == [540, 720, 931]

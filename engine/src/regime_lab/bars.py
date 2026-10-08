@@ -9,8 +9,12 @@ as_of 예측은 확정 시각 ≤ as_of 인 봉만 입력으로 쓴다(FR-F3). �
 
 from __future__ import annotations
 
+from datetime import timedelta, timezone
+
 import numpy as np
 import pandas as pd
+
+KST = timezone(timedelta(hours=9))
 
 # 정규화·집계 코드가 바뀌면 올린다 (정규화 캐시 무효화, §3). 일봉 PREP_VERSION 과 독립
 MINUTE_PREP_VERSION = 1
@@ -50,8 +54,9 @@ def normalize_minutes(raw: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, dict]
     prev = df.groupby([df["code"], date], sort=False)["value"].shift(1)
     value_1m = (df["value"] - prev).fillna(df["value"])
 
-    # N7: 시가가 고가·저가 범위 밖이거나 고가 < 저가인 행
-    bad = (df["open_p"] > df["high_p"]) | (df["open_p"] < df["low_p"]) | (df["high_p"] < df["low_p"])
+    # N7: 시가·종가가 고가·저가 범위 밖이거나 고가 < 저가인 행
+    bad = ((df["open_p"] > df["high_p"]) | (df["open_p"] < df["low_p"]) | (df["high_p"] < df["low_p"])
+           | (df["close_p"] > df["high_p"]) | (df["close_p"] < df["low_p"]))
     # N1: 정규장만 (늦은 개장일은 있는 행 그대로)
     tod = df["dt"].dt.hour * 60 + df["dt"].dt.minute
     in_session = (tod >= _minute_of_day(mcfg["session_open"])) & (tod <= _minute_of_day(mcfg["session_close"]))
@@ -75,8 +80,11 @@ def aggregate_bars(minutes: pd.DataFrame, timeframe: str, cfg: dict) -> pd.DataF
     n_minutes = 실제 포함된 분 수, available_at = 확정 시각(봉 마지막 분 + 1분).
     """
     edges = slot_edges(timeframe, cfg)
-    if minutes.empty:
-        return pd.DataFrame({c: pd.Series(dtype=minutes.dtypes.get(c, "float64")) for c in BAR_COLS})
+    if minutes.empty:  # 봉이 있을 때와 같은 열 형식
+        ts = minutes.dtypes.get("dt", "datetime64[ns]")  # 시각 열은 입력 dt 와 같은 해상도
+        fixed = {"date": ts, "slot": "int64", "bar_start": ts, "available_at": ts,
+                 "bar_minutes": "int64", "n_minutes": "int64", "nxt_period": "bool"}
+        return pd.DataFrame({c: pd.Series(dtype=fixed.get(c, minutes.dtypes.get(c, "float64"))) for c in BAR_COLS})
     tod = (minutes["dt"].dt.hour * 60 + minutes["dt"].dt.minute).to_numpy()
     slot = np.searchsorted(edges, tod, side="right")  # 1..n
     if (slot < 1).any() or (slot >= len(edges)).any():
@@ -93,6 +101,16 @@ def aggregate_bars(minutes: pd.DataFrame, timeframe: str, cfg: dict) -> pd.DataF
     return bars[BAR_COLS]
 
 
-def confirmed_bars(bars: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
-    """as_of 에 이미 확정된 봉만 (available_at ≤ as_of). 진행 중인 봉은 쓰지 않는다(D-2)."""
-    return bars[bars["available_at"] <= pd.Timestamp(as_of)].reset_index(drop=True)
+def to_kst_naive(t) -> pd.Timestamp:
+    """봉 시각은 시간대 없는 KST 다. 시간대가 있는 시각(예: 문서의 +09:00·UTC ISO)은 KST 로 바꿔 시간대를 뗀다.
+
+    KST 는 1988년 이후 서머타임이 없어 고정 UTC+9 로 바꾼다 (시간대 DB 없이 Windows 에서도 동작).
+    """
+    ts = pd.Timestamp(t)
+    return ts.tz_convert(KST).tz_localize(None) if ts.tzinfo is not None else ts
+
+
+def confirmed_bars(bars: pd.DataFrame, as_of) -> pd.DataFrame:
+    """as_of 에 이미 확정된 봉만 (available_at ≤ as_of). 진행 중인 봉은 쓰지 않는다(D-2).
+    as_of 는 시간대가 없으면 KST 로 보고, 있으면 KST 로 바꿔 비교한다."""
+    return bars[bars["available_at"] <= to_kst_naive(as_of)].reset_index(drop=True)
