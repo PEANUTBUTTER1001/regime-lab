@@ -154,3 +154,12 @@ archive:                            # P3-13 자료 보관함 (SRS FR-N7). PREP_S
   page_size: 50                     # 목록 한 쪽 기본 건수
   max_page_size: 200                # 요청 page_size 상한
   coverage_list_max: 50             # 수집 상태: 출처마다 보여 줄 공백·부분 날짜 수 상한 (개수는 전부 센다)
+
+minutes:                            # P2-4 1분봉 정규화·시간봉 집계 (docs/분봉_데이터_설계.md §2). PREP_SECTIONS 밖 — 일봉 준비 캐시와 무관
+  session_open: "09:00"             # N1 정규장 첫 분
+  session_close: "15:30"            # N1 정규장 마지막 분 (종가 단일가 체결 분, 포함). 15:20~15:29 동시호가 포함
+  nxt_start: "2026-04-24"           # N5 KRX+NXT 통합 시세 시작일 (P2-1 실사)
+  price_basis_tol_pct: 0.2          # N2 가격 기준 판정 허용오차 (P2-4.3에서 사용)
+  bar_starts:                       # §2.1 집계 봉 시작 시각. 마지막 봉은 session_close 까지 (길이가 달라도 합치거나 빼지 않음)
+    1h: ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00"]
+    3h: ["09:00", "12:00"]
