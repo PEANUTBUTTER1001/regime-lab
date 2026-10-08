@@ -59,4 +59,7 @@ export const api = {
   deletePreset: (id) => request('DELETE', `/presets/${encodeURIComponent(id)}`),
   // 근거 검색 (P3-11)
   evidence: (params) => request('GET', `/evidence/search?${new URLSearchParams(params)}`),
+  // 자료 보관함·자료 상세 (P3-13)
+  documents: (params) => request('GET', `/evidence/documents?${new URLSearchParams(params)}`),
+  document: (id, params) => request('GET', `/evidence/documents/${encodeURIComponent(id)}?${new URLSearchParams(params)}`),
 };

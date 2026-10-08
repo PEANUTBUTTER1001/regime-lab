@@ -16,6 +16,16 @@ def load_config(path: Path | None = None) -> dict:
         return yaml.safe_load(f)
 
 
+def load_news_config(path: Path | None = None) -> dict:
+    try:
+        result = load_config(path or CONFIG_DIR / "news.example.yaml")
+    except (OSError, yaml.YAMLError):
+        raise ValueError("invalid news configuration file") from None
+    if not isinstance(result, dict):
+        raise ValueError("news configuration must be a mapping")
+    return result
+
+
 # 저장소에서 원본 데이터가 놓이는 곳 (AGENTS.md: 수정·이동·커밋 금지). ext_store 는 이것들과 겹치면 안 된다
 PROTECTED = ("data", "multi_tables_db", "store", "cache", "runs")
 
