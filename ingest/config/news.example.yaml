@@ -1,0 +1,14 @@
+# P3-8 draft: example choices, no collector/schedule activation.
+sources:
+  naver_news:
+    active: false
+    license_scope: metadata_only
+    queries: []  # explicit watchlist only; no automatic all-market expansion
+limits:
+  request_limit: 10
+  remaining_daily: 100  # caller must replace with locked, persisted remaining budget
+  display: 20
+  page_limit: 1
+  selection_limit: 40  # bounded downstream batch, not a claim of complete coverage
+  feed_max_bytes: 1048576
+  feed_max_items: 100

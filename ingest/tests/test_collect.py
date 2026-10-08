@@ -318,3 +318,18 @@ def test_forward_day_is_not_treated_as_fully_collected(tmp_path, cfg):
     docs = Store(tmp_path).read_docs("opendart")
     assert len(docs) == 5 and all(d["available_at"] == first[d["doc_id"]] for d in docs if d["doc_id"] in first)
     assert set(Store(tmp_path).coverage("opendart").values()) == {"collected"}
+
+
+def test_recover_is_scoped_to_locked_source(tmp_path):
+    """잠금은 출처 단위 → 정리도 출처 단위. opendart 잠금을 잡아도 다른 출처의 진행 중 tmp 는 남는다."""
+    other = tmp_path / "docs" / "source=news" / "date=2026-10"
+    other.mkdir(parents=True)
+    active = other / "part-w.parquet.tmp"
+    active.write_bytes(b"in-progress")
+    mine = tmp_path / "docs" / "source=opendart" / "date=2021-01"
+    mine.mkdir(parents=True)
+    stale = mine / "part-old.parquet.tmp"
+    stale.write_bytes(b"stale")
+    Store(tmp_path).lock("opendart")
+    assert active.exists()  # 다른 출처: 그대로
+    assert not stale.exists()  # 내 출처의 미커밋 tmp: 정리

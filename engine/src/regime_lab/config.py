@@ -43,6 +43,7 @@ class Paths:
     sql_dump: Path
     cache: Path
     runs: Path
+    ext_store: Path | None = None  # 외부 자료 docs Parquet (근거 검색). paths.local.yaml 에 없으면 None
 
 
 def load_paths() -> Paths:

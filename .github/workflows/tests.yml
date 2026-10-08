@@ -63,7 +63,7 @@ jobs:
           skipped = [c for c in cases if c.find('skipped') is not None]
           failed = [c for c in cases if c.find('failure') is not None or c.find('error') is not None]
           required = {
-              'engine': ('test_search', 'test_win_rate'),
+              'engine': ('test_search', 'test_win_rate', 'test_rag_rank'),
               'api': ('test_llm_verify', 'test_search_contract'),
               'ingest': ('test_collect', 'test_contract'),
           }[project]

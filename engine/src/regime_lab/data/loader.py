@@ -12,6 +12,8 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
+from regime_lab.data.docs import DocsStore  # noqa: F401 — 근거 검색 문서 저장소. API·CLI 는 공개 모듈(R5)인 이 파일로 가져간다
+
 PRICE_COLS = ["open", "high", "low", "close"]
 
 

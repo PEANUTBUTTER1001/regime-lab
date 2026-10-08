@@ -136,6 +136,20 @@ search:                             # D-1 역방향 탐색 (docs/역방향_백�
     take_profit_pct: [20]
     max_hold_days: [20]
 
+rag:                                # P3-11 근거 검색 (역방향 탐색 search 절과 다름). 수치는 모두 잠정, 평가셋 dev 분할로 조정한다
+  index_fields: [title, corp_name]  # 제품 색인 필드. 2026-10-08 사용자 결정: 제품은 제목·회사명만 (요약은 개인 실험에서만 비교)
+  k1: 1.5                           # BM25 단어 빈도 포화
+  b: 0.75                           # BM25 문서 길이 보정
+  top_k: 5                          # 기본 반환 수
+  max_k: 20                         # 요청 k 상한
+  candidate_k: 20                   # MMR 을 켤 때 다시 고를 BM25 후보 수
+  mmr_lambda: null                  # null 이면 MMR 끔. 0~1 (1 이면 BM25 순서와 같음). 묶기를 켜면 쓰지 않는다
+  group_threshold: 0.3              # 제목이 비슷한 기사 묶기: 질의 글자를 뺀 제목 자카드 ≥ 이 값이면 앞 묶음에 넣음. null 이면 끔.
+                                    # 2026-10-08 n8n 엑셀 관찰: 0.2 는 틀이 같은 다른 종목 제목을 묶어 보수적으로 0.3 (평가셋 사건 표시로 조정)
+  group_candidate_k: 100            # 묶기 전에 보는 BM25 후보 수 (묶음 크기는 이 안에서만 센다)
+  min_score: 0.0                    # 상위 점수가 이 값 이하이면 근거 없음 (no_evidence)
+  max_query_len: 200                # 질의 글자 수 상한
+
 minutes:                            # P2-4 1분봉 정규화·시간봉 집계 (docs/분봉_데이터_설계.md §2). PREP_SECTIONS 밖 — 일봉 준비 캐시와 무관
   session_open: "09:00"             # N1 정규장 첫 분
   session_close: "15:30"            # N1 정규장 마지막 분 (종가 단일가 체결 분, 포함). 15:20~15:29 동시호가 포함
