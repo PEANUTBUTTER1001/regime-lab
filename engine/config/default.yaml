@@ -177,3 +177,12 @@ forecast:                           # P2 봉 예측 (D-2 확정 2026-10-07, docs
     window: 60                      # 종목·slot 별 최근 표본 수 (1시간봉이면 약 60거래일)
     min_samples: 20                 # 이보다 적으면 예측하지 않음 (insufficient_history)
     by_slot: true                   # 같은 slot(장중 시각대)끼리만 비교 — 장 시작 직후 변동성이 큼
+  model:                            # P2-6 scikit-learn HistGradientBoosting (2026-10-08 Seonghwanaa 승인). 학습=학습 구간, 보정=검증 구간
+    max_iter: 200
+    learning_rate: 0.05
+    max_leaf_nodes: 31
+    min_samples_leaf: 200
+    l2_regularization: 1.0
+    max_train_rows: 500000          # 학습 표본 상한 (넘으면 시드 고정 무작위 추출)
+    random_state: 0
+    conformal: true                 # 검증 구간에서 회색 구간을 목표 적중률(80%)에 맞게 넓힘
