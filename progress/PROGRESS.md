@@ -1,5 +1,55 @@
 # PROGRESS
 
+## 2026-10-08 12:44:08 KST (+09:00) — PEANUTBUTTER1001 P3-11 근거 검색(RAG 검색 단계) 구현
+
+- 시작 시각: 2026-10-08 12:44:08 KST (+09:00)
+- 목표: 확정 명세(이 채팅 /srs)대로 시점이 맞는 BM25 근거 검색(엔진 도메인·유스케이스·인프라·CLI·API)과 평가 도구를 만들고, 원본 없이 도는 테스트로 검증한다.
+- 승인 근거: 사용자 '명세 확정'에 해당하는 'q1~q3 권장안대로 진행 /execute'. Q1 삭제 필드는 `status == "deleted"` 가정(A1), Q2 API 응답 필드 목록은 공유용으로 정리, Q3 CI 핵심 목록에 `test_rag_rank` 추가. AGENTS.md 개정(같은 날, 미커밋)이 위치 근거. 커밋·푸시·PR, `ingest/` 변경, 웹 화면, LLM 생성, 임베딩은 범위 밖.
+
+### 단계 상태
+
+| 단계 | 상태 | 비고 |
+|---|---|---|
+| 1. 설정: `default.yaml` `rag:` 절, `paths.example.yaml` `ext_store`, `config.py` Paths | 🟢 완료 | `Paths.ext_store`는 기본 None(없으면 근거 검색만 data_unavailable). `prep_hash` 변경 전후 `534e3b66fcf4b633` 동일. 계획 외 1줄: `api/.../settings.py`의 `REGIME_RUNS_DIR` 분기가 Paths를 다시 만들 때 `ext_store`를 넘기도록 수정 |
+| 2. 도메인 `rag/` (text·select·rank·metrics) + 단위·절단 불변 테스트 | 🟢 완료 | 19 passed. 절단 불변(미래 문서 50건 추가·행 순서 뒤집기)과 대조군(전체 통계면 점수가 바뀜) 둘 다 확인. 시점 선택은 수집 쪽 §4 사례를 복제. 테스트 도우미 `engine/tests/rag_synth.py` |
+| 3. 인프라 `data/docs.py` + 유스케이스 `retrieval.py` + 테스트 | 🟢 완료 | RAG 테스트 합계 23 passed (`test_retrieval.py` 4개 추가: data_unavailable·캐시 키·응답 필드·검증·평가 분할 잠금). 유스케이스는 저장소 객체·시계를 인자로 받고, `data/loader.py`가 `DocsStore`를 다시 내보냄(§6 예외 추가 없음). 전체 테스트·audit 은 아직 |
+| 4. CLI `rag-index`·`rag-search`·`rag-eval` | 🟢 완료 | 사용자 질문 '구현끝남?' 뒤 재개. 합성 문서 폴더(scratchpad)로 확인: 색인 생성→캐시 hit, 검색 2건, 평가 recall·mrr 1.0·근거 없음 1.0, 시간대 없는 as_of 와 ext_store 미설정은 종료 코드 2 |
+| 5. API `routes/evidence.py`·`main.py` + 계약 테스트 | 🟢 완료 | `test_evidence_contract.py` 11 passed (200 ok·필드, 종목·k, no_evidence 200, 422 6종, 503 data_unavailable·warming_up). 색인은 준비 프레임과 따로 백그라운드 적재, 실패해도 다른 기능 영향 없음 |
+| 6. CI 핵심 목록 `test_rag_rank` | 🟢 완료 | `.github/workflows/tests.yml` engine 핵심 목록에 추가. GitHub 실행은 푸시 전이라 미확인 |
+| 7. 문서: 결정 기록 §5.3, `docs/RAG_검색_평가.md` 골격, API 응답 필드 목록 | 🟢 완료 | §5.3 `P3-11` 행(결정 ①~⑨). 평가 문서에 검색 규칙·API 계약(P3-13 공유용)·평가셋 형식·지표·실험표(측정 전 빈칸) |
+| 8. 전체 검증 (engine·api·ingest, 원본 있음·없음, audit, prep_hash 불변) | 🟢 완료 | 원본 있음: engine 375 passed·6 skipped(이전 352·6), API 103 passed(이전 92), ingest 67 passed. 원본 없음(scratchpad 작업 트리 복사본, paths.local·data 없음): engine 336 passed·45 skipped(이전 313·45), API 66 passed·37 skipped(이전 55·37), ingest 67 passed — 새 RAG 테스트 34개는 원본 없이 skip 0. audit FAIL 0·WARN 60(이전 57): 늘어난 3개는 생긴 파일의 `(예정)` 표시 제거 안내(`/agents-md` 몫). rag·retrieval·evidence·docs.py 에 R1·R2 경고 없음. cli.py 에 평가셋 JSON 읽기로 기존과 같은 종류의 '진입에서 I/O 주의' 1건 추가. `prep_hash` `534e3b66fcf4b633` 불변. 색인 캐시 `cache/rag/`는 .gitignore `cache/` 로 제외 확인 |
+
+| 9. (추가 요청) 웹 '근거 검색' 탭 `#/evidence` — `views/evidence.js`·`app.js` NAV·ROUTES·`api.js`·`i18n.js`(한·영) | 🟢 완료 | 사용자 요청 '실제 웹페이지 열어서 rag기반 검색할수있는 탭도 구현되어 검색가능해야'(명세의 '웹 화면 제외'를 바꿈). 검색어·기준 시각(KST)·시점 기준·종목코드·결과 수, 조건은 주소에 남김. 결과표(제목=원출처 링크·출처·게시·이용 가능·점수·맞은 글자), 근거 없음·입력 오류(필드 아래)·data_unavailable·재시도. 시각은 모두 KST 로 표시(게시 시각이 UTC 로 잘려 보이던 문제 수정). 결과 아래 중복 고지 줄은 하단 고정 고지로 대신. P3-13(hongsungmin0315)이 재사용할 수 있게 독립 탭 |
+| 10. (추가 요청) 로컬 시연 데이터: 엑셀 뉴스 → 저장소 밖 docs Parquet, `paths.local.yaml` `ext_store` 연결 | 🟢 완료 | 저장소 밖 `Desktop/rag-study/xlsx_to_docs.py` → `Desktop/rag-study/ext_store/docs/source=n8n_news/` (4,832행 → 4,653건, 같은 제목은 최초 수집이 가장 이른 행, LLM 판정 시트 제외). Git 제외 `engine/config/paths.local.yaml` 에 `ext_store: ../rag-study/ext_store` 한 줄 추가 |
+| 11. (추가 요청) 브라우저에서 실제 검색 확인 | 🟢 완료 | 8001 서버(8000 은 기존 서버라 유지). "삼성전자 자사주 매입": 지금 기준 4,653건 중 5건, 10-01 23:59 기준 보이는 100건 중 5건(시점 정합), 10-01 10:00 기준 근거 없음, 종목코드 '12' 는 필드 아래 오류. 콘솔 오류는 의도한 422 기록 1건뿐. 영어 화면 전환, 375px 가로 넘침 0. API 103 passed(i18n 키 검사 포함), JS 구문 검사 통과 |
+
+| 12. (추가 요청) 같은 사건 묶기 — 도메인 `rank.py` 질의 시점 묶기 + 설정·유스케이스·평가 | 🟢 완료 | 사용자 '같은 사건 묶기 진행하자'. 실데이터 관찰: MMR(λ 0.5·0.3)은 순서만 바꾸고 상위 10건이 모두 같은 사건. 묶음은 그 시점에 보이는 후보만으로 만들어 절단 불변 유지(전체 문서로 미리 묶으면 미래 기사가 과거 묶음을 바꿈). 질의어 글자를 빼고 제목 자카드 ≥ 0.3(잠정)로 앞 묶음 대표와 비교 — 0.2 는 '대한제강 주가 상승'·'대한전선 주가 하락' 같은 틀 제목을 잘못 묶음 |
+| 13. (추가 요청) API·웹: 대표 기사 + '제목이 비슷한 기사 N건' 펼치기 | 🟢 완료 | 응답 `similar_count`·`similar[]`·`index.grouping` 추가(공개 API 필드 추가, 기존 필드 불변). 화면은 대표 아래 펼치기, 요약 줄에 '비슷한 제목은 하나로 묶었습니다'. 8001 재시작 뒤 '삼성전자 자사주 매입' 상위 10묶음에 비슷한 기사 13건(7·4·2) 접힘 확인. 표현이 다른 같은 사건은 따로 남음(보수적 문턱) |
+| 14. (추가 요청) 문서: 현재 테스트 단계 `ext_store: ../rag-study/ext_store` 사용, 추후 크롤링 자료도 주식 데이터처럼 데이터 서버 API·DB 조회로 전환 예정 | 🟢 완료 | `docs/RAG_검색_평가.md` §0(현재 로컬 시연 자료·전환 예정과 그때 정할 것), §2·§3·§4·§5(묶기 규칙·API 필드·평가 방식·관찰), `구현_전_결정사항.md` §5.3 `P3-11` ⑩~⑫ |
+| 15. (추가 요청) 테스트·브라우저 재검증 | 🟢 완료 | 원본 있음 engine 378 passed·6 skipped(묶기 테스트 3개 추가), API 103 passed, ingest 67 passed. audit FAIL 0·WARN 61(늘어난 1건은 웹 화면이 `api.js`를 쓰는 R1 허용 패턴). JS 구문 검사 통과. 원본 없는 복사본 재실행은 생략(새 테스트는 합성 데이터만 씀) |
+
+- 최종 결과(1~8단계): 8단계 모두 완료. 계획 외 변경 2건 — `api/.../settings.py` 1줄(ext_store 전달), `data/loader.py` 1줄(`DocsStore` 공개 모듈로 내보냄, R1·R5 를 함께 지키기 위해). 원본 없는 첫 실행의 오류 다수는 복사본에 pytest 임시 폴더 상위(`cache/qa`)가 없어서였고, 폴더를 만든 뒤 재실행해 통과. 커밋·푸시·PR 은 사용자 몫. 남은 조치: `/agents-md`로 §2·§4 `(예정)` 제거, P3-13 담당(hongsungmin0315)에게 `docs/RAG_검색_평가.md` §3 API 필드 공유, 실데이터 평가(공시 수집·평가셋)는 저장소 밖 작업.
+
+---
+
+## 2026-10-07 17:37:40 KST (+09:00) — PEANUTBUTTER1001 X5 병합 뒤 보고서 국면 시작일 문장·전체 재검증
+
+- 시작 시각: 2026-10-07 17:37:40 KST (+09:00)
+- 목표: develop #24~#28(X5 국면 2020-09-01) 병합 뒤 보고서 한계 문장의 고정 날짜 2021-07-21을 실행에 저장된 설정 값으로 바꾸고, 전체 테스트를 다시 확인한다.
+- 승인 근거: 사용자 요청 '보고서 날짜 문장 수정과 전체 테스트 재실행 이거해줘'. 병합(`c83552b`)은 사용자가 완료. `i18n.js` `r.heatSub`·`aggregate.py` 주석의 같은 날짜는 X5 담당 영역이라 범위 밖. 커밋·푸시·PR은 범위 밖.
+
+### 단계 상태
+
+| 단계 | 상태 | 비고 |
+|---|---|---|
+| 1. 보고서 국면 시작일 문장 | 🟢 완료 | 고정 문장 '2021-07-21 이후 진입만 산출' 삭제. 실행 설정은 `result.json`이 아니라 `meta.json`에만 있어 저장 시작일 대신 그 실행의 '국면 없음'(unavailable) 셀 거래 수로 한계 문장을 만든다(0건이면 모두 산출됨). 과거 지수 파일 유무와 무관하게 맞음. `test_llm_verify` 27 passed |
+| 2. 전체 테스트 (원본 있음·없음, ingest) | 🟢 완료 | 원본 있음: engine 352 passed·6 skipped(과거 지수 `index_warmup.parquet`·1분봉 사본이 이 PC에 없음), API 92 passed. 원본 없음: engine 313 passed·45 skipped, API 55 passed·37 skipped, ingest 67 passed. `git diff --check` 통과 |
+
+- API(원본 있음) 실행 1회가 2분 26초 걸리며 1 failed — 출력을 남기지 않아 실패 테스트는 미확인. 같은 코드로 3회 재실행 모두 92 passed(약 27초). PREP_VERSION 3으로 준비 프레임을 처음 다시 만들 때 `run_to_end`의 120초 대기를 넘은 것으로 추정(미확인).
+- 최종 결과: 2단계 완료. 커밋·푸시·PR은 사용자 몫.
+
+---
+
 ## 2026-10-07 16:49 KST (+09:00) — hongsungmin0315 백테스트 담당(오후): P3-7 OpenDART 수집기·계약 정렬·실데이터 회귀·팀 PR 리뷰
 
 - 시작 시각: 2026-10-07 오후 (기록 시각 2026-10-07 16:49). Claude Code 작업, Agent Relay friends 채널 재개 — hchee99-codex(P3-4/P3-6 계약·리뷰), codex-01a0fb4b(G2·검증), seonghwan-claude(데이터 서버·P2)와 협업
@@ -30,6 +80,28 @@
 
 ---
 
+## 2026-10-07 16:28:05 KST (+09:00) — PEANUTBUTTER1001 M2·M3·X1·F2 PR 보완 (develop #17~#23 병합 뒤)
+
+- 시작 시각: 2026-10-07 16:28:05 KST (+09:00)
+- 목표: 최신 develop을 합친 `chore/M2-M3-X1-F2-quality`에서 report-v3가 #18·#19의 패턴·수치·선택 청산을 한국어로 설명하게 하고, CI에 ingest를 넣고, 전체 테스트를 다시 확인한다.
+- 승인 근거: 이 채팅의 보완 범위 제안과 사용자 답변 'a 포함 / b 포함'(A: CI에 ingest, B: 보고서에 선택 청산). 커밋·푸시·PR은 범위 밖.
+
+### 단계 상태
+
+| 단계 | 상태 | 비고 |
+|---|---|---|
+| 1. report-v3 패턴·수치 이름표 (#18·#19) | 🟢 완료 | `PATTERN_KO` 14종, `PARAM_KO`에 핵심 5종 기간·배수와 새 4종 수치 추가. 이름은 i18n 한국어와 같게(볼린저 수축 '(거래일)'→'(일)') |
+| 2. report-v3 선택 청산 설명 (B) | 🟢 완료 | 근거에 `strategy.exits_ko`(켜진 청산만, 엔진 검사 순서), 프롬프트 규칙 12, 템플릿은 패턴·수치·청산을 한 문장으로 이어 14문장 제한 유지. 버전은 미배포 v3 유지 |
+| 3. 이름표 누락 방지 테스트 | 🟢 완료 | 설정 `patterns`·`pattern_limits`·`exit_limits` 대비 이름표 일치·i18n 동일 검사, 켜진 청산만 설명·구 결과 처리 검사. `test_llm_verify` 25 passed |
+| 4. CI에 ingest 포함 (A) | 🟢 완료 | matrix에 ingest, `DART_API_KEY` 빈 값, 프로젝트별 핵심 테스트(ingest: test_collect·test_contract). 로컬 ingest 67 passed, 요약 스크립트 3개 프로젝트 통과·핵심 테스트 skip 시 실패 확인. `actions/checkout@v7`·setup-uv 고정 커밋 존재 확인 |
+| 5. `docs/구현_계획.md` §0 갱신 | 🟢 완료 | Git 상태(3243696·927ceef), 10-07 검증 수, F2 ingest, 8002 서버 미실행, report-v3 보완 내용 |
+| 6. 전체 테스트 (원본 있음·없음) | 🟢 완료 | 원본 있음: engine 338·API 90 passed(skip 0). 원본 없음: engine 300 passed·38 skipped, API 53 passed·37 skipped, ingest 67 passed. `git diff --check` 통과 |
+
+- 참고: 저장소 안 `engine/cache/qa/`·`api/cache/qa/`에 접근 권한이 없는 10-02 임시 폴더가 남아 `python -m pytest <engine|api>` 수집이 막혀 `--ignore=<engine|api>/cache`를 붙여 실행했다. Git 제외 폴더이며 CI에는 없다. 지우지 않았다.
+- 최종 결과: 승인 범위 6단계 완료. 커밋·푸시·PR은 사용자 몫. AnyIO deprecation 경고 1건은 그대로.
+
+---
+
 ## 2026-10-07 12:32 KST (+09:00) — hongsungmin0315 백테스트 담당: 재현성 보강·조건 확장(패턴 수치·선택 청산·매수 패턴 4종)
 
 - 시작 시각: 2026-10-07 (기록 시각 2026-10-07 12:32). Claude Code 작업. 이날부터 Agent Relay 채널은 읽지 않고 사용자와만 진행
@@ -53,6 +125,31 @@
 - 백테스트 담당 WBS 중 P1 전체·X2·X6 완료. 남은 P3-7·P3-13 은 선행 작업 대기
 - 병합 요청 순서: #17 → #18 → #19. #18 병합 뒤 #19 를 develop 위로 rebase 예정
 - 테스트(로컬, 원본 없음): #19 브랜치 engine 247 passed·39 skipped, api 29 passed·53 skipped
+
+---
+
+
+## 2026-10-02 18:34:17 KST (+09:00) — PEANUTBUTTER1001 독립 작업: M2 → M3 → X1 → F2
+
+- 시작 시각: 2026-10-02 18:34:17 KST (+09:00)
+- 목표: 승인된 명세에 따라 현재 보고서 품질을 점검하고 report-v3·기존 화면 사용성·원본 없는 CI를 구현·검증한다.
+- 승인 근거: 이 채팅의 전체 경로 명세 선택과 `$execute` 호출. 브랜치 `chore/M2-M3-X1-F2-quality`; 커밋·푸시·PR·사용자가 실행 중인 서버 종료/재시작은 범위 밖. 에이전트가 직접 띄운 점검용 8002 서버는 검증을 위해 재시작했다.
+
+### 단계 상태
+
+| 단계 | 상태 | 비고 |
+|---|---|---|
+| 1. M2 현재 회귀·대표 보고서 점검 | 🟢 완료 | sample30 실행 `20261002T193858_compare3_441ef4da`: 기본 돌파 534건·RSI35 808건·하락4일 580건. v2는 수치·분할일 누락, RSI30 고정명·후순위 코드명·샤프 배수 설명. 모두 fallback·cached=false. 사용자가 키 없이 진행 선택 → 실제 AI 호출 미실행 |
+| 2. M3 report-v3·원본 없는 보고서 테스트 | 🟢 완료 | 패턴 10종·저장 수치·분할일·단위·제외/건너뛴 진입 설명 반영. 거래 0건의 기간 누락·14문장 제한도 보완, 최종 핵심 보고서 23개 통과 |
+| 3. X1 기존 화면 점검·수정·검수 | 🟢 완료 | 한·영 빌더 1920/1280/1000/680/320px 가로 넘침·입력 넘침 0, 조작 영역 44px 이상. 오류 입력 포커스·고지/실행 버튼 간격·결과표 null 노출 수정. 키보드 실행→결과→보고서, 빈 상태·404·네트워크 오류 후 재시도 확인 |
+| 4. F2 원본·키 없는 CI | 🟢 완료 | engine 218 passed·38 skipped, API 50 passed·37 skipped. 핵심 search 41·win_rate 10·llm_verify 23·search_contract 24개 모두 실행, CI 요약의 누락/skip 실패 가드 검증. GitHub 실행은 푸시/PR 전이라 미실행 |
+| 5. 전체 검증·인수인계 | 🟢 완료 | engine 256·API 87 passed(실패·skip 0), 최종 경계 보완 뒤 보고서 23개 재통과. JS 구문·diff 공백 검사 통과, 활성 인수인계 `docs/구현_계획.md` 갱신 |
+| 6. 실제 AI 보고서 품질 점검 | 🟠 연기 | 사용자 답변 '이번에는 키 없이 진행'. 실제 공급사·모델 응답 품질은 미검증 |
+
+- 기준 회귀: 첫 실행은 시스템 임시 폴더·기존 pytest 캐시 권한 오류(엔진 226 passed·29 errors, API 5 passed·77 errors). 별도 엔진 실패는 로컬 데이터 폴더명을 `store`로 고정한 `test_paths_resolve`; 제품 변경 없이 임시 설정으로 상대·절대 경로 및 local 우선순위를 검증하도록 수정한다. 이후 워크스페이스 안의 임시·캐시 경로로 재검증한다.
+- 최종 결과: 승인된 구현·로컬 검증 완료. 실제 AI 점검은 연기, GitHub workflow 실행은 커밋/푸시/PR 전이라 미실행. AnyIO deprecation 경고 1건은 남아 있다. 원본·확정 설정·WBS CSV·AGENTS.md는 변경하지 않았다.
+- 검수용 실행 `20261002T200304_quality_keyboard_dd3edcb2`: 키보드로 sample30 기본 돌파 실행, 534건 결과와 한국어 템플릿 표시 확인. 한·영 검수 후 브라우저 언어를 한국어로, 화면 크기를 기본값으로 복원했다. 점검 서버 8002는 결과 확인용으로 실행 중이다.
+- 검증 산출물(모두 Git 제외): `cache/qa/engine-local.xml`, `api-final.xml`, `engine-no-data.xml`, `api-no-data.xml`; CI 요약·누락/skip 실패 가드 검증 로그. 브라우저 캡처는 사용자 Codex visualizations 폴더에 저장했다.
 
 ---
 

@@ -153,7 +153,7 @@ export async function renderResults(el, runId, query) {
       ],
       rows: all.slice(0, shown),
       onRow: (r) => { location.hash = `#/runs/${runId}/stock/${r.ticker}${q(cur)}`; },
-    }), all.length > shown ? h('div', { class: 'actions' }, h('button', { class: 'secondary', type: 'button', onclick: () => { shown += 50; drawTickers(); } }, t('r.showMore'))) : null);
+    }), ...(all.length > shown ? [h('div', { class: 'actions' }, h('button', { class: 'secondary', type: 'button', onclick: () => { shown += 50; drawTickers(); } }, t('r.showMore')))] : []));
   };
   drawTickers();
   el.append(h('article', { class: 'card' },
