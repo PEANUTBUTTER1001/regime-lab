@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from regime_lab.bars import (add_segments, aggregate_bars, apply_price_basis, confirmed_bars, judge_price_basis,
-                             normalize_minutes, slot_edges)
+                             normalize_minutes, price_segments, slot_edges)
 
 COLS = ["code", "dt", "open_p", "high_p", "low_p", "close_p", "volume", "value"]
 
@@ -180,6 +180,14 @@ def test_segments_break_only_beyond_price_limit(cfg):
     assert got.loc["005930"].tolist() == [0, 0, 1] and got.loc["000660"].tolist() == [0]
     bars = aggregate_bars(seg, "1h", cfg)
     assert "segment" in bars and bars.loc[bars["code"] == "005930", "segment"].tolist() == [0, 0, 0, 1]
+
+
+def test_price_segments_daily_rule_skips_no_trade_open(cfg):
+    """일봉(KRX close_raw·open_raw)에도 같은 규칙: 무거래 시가 0 은 끊지 않고, 첫 행·결측도 끊지 않는다."""
+    code = pd.Series(["A", "A", "A", "A", "B", "B"])
+    prev_close = pd.Series([np.nan, 1000, 1000, 1000, np.nan, 50])
+    open_raw = pd.Series([1000, 0, 1300, 200, 50, 100])  # 0원(무거래)·+30%(제한폭 안)·-80%(분할)·B +100%
+    assert price_segments(code, prev_close, open_raw, 30.0).tolist() == [0, 0, 0, 1, 0, 1]
 
 
 @pytest.mark.parametrize("as_of", ["2026-04-24 10:00", "2026-04-27 09:00", "2026-04-27 12:00"])

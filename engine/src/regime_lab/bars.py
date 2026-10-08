@@ -145,13 +145,24 @@ def add_segments(minutes: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     (분할·병합 등)으로 보고 그날부터 새 구간으로 끊는다. 그날 첫 분이 끝나면 알 수 있는 값이라 미래 정보가 아니다.
     제한폭 안의 작은 조정(유·무상 권리락 등)은 잡지 못한다 — 채점에서 이벤트 당일을 따로 보고한다.
     """
-    limit = cfg["minutes"]["event_gap_pct"]
     df = minutes.sort_values(["code", "dt"], kind="stable").reset_index(drop=True)
     day = df.groupby(["code", "date"], sort=True).agg(first=("open", "first"), last=("close", "last")).reset_index()
-    prev_last = day.groupby("code")["last"].shift(1)
-    jump = ((day["first"] / prev_last - 1).abs() * 100 > limit).fillna(False)
-    day["segment"] = jump.astype(int).groupby(day["code"]).cumsum()
+    day["segment"] = price_segments(day["code"], day.groupby("code")["last"].shift(1), day["first"],
+                                    cfg["minutes"]["event_gap_pct"])
     return df.merge(day[["code", "date", "segment"]], on=["code", "date"], how="left")
+
+
+def price_segments(code: pd.Series, prev_close: pd.Series, first_price: pd.Series, limit_pct: float) -> pd.Series:
+    """가격 구간 번호 (종목별 0부터). 행은 종목·거래일 순으로 정렬돼 있어야 한다.
+
+    |당일 첫 가격 ÷ 직전 거래일 정규장 종가 − 1| > limit_pct% 이면 그날부터 새 구간 (가격제한폭 밖 = 기준가 변경).
+    첫 가격이 0 이하(무거래)이거나 비교 값이 없으면 끊지 않는다. 1분봉(add_segments)과 일봉(KRX close_raw·open_raw)이
+    같은 규칙을 쓰도록 순수 함수로 둔다.
+    """
+    valid = (first_price > 0) & (prev_close > 0)
+    # 제한폭 정확히 30% 인 상·하한가는 같은 구간 (부동소수 오차로 30.000…04% 가 되는 것을 막는 여유)
+    jump = valid & ((first_price / prev_close - 1).abs() * 100 > limit_pct + 1e-9)
+    return jump.astype(int).groupby(code.to_numpy()).cumsum()
 
 
 def confirmed_bars(bars: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
