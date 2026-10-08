@@ -225,3 +225,6 @@ body.bare footer.disclaimer { left:0; }
 .ar-rel h3 { margin:14px 0 6px; font-size:14px; }
 .ar-rel p, .ar-rel li { font-size:13px; margin:0; }
 .ar-rel ul { margin:0; padding-left:18px; display:grid; gap:6px; }
+/* 결과: 청산 사유별 건수 (선택 청산 규칙 확인용) */
+.exit-reasons { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:12px 0 16px; }
+.exit-reasons .label { color:var(--muted); font-size:12px; margin-right:4px; }
