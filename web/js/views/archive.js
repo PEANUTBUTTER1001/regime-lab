@@ -20,6 +20,33 @@ const STATUS_KIND = { amendment: 'warn', revised: 'neutral', unlinked: 'neutral'
 const statusPills = (list) => (list || []).map((s) => pill(t(`ar.status.${s}`), STATUS_KIND[s] || ''));
 const docHref = (id, asOf, mode) => `#/archive/doc?${new URLSearchParams({ id, as_of: asOf, mode })}`;
 
+// 기간 안 수집 상태 (FR-N4): 공백(gap)은 '자료 0건'과 다르다. 목록과 따로 불러오며, 실패해도 목록은 그대로 둔다.
+function coveragePanel(params) {
+  const box = h('div', { class: 'ar-coverage', 'aria-live': 'polite' }, h('p', { class: 'muted', text: t('ar.cov.loading') }));
+  const q = Object.fromEntries(Object.entries(params).filter(([, v]) => v));
+  api.coverage(q).then((res) => {
+    if (res.status === 'no_coverage') { box.replaceChildren(h('p', { class: 'muted', text: t('ar.cov.none') })); return; }
+    box.replaceChildren(h('h3', {}, t('ar.cov.title')), h('p', { class: 'hint', text: t('ar.cov.sub') }),
+      ...Object.entries(res.sources).map(([src, s]) => {
+        const c = s.counts;
+        const days = (list, total, key) => (list.length ? h('details', { class: 'ev-similar' },
+          h('summary', {}, t(key, { n: fmt.int(total) })), h('p', { class: 'muted' }, list.join(', '),
+            total > list.length ? ` … ${t('ar.cov.more', { n: fmt.int(total - list.length) })}` : '')) : null);
+        return h('div', { class: 'ar-cov-row' },
+          h('strong', {}, srcLabel(src)), ' ',
+          h('small', { class: 'muted' }, `${s.first_day} ~ ${s.last_day} · ${s.markets.join('·')}`), ' ',
+          pill(`${t('ar.cov.collected')} ${fmt.int(c.collected)}`), ' ',
+          c.forward ? pill(`${t('ar.cov.forward')} ${fmt.int(c.forward)}`, 'neutral') : null, ' ',
+          c.partial ? pill(`${t('ar.cov.partial')} ${fmt.int(c.partial)}`, 'warn') : null, ' ',
+          c.gap ? pill(`${t('ar.cov.gap')} ${fmt.int(c.gap)}`, 'bad') : null,
+          days(s.gap_days, c.gap, 'ar.cov.gapDays'), days(s.partial_days, c.partial, 'ar.cov.partialDays'));
+      }));
+  }).catch((err) => {
+    box.replaceChildren(h('p', { class: 'muted', text: err.code === 'data_unavailable' ? t('ar.cov.none') : t('ar.cov.failed') }));
+  });
+  return box;
+}
+
 function unavailable(err) {
   return stateView({ kind: 'error', title: t('err.data_unavailable'), message: t('ev.unavailable'),
     detail: err.detail?.error ? String(err.detail.error) : t('common.code', { c: err.code }) });
@@ -111,8 +138,9 @@ export async function renderArchive(el, query) {
     }));
   const summary = h('p', { class: 'muted', style: { margin: '18px 0 10px' } },
     t('ar.summary', { v: fmt.int(res.total), n: fmt.int(ix.total_docs), a: when(ix.as_of), m: t(`ev.mode.${ix.mode}`) }));
+  const cov = coveragePanel({ as_of: ix.as_of, mode: ix.mode, start: f.start, end: f.end });
   if (res.status === 'no_documents') {
-    box.append(chips, summary, stateView({ title: t('ar.noneTitle'), message: t('ar.noneMsg') }));
+    box.append(chips, summary, cov, stateView({ title: t('ar.noneTitle'), message: t('ar.noneMsg') }));
     return;
   }
   const columns = [
@@ -129,7 +157,7 @@ export async function renderArchive(el, query) {
     h('button', { type: 'button', class: 'secondary', disabled: res.page <= 1, onclick: () => go({ page: res.page - 1 }) }, `← ${t('ar.prev')}`),
     h('span', { class: 'muted' }, t('ar.pageOf', { p: res.page, n: res.pages })),
     h('button', { type: 'button', class: 'secondary', disabled: res.page >= res.pages, onclick: () => go({ page: res.page + 1 }) }, `${t('ar.next')} →`));
-  box.append(chips, summary,
+  box.append(chips, summary, cov,
     h('article', { class: 'card' }, table({ caption: t('ar.caption', { n: res.items.length, total: fmt.int(res.total) }), columns, rows: res.items }), pager));
 }
 
