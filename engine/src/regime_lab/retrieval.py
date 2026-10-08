@@ -370,3 +370,59 @@ def document(ei: EvidenceIndex, cfg: dict, doc_id: str, as_of, mode: str = "obse
         "content_policy": {"license_scope": cur.get("license_scope"), "summary_shown": show_summary, "body_shown": False},
         "as_of": t.isoformat(), "mode": mode,
     }
+
+
+COVERAGE_STATES = ("collected", "forward", "partial", "gap")
+
+
+def coverage(store, cfg: dict, as_of, mode: str = "observed", start: str | None = None, end: str | None = None) -> dict:
+    """기간 안 출처별 수집 상태 (P3-13, FR-N4·N7): 공백(gap)은 '자료 0건'과 다르다는 것을 보관함에 보이기 위함.
+
+    store.coverage() 는 수집기가 내보낸 수집 범위 이력(추가만)이다. (출처, 날짜, 시장)마다 마지막 기록이 그 시점 상태다.
+    - observed: observed_at ≤ as_of 인 기록만 — 그 시각 수집기가 실제로 알던 상태
+    - historical_assumed: 최종 기록 (소급을 받아들인 일봉 연구용) — 단 날짜는 as_of 의 KST 날짜까지만
+    날짜를 주지 않으면 기록이 있는 전체 날짜. 기록이 없는 날은 '시도 안 함'이라 세지 않는다.
+    """
+    errors: dict = {}
+    t = _as_of_mode(as_of, mode, errors)
+    days = {}
+    for k, v in (("start", start), ("end", end)):
+        if v:
+            try:
+                days[k] = date.fromisoformat(v).isoformat() if len(v) == 10 else None
+            except ValueError:
+                days[k] = None
+            if days[k] is None:
+                errors[k] = "YYYY-MM-DD 날짜"
+    if days.get("start") and days.get("end") and days["start"] > days["end"]:
+        errors["end"] = "시작일 이후 날짜"
+    if errors:
+        raise RetrievalError("validation_failed", "Check the input values.", {"fields": errors})
+    try:
+        rows = store.coverage()
+    except FileNotFoundError as e:
+        raise RetrievalError("data_unavailable", "External documents are not available.", {"error": str(e)}) from None
+    last_day = t.astimezone(_KST).date().isoformat()
+    lo, hi = days.get("start"), min(days.get("end") or last_day, last_day)
+    state: dict[tuple[str, str, str], str] = {}
+    for r in sorted(rows, key=lambda r: (r["source"], r["seq"])):
+        if mode == "observed" and aware(r["observed_at"]) > t:
+            continue
+        if (lo and r["day"] < lo) or r["day"] > hi:
+            continue
+        state[(r["source"], r["day"], r["corp_cls"])] = r["state"]
+    limit = cfg["archive"]["coverage_list_max"]
+    out: dict[str, dict] = {}
+    for (src, day, cls), st in sorted(state.items()):
+        o = out.setdefault(src, {"counts": dict.fromkeys(COVERAGE_STATES, 0), "gap_days": [], "partial_days": [],
+                                 "first_day": day, "last_day": day, "markets": set()})
+        o["counts"][st] = o["counts"].get(st, 0) + 1
+        o["markets"].add(cls)
+        o["last_day"] = max(o["last_day"], day)
+        key = {"gap": "gap_days", "partial": "partial_days"}.get(st)
+        if key and (not o[key] or o[key][-1] != day) and len(o[key]) < limit:
+            o[key].append(day)
+    for o in out.values():
+        o["markets"] = sorted(o["markets"])
+    return {"status": "ok" if out else "no_coverage", "sources": out, "as_of": t.isoformat(), "mode": mode,
+            "start": lo, "end": hi, "list_limit": limit}
