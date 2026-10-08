@@ -4,8 +4,10 @@
 구간 규칙 (seonghwan-claude 와 합의, docs/분봉_데이터_설계.md N3 과 같은 정의):
   ① 직전 거래일 KRX 정규장 종가(close_raw) vs 당일 KRX 시가(open_raw)  ② open_raw > 0 인 날만
   ③ |변화| > --gap-pct(기본 30%) 면 그날부터 새 구간 (정확히 30% 는 같은 구간, 부동소수 여유 1e-9)
-수정비율 (시점 정합, codex-01a0fb4b 리뷰 반영): t 일 비율 = 같은 구간에서 t 일까지의 최근 --window(기본 60) 거래일의
-store close / close_raw 중앙값. t 이후 행은 쓰지 않는다. 구간이 cutover 전부터 이어지면 NXT 전의 믿을 만한 날들이
+수정비율 (시점 정합, codex-01a0fb4b 리뷰 반영): t 일 비율 = 같은 구간에서 **t-1 일까지**의 최근 --window(기본 60)
+거래일 store close / close_raw 중앙값. t 일 OHLC 를 보정하는 데 t 일 종가(15:30 이후 확정)를 쓰지 않으므로 t 일 시가(09:00)
+시점에도 이미 알 수 있는 값이다. 구간 첫날은 앞선 날이 없어 보정하지 않는다(store 값 유지).
+입력 이용 가능 시점: store 일봉·raw/krx_daily 의 t 일 값은 t 일 장 마감 뒤 확정 → t+1 일부터 비율 계산에 쓴다. 구간이 cutover 전부터 이어지면 NXT 전의 믿을 만한 날들이
 창을 채워, cutover 뒤 일부 날의 시간외 종가가 섞여도 중앙값이 흔들리지 않는다.
 --self-check 로 마지막 20거래일을 잘라 다시 계산해 겹치는 날의 보정값이 같은지(절단 불변) 확인한다.
 cutover 이후 행만 open·high·low·close = 원주가 × 비율로 바꾼다 (원주가가 0·결측이면 store 값 유지,
@@ -46,9 +48,9 @@ def segments(d: pd.DataFrame, gap_pct: float) -> pd.Series:
 
 
 def ratios(m: pd.DataFrame, seg: pd.Series, window: int) -> pd.Series:
-    """t 일 수정비율 = 같은 (종목, 구간)에서 t 일까지 최근 window 행의 close/close_raw 중앙값 (t 이후 미사용)."""
+    """t 일 수정비율 = 같은 (종목, 구간)에서 t-1 일까지 최근 window 행의 close/close_raw 중앙값 (t 일 이후 미사용)."""
     rc = (m["close"] / m["close_raw_k"]).where(m["close_raw_k"].gt(0))
-    return rc.groupby([m["ticker"], seg]).transform(lambda s: s.rolling(window, min_periods=1).median())
+    return rc.groupby([m["ticker"], seg]).transform(lambda s: s.rolling(window, min_periods=1).median().shift(1))
 
 
 def corrector(raw: pd.DataFrame, cutover: pd.Timestamp, gap_pct: float, window: int, stats: dict):
@@ -100,6 +102,13 @@ def main() -> None:
         part = ratios(mt, segments(mt, a.gap_pct), a.window)
         same = np.allclose(full.loc[mt.index].to_numpy(float), part.to_numpy(float), equal_nan=True, rtol=0, atol=0)
         print(f"절단 불변 (마지막 20거래일 제거, 겹치는 {len(mt):,}행 수정비율 동일): {same}")
+        # t 일 값을 바꿔도 t 일 비율이 그대로인지 (t-1 까지만 쓰는지) — 마지막 날 종가를 2배로 바꿔 확인
+        last = m["date"] == m["date"].max()
+        m2 = m.copy()
+        m2.loc[last, "close"] = m2.loc[last, "close"] * 2
+        same_t = np.allclose(ratios(m2, segments(m2, a.gap_pct), a.window)[last].to_numpy(float),
+                             full[last].to_numpy(float), equal_nan=True, rtol=0, atol=0)
+        print(f"당일 값 미사용 (마지막 날 종가를 바꿔도 그날 비율 동일): {same_t}")
         return
     stats: dict = {}
     orig, load = corrector(raw, cutover, a.gap_pct, a.window, stats)
