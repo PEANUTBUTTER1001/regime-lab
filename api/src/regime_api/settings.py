@@ -43,7 +43,7 @@ class Settings:
         paths = load_paths()
         runs = os.environ.get("REGIME_RUNS_DIR")
         if runs:
-            paths = Paths(paths.store, paths.sql_dump, paths.cache, Path(runs))
+            paths = Paths(paths.store, paths.sql_dump, paths.cache, Path(runs), paths.ext_store)
         provider = os.environ.get("REGIME_LLM_PROVIDER", "openai").strip().lower()
         key_env = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
         return cls(

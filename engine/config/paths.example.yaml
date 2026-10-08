@@ -4,3 +4,4 @@ store: store
 sql_dump: multi_tables_db/multi_tables_backup.sql
 cache: cache
 runs: runs
+ext_store: ../regime-lab_ext_store   # 외부 자료 수집 결과 (ingest 와 같은 폴더, 저장소 밖). 근거 검색이 docs Parquet 만 읽는다
