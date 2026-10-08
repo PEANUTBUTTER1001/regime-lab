@@ -170,7 +170,7 @@ export async function renderArchiveDoc(el, query) {
     h('div', {}, h('div', { class: 'eyebrow' }, t('ar.eyebrow')), h('h1', { tabindex: '-1', text: t('ar.docTitle') }),
       h('p', { class: 'lead', text: t('ar.docLead', { a: when(asOf), m: t(`ev.mode.${mode}`) }) })),
     h('a', { class: 'secondary', href: back }, `← ${t('ar.backList')}`)));
-  const box = h('div', { 'aria-live': 'polite' }, loading(t('ar.loading')));
+  const box = h('div', { class: 'ar-doc', 'aria-live': 'polite' }, loading(t('ar.loading')));
   el.append(box);
   let res;
   try {
@@ -208,7 +208,7 @@ export async function renderArchiveDoc(el, query) {
   });
   const linkTo = (x) => h('a', { href: docHref(x.doc_id, res.as_of, res.mode) }, x.title || x.doc_id);
   const cand = res.amends_candidate;
-  const rel = h('article', { class: 'card' }, h('h2', {}, t('ar.relTitle')), h('p', { class: 'card-sub', text: t('ar.relSub') }),
+  const rel = h('article', { class: 'card ar-rel' }, h('h2', {}, t('ar.relTitle')), h('p', { class: 'card-sub', text: t('ar.relSub') }),
     h('h3', {}, t('ar.amends')),
     !cand ? h('p', { class: 'muted', text: t('ar.amendsNone') })
       : cand.visible ? h('p', {}, pill(t('ar.candidate'), 'warn'), ' ', linkTo(cand), h('small', { class: 'muted' }, ` · ${when(cand.published_at)}`))
