@@ -7,6 +7,7 @@ import { t } from './i18n.js';
 import { state } from './state.js';
 import { renderBriefing } from './views/briefing.js';
 import { renderBuilder } from './views/builder.js';
+import { renderEvidence } from './views/evidence.js';
 import { renderLogin } from './views/login.js';
 import { renderProgress } from './views/progress.js';
 import { renderReport } from './views/report.js';
@@ -25,6 +26,7 @@ const NAV = [
   { id: 'results', icon: '▦', label: 'nav.results', href: () => (state.lastRun ? `#/runs/${state.lastRun}/results` : '#/results') },
   { id: 'stock', icon: '⌁', label: 'nav.stock', href: () => (state.lastRun ? `#/runs/${state.lastRun}/stock` : '#/stock') },
   { id: 'report', icon: '✦', label: 'nav.report', href: () => (state.lastRun ? `#/runs/${state.lastRun}/report` : '#/report') },
+  { id: 'evidence', icon: '⌕', label: 'nav.evidence', href: () => '#/evidence' },
   { id: 'briefing', icon: '◌', label: 'nav.briefing', href: () => '#/briefing' },
 ];
 
@@ -41,6 +43,7 @@ const ROUTES = [
   [/^#\/presets$/, () => ({ nav: 'presets', view: renderPresets })],
   [/^#\/searches\/([^/]+)\/progress$/, (m) => ({ nav: 'search', view: (el) => renderSearchProgress(el, m[1]) })],
   [/^#\/searches\/([^/]+)\/results$/, (m) => ({ nav: 'search', view: (el) => renderSearchResult(el, m[1]) })],
+  [/^#\/evidence$/, () => ({ nav: 'evidence', view: renderEvidence })],
   [/^#\/briefing$/, () => ({ nav: 'briefing', view: renderBriefing })],
   [/^#\/settings$/, () => ({ nav: 'settings', view: renderSettings })],
 ];

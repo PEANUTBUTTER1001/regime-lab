@@ -57,4 +57,6 @@ export const api = {
   preset: (id) => request('GET', `/presets/${encodeURIComponent(id)}`),
   updatePreset: (id, body) => request('PUT', `/presets/${encodeURIComponent(id)}`, body),
   deletePreset: (id) => request('DELETE', `/presets/${encodeURIComponent(id)}`),
+  // 근거 검색 (P3-11)
+  evidence: (params) => request('GET', `/evidence/search?${new URLSearchParams(params)}`),
 };

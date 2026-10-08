@@ -17,7 +17,9 @@ from regime_api.errors import ApiError
 from regime_api.jobs import JobManager
 from regime_api.llm.service import ReportService
 from regime_api.settings import Settings
+from regime_lab import retrieval
 from regime_lab.config import load_config
+from regime_lab.data.loader import DocsStore
 from regime_lab.pipeline import Prepared, prepare
 from regime_lab.presets import PresetStore, presets_dir
 
@@ -34,7 +36,7 @@ class RevalidatingStaticFiles(StaticFiles):
 
 
 class AppState:
-    def __init__(self, settings: Settings, prep: Prepared | None = None):
+    def __init__(self, settings: Settings, prep: Prepared | None = None, rag: retrieval.EvidenceIndex | None = None):
         self.settings = settings
         self.cfg = load_config()
         self.paths = settings.paths
@@ -53,6 +55,10 @@ class AppState:
         # 설정 화면에서 바꾼 LLM 값은 메모리에만 둔다. 지우기 시 시작 시점의 환경변수 값으로 돌아간다 (E10).
         self.llm_env = (settings.llm_model, settings.llm_api_key)
         self.llm_source = "env"
+        # 근거 검색 색인 (P3-11). 준비 프레임과 따로 불러오며, 실패해도 다른 기능에는 영향이 없다.
+        self.rag = rag
+        self.rag_status = "ready" if rag is not None else "warming_up"
+        self.rag_error: dict | None = None
 
     def load(self) -> None:
         try:
@@ -60,6 +66,23 @@ class AppState:
             self.status = "ready"
         except Exception as e:  # noqa: BLE001
             self.status, self.load_error = "failed", f"{type(e).__name__}: {e}"
+
+    def load_rag(self) -> None:
+        try:
+            self.rag = retrieval.open_index(DocsStore(self.paths.ext_store, self.paths.cache), self.cfg)
+            self.rag_status = "ready"
+        except retrieval.RetrievalError as e:
+            self.rag_status, self.rag_error = "failed", e.detail
+        except Exception as e:  # noqa: BLE001
+            self.rag_status, self.rag_error = "failed", {"error": f"{type(e).__name__}: {e}"}
+
+    def require_rag(self) -> retrieval.EvidenceIndex:
+        if self.rag is None:
+            if self.rag_status == "failed":
+                raise ApiError(503, "data_unavailable", "External documents could not be loaded.", self.rag_error)
+            raise ApiError(503, "warming_up", "The server is still loading the evidence index. Try again shortly.",
+                           retryable=True)
+        return self.rag
 
     def require_prep(self) -> Prepared:
         if self.prep is None:
@@ -69,14 +92,17 @@ class AppState:
         return self.prep
 
 
-def create_app(settings: Settings | None = None, prep: Prepared | None = None, serve_web: bool = True) -> FastAPI:
+def create_app(settings: Settings | None = None, prep: Prepared | None = None, serve_web: bool = True,
+               rag: retrieval.EvidenceIndex | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    state = AppState(settings, prep)
+    state = AppState(settings, prep, rag)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if state.prep is None:
             threading.Thread(target=state.load, name="prepare", daemon=True).start()
+        if state.rag is None:
+            threading.Thread(target=state.load_rag, name="rag-index", daemon=True).start()
         yield
 
     app = FastAPI(title="regime-lab API", version=API_VERSION, lifespan=lifespan,
@@ -87,10 +113,10 @@ def create_app(settings: Settings | None = None, prep: Prepared | None = None, s
         app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"],
                            allow_headers=["*"])
 
-    from regime_api.routes import briefing, llm, meta, presets, report, results, runs, searches
+    from regime_api.routes import briefing, evidence, llm, meta, presets, report, results, runs, searches
 
     for r in (meta.router, runs.router, results.router, report.router, briefing.router, llm.router,
-              searches.router, presets.router):
+              searches.router, presets.router, evidence.router):
         app.include_router(r, prefix="/api")
     if serve_web and settings.web_dir.exists():
         app.mount("/", RevalidatingStaticFiles(directory=settings.web_dir, html=True), name="web")
