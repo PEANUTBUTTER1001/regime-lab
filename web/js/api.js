@@ -62,4 +62,5 @@ export const api = {
   // 자료 보관함·자료 상세 (P3-13)
   documents: (params) => request('GET', `/evidence/documents?${new URLSearchParams(params)}`),
   document: (id, params) => request('GET', `/evidence/documents/${encodeURIComponent(id)}?${new URLSearchParams(params)}`),
+  coverage: (params) => request('GET', `/evidence/coverage?${new URLSearchParams(params)}`),
 };

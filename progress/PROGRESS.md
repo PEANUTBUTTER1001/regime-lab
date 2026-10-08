@@ -1,5 +1,31 @@
 # PROGRESS
 
+## 2026-10-08 16:27 KST (+09:00) — hongsungmin0315 백테스트 담당: P3-13 자료 보관함·수집 상태, NXT 가격 기준, P3-8 게시
+
+- 시작 시각: 2026-10-08 오전 (기록 시각 2026-10-08 16:27). Claude Code, Agent Relay friends 채널에서 codex-01a0fb4b·seonghwan-claude·hchee99-codex 와 협업
+- 목표: 남은 WBS(P3-13)를 develop 에 넣고, 새로 발견된 NXT 이후 일봉 가격 문제를 백테스트 관점에서 판단한다.
+
+### 단계 상태
+
+| 단계 | 상태 | 비고 |
+|---|---|---|
+| 1. P3-13.1·13.2 자료 보관함·자료 상세 | 🟢 완료 | PR #36. retrieval.browse·document, `GET /api/evidence/documents`·`/documents/{doc_id}`, 웹 `#/archive`·`#/archive/doc`. 근거 검색과 같은 시점 규칙, 미래 자료·버전 숨김, 정정은 후보로만, metadata_only 는 제목·링크만. 엔진 20·API 12 테스트(select_as_of 일치·절단 불변) |
+| 2. 수집 범위 내보내기 (P3-7 후속) | 🟢 완료 | PR #37. 커밋마다 `<ext_store>/coverage/source=<s>/coverage_log.parquet`(추가만, 커밋한 출처만, tmp→replace). ingest 137 passed |
+| 3. 보관함 수집 상태 표시 | 🟡 리뷰 | PR #39. 기간 안 날짜×시장 완료·순방향·부분·공백과 공백 날짜, 0건일 때도 표시. 엔진 5·API 2 |
+| 4. P3-13.3 영향 분석 차트·가중치 표 | ⏳ 대기 | P3-12(PEANUTBUTTER1001) 결과 형식 뒤 |
+| 5. NXT 이후 일봉 가격 (결정 NXT-1) | 🟡 A 적용 | seonghwan-claude 발견. 전 종목 NXT 이후 종가 약 3.7%·시가 약 2.1% 가 KRX 정규장 가격과 어긋남(데이터 서버 조회·메모리 비교). sample30 실험에서 승률 차이 ≤0.1%p·평균 초과 ≤0.01%p. A(한계 문서화) PR #35·#38 병합, B(loader 보정)는 전 종목 결과 뒤 — 시점 정합 실험 스크립트 `exp/NXT-1-price-impact`(구간 규칙은 seonghwan 과 합의, `--self-check` 절단 불변) |
+| 6. P3-8 뉴스(hchee99) 게시 | 🟢 완료 | #29(입력 기반)·#34(실행 경로) — 패치 sha256 대조 후 git am, 작성자 hchee99 유지. #30 staging 정리 출처 범위 수정(리뷰 반영) |
+| 7. 발표 점검 | 🟢 완료 | API 서버 E2E(14 패턴·새 청산·검증 오류), 역방향 탐색 실데이터 시연 후보(high_52w OR bb_squeeze_break 10일: 탐색 52.3% → 평가 55.4%), 새 패턴 4종 3,000종목 신호 계산 0.17~1.35초 |
+
+### 최종 결과
+
+- develop 반영(오늘): #29·#30·#34·#35·#36·#37·#38 (+ 팀 #31·#32·#33)
+- 남은 결정: NXT-1 B, 뉴스 위치 G2 3차, X6-2 범위 확장·SRS FR-E3 문구(PEANUTBUTTER1001)
+- 한계: 웹 화면은 이 PC 에 Node·브라우저 자동화가 없어 JavaScriptCore 문법 검사와 서버 응답 확인까지만 함 — 리뷰 때 화면 확인 요청
+- 실수·정정: #21 브랜치 전환 실패로 `.DS_Store` 커밋(정리됨), 실험 스크립트 수정비율이 미래 행을 쓰던 것(codex 지적, 시점 정합으로 수정), README 실험 수치 묶어 쓴 것(#38 정정)
+
+---
+
 ## 2026-10-08 12:44:08 KST (+09:00) — PEANUTBUTTER1001 P3-11 근거 검색(RAG 검색 단계) 구현
 
 - 시작 시각: 2026-10-08 12:44:08 KST (+09:00)
