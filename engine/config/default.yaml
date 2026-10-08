@@ -149,3 +149,18 @@ rag:                                # P3-11 근거 검색 (역방향 탐색 sear
   group_candidate_k: 100            # 묶기 전에 보는 BM25 후보 수 (묶음 크기는 이 안에서만 센다)
   min_score: 0.0                    # 상위 점수가 이 값 이하이면 근거 없음 (no_evidence)
   max_query_len: 200                # 질의 글자 수 상한
+
+archive:                            # P3-13 자료 보관함 (SRS FR-N7). PREP_SECTIONS 밖 — 준비 캐시와 무관
+  page_size: 50                     # 목록 한 쪽 기본 건수
+  max_page_size: 200                # 요청 page_size 상한
+  coverage_list_max: 50             # 수집 상태: 출처마다 보여 줄 공백·부분 날짜 수 상한 (개수는 전부 센다)
+
+minutes:                            # P2-4 1분봉 정규화·시간봉 집계 (docs/분봉_데이터_설계.md §2). PREP_SECTIONS 밖 — 일봉 준비 캐시와 무관
+  session_open: "09:00"             # N1 정규장 첫 분
+  session_close: "15:30"            # N1 정규장 마지막 분 (종가 단일가 체결 분, 포함). 15:20~15:29 동시호가 포함
+  nxt_start: "2026-04-24"           # N5 KRX+NXT 통합 시세 시작일 (P2-1 실사)
+  price_basis_tol_pct: 0.2          # N2 1분봉 정규장 종가 vs KRX 원주가 종가 허용오차
+  event_gap_pct: 30.0               # N3 전일 정규장 마지막 가격 대비 당일 첫 가격 변화가 이를 넘으면(가격제한폭 밖) 기준가 변경 → 가격 구간을 끊는다
+  bar_starts:                       # §2.1 집계 봉 시작 시각. 마지막 봉은 session_close 까지 (길이가 달라도 합치거나 빼지 않음)
+    1h: ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00"]
+    3h: ["09:00", "12:00"]

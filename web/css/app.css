@@ -205,3 +205,26 @@ footer.disclaimer { position:fixed; left:260px; right:0; bottom:0; background:rg
 .login-alt { display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap; margin-top:12px; }
 .login-alt .secondary { min-height:44px; }
 body.bare footer.disclaimer { left:0; }
+
+/* 자료 보관함 (P3-13) */
+.ar-chips { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 0; }
+.ar-chips .chip { min-height:32px; padding:4px 12px; border-radius:999px; border:1px solid var(--line); background:var(--control); color:var(--text); cursor:pointer; font-size:13px; }
+.ar-chips .chip.active { border-color:var(--mint); color:var(--mint); font-weight:600; }
+.ar-pills { display:inline-flex; flex-wrap:wrap; gap:4px; }
+.ar-ext { text-decoration:none; }
+.ar-pager { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; }
+.ar-meta { width:100%; border-collapse:collapse; }
+.ar-meta th { text-align:left; width:9em; color:var(--muted); font-weight:500; padding:6px 8px 6px 0; vertical-align:top; }
+.ar-meta td { padding:6px 0; }
+.ar-summary { margin:12px 0 0; padding:10px 14px; border-left:3px solid var(--line); color:var(--text); }
+.ar-coverage { margin:8px 0 14px; padding:10px 14px; border:1px solid var(--line); border-radius:8px; background:rgba(27,36,41,.5); }
+.ar-coverage h3 { margin:0 0 4px; font-size:14px; }
+.ar-cov-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:6px; }
+.ar-cov-row details { flex-basis:100%; }
+.ar-doc { display:grid; gap:14px; }
+.ar-rel h3 { margin:14px 0 6px; font-size:14px; }
+.ar-rel p, .ar-rel li { font-size:13px; margin:0; }
+.ar-rel ul { margin:0; padding-left:18px; display:grid; gap:6px; }
+/* 결과: 청산 사유별 건수 (선택 청산 규칙 확인용) */
+.exit-reasons { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:12px 0 16px; }
+.exit-reasons .label { color:var(--muted); font-size:12px; margin-right:4px; }

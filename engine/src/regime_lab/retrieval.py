@@ -1,4 +1,5 @@
 """근거 검색 유스케이스 (P3-11, SRS FR-N5): 색인 만들기·불러오기, as_of 검색, 평가셋 채점.
+자료 보관함·자료 상세 (P3-13, SRS FR-N7): browse·document — 같은 색인 문서와 시점 규칙을 쓴다.
 
 API·CLI 의 공개 진입점(AGENTS.md R5). 문서·캐시 I/O 는 인자로 받은 저장소(store, 인프라 data/docs.py 의
 DocsStore)가 맡고, 시계도 호출자가 넘긴다 — 이 파일은 파일·시계에 직접 닿지 않는다(R1·R2).
@@ -9,9 +10,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections import defaultdict
+import re
+from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 
 from regime_lab.rag.metrics import abstention, ndcg_at_k, percentile, reciprocal_rank, unique_clusters_at_k
@@ -200,3 +202,227 @@ def evaluate(ei: EvidenceIndex, cfg: dict, gold: list[dict], split: str, *, allo
             "index": {"index_version": INDEX_VERSION, "docs_fingerprint": ei.docs_fingerprint, "fields": list(ei.fields),
                       "total_docs": len(ei.docs)},
             "warnings": warnings, "per_query": per_query}
+
+
+# ---------------------------------------------------------------- 자료 보관함·자료 상세 (P3-13, SRS FR-N7)
+# 원칙: as_of 에 쓸 수 있던 버전만 보인다(select_as_of 와 같은 규칙, 미래 버전·문서는 숨김). 보관 범위가 metadata_only 면
+# 제목·링크·메타데이터만, 요약은 summary_link·full_text 일 때만. 원문 본문(body_ref)은 화면으로 내보내지 않는다.
+# 정정 관계는 수집기가 남긴 '후보'(amends_candidate_doc_id)일 뿐이라 확정 관계로 표시하지 않는다.
+ARCHIVE_STATUSES = ("all", "amendment", "revised", "unlinked")
+SOURCE_TYPES = ("disclosure", "news")
+_ARCHIVE_FIELDS = ("doc_id", "version", "source", "source_type", "title", "corp_name", "url", "published_at",
+                   "time_precision", "first_seen_at", "available_at", "license_scope", "ticker_status")
+_LINK_FIELDS = ("doc_id", "title", "source", "url", "published_at", "available_at")
+_VERSION_FIELDS = ("version", "title", "first_seen_at", "available_at", "backfilled", "content_hash")
+_SUMMARY_SCOPES = ("summary_link", "full_text")
+_DOC_ID_RE = re.compile(r"^[a-z][a-z0-9_]*:[A-Za-z0-9_.\-]{1,120}$")
+_KST = timezone(timedelta(hours=9))
+
+
+def _visible(d: dict, t: datetime, mode: str) -> bool:
+    """버전 하나가 t 에 보이는지 (select_as_of 의 행 조건과 같다. 둘은 test_archive 에서 같은 결과로 묶는다)."""
+    if d.get("status") == "deleted" or aware(d["available_at"]) > t:
+        return False
+    return mode != "observed" or aware(d["first_seen_at"]) <= t
+
+
+def _pub_date(d: dict) -> str:
+    """게시일 (KST 날짜). 날짜만 있으면 그대로, 시각이 있으면 KST 로 바꾼 날짜 (UTC 로 오는 출처가 있다)."""
+    s = str(d.get("published_at") or "")
+    if len(s) <= 10:
+        return s
+    try:
+        return aware(s).astimezone(_KST).date().isoformat()
+    except ValueError:
+        return s[:10]
+
+
+def _statuses(d: dict) -> list[str]:
+    out = []
+    if d.get("is_amendment"):
+        out.append("amendment")
+    if (d.get("version") or 1) > 1:
+        out.append("revised")
+    if d.get("ticker_status") != "resolved":
+        out.append("unlinked")
+    return out
+
+
+def _codes(d: dict) -> list[str]:
+    return [x.get("code") for x in d.get("tickers") or [] if x.get("code")]
+
+
+def _as_of_mode(as_of, mode, errors: dict) -> datetime | None:
+    t = None
+    try:
+        t = aware(as_of)
+    except (TypeError, ValueError):
+        errors["as_of"] = "시간대가 포함된 ISO 8601 시각이 필요합니다 (예: 2026-10-07T09:00:00+09:00)"
+    if mode not in AS_OF_MODES:
+        errors["mode"] = f"{AS_OF_MODES} 중 하나"
+    return t
+
+
+def _validate_browse(cfg: dict, as_of, mode, source_type, start, end, tickers, status, page, page_size):
+    errors: dict = {}
+    t = _as_of_mode(as_of, mode, errors)
+    source_type = source_type or None
+    if source_type is not None and source_type not in SOURCE_TYPES:
+        errors["source_type"] = f"{SOURCE_TYPES} 중 하나"
+    days = {}
+    for k, v in (("start", start), ("end", end)):
+        if v:
+            try:
+                days[k] = date.fromisoformat(v).isoformat() if len(v) == 10 else None
+            except ValueError:
+                days[k] = None
+            if days[k] is None:
+                errors[k] = "YYYY-MM-DD 날짜"
+    if days.get("start") and days.get("end") and days["start"] > days["end"]:
+        errors["end"] = "시작일 이후 날짜"
+    tickers = [x.strip() for x in (tickers or []) if x and x.strip()]
+    if any(len(x) != _TICKER_LEN or not x.isalnum() for x in tickers):
+        errors["tickers"] = "종목코드는 6자리 영숫자입니다"
+    status = status or "all"
+    if status not in ARCHIVE_STATUSES:
+        errors["status"] = f"{ARCHIVE_STATUSES} 중 하나"
+    a = cfg["archive"]
+    page_size = a["page_size"] if page_size is None else page_size
+    if not isinstance(page, int) or isinstance(page, bool) or page < 1:
+        errors["page"] = "1 이상"
+    if not isinstance(page_size, int) or isinstance(page_size, bool) or not 1 <= page_size <= a["max_page_size"]:
+        errors["page_size"] = f"1~{a['max_page_size']}"
+    if errors:
+        raise RetrievalError("validation_failed", "Check the input values.", {"fields": errors})
+    return t, source_type, days.get("start"), days.get("end"), tickers, status, page, page_size
+
+
+def browse(ei: EvidenceIndex, cfg: dict, as_of, mode: str = "observed", source_type: str | None = None,
+           start: str | None = None, end: str | None = None, tickers=None, status: str = "all", page: int = 1,
+           page_size: int | None = None) -> dict:
+    """자료 보관함 목록. as_of 에 보이는 문서(doc_id 마다 최신 허용 버전)를 게시일·종목·출처 유형·상태로 거른다.
+
+    facets 는 출처 유형·상태 필터를 걸기 전(시점·기간·종목만 적용) 개수 — 필터 버튼 옆 숫자용.
+    정렬은 게시일 최신순, 같은 날은 이용 가능 시각 최신순.
+    """
+    t, source_type, start, end, tickers, status, page, page_size = _validate_browse(
+        cfg, as_of, mode, source_type, start, end, tickers, status, page, page_size)
+    rows = with_tickers(ei.docs, select_as_of(ei.docs, t, mode), tickers)
+    if start or end:
+        rows = [i for i in rows if (not start or _pub_date(ei.docs[i]) >= start) and (not end or _pub_date(ei.docs[i]) <= end)]
+    facets = {"source_type": dict(Counter(ei.docs[i].get("source_type") for i in rows)),
+              "status": {s: sum(1 for i in rows if s in _statuses(ei.docs[i])) for s in ARCHIVE_STATUSES[1:]}}
+    if source_type:
+        rows = [i for i in rows if ei.docs[i].get("source_type") == source_type]
+    if status != "all":
+        rows = [i for i in rows if status in _statuses(ei.docs[i])]
+    rows.sort(key=lambda i: (_pub_date(ei.docs[i]), ei.docs[i]["available_at"], ei.docs[i]["doc_id"]), reverse=True)
+    counts = Counter(d["doc_id"] for d in ei.docs if _visible(d, t, mode))
+    lo = (page - 1) * page_size
+    items = [{f: ei.docs[i].get(f) for f in _ARCHIVE_FIELDS}
+             | {"tickers": _codes(ei.docs[i]), "statuses": _statuses(ei.docs[i]),
+                "versions_visible": counts[ei.docs[i]["doc_id"]],
+                "has_amendment_candidate": bool(ei.docs[i].get("amends_candidate_doc_id"))}
+             for i in rows[lo:lo + page_size]]
+    return {"status": "ok" if items else "no_documents", "items": items, "total": len(rows), "page": page,
+            "page_size": page_size, "pages": max(1, -(-len(rows) // page_size)), "facets": facets,
+            "index": {"docs_fingerprint": ei.docs_fingerprint, "total_docs": len(ei.docs), "mode": mode,
+                      "as_of": t.isoformat()}}
+
+
+def document(ei: EvidenceIndex, cfg: dict, doc_id: str, as_of, mode: str = "observed") -> dict:
+    """자료 상세: as_of 까지 보이는 버전 이력, 정정 후보(이 자료가 고친 것으로 보이는 원공시, 이 자료를 고친 것으로
+    보이는 정정 공시), 보관 범위에 따른 표시 정책. as_of 에 아직 없던 자료는 not_available_at_as_of."""
+    errors: dict = {}
+    if not isinstance(doc_id, str) or not _DOC_ID_RE.match(doc_id):
+        errors["doc_id"] = "출처:식별자 형식 (예: opendart:20260312000736)"
+    t = _as_of_mode(as_of, mode, errors)
+    if errors:
+        raise RetrievalError("validation_failed", "Check the input values.", {"fields": errors})
+    rows = [d for d in ei.docs if d["doc_id"] == doc_id]
+    if not rows:
+        raise RetrievalError("not_found", "Document not found.", {"doc_id": doc_id})
+    sel = select_as_of(rows, t, mode)
+    if not sel:
+        raise RetrievalError("not_available_at_as_of", "The document was not available at that time.",
+                             {"doc_id": doc_id, "as_of": t.isoformat(), "mode": mode})
+    cur = rows[sel[0]]
+    versions = sorted((d for d in rows if _visible(d, t, mode) and d["version"] <= cur["version"]),
+                      key=lambda d: d["version"])
+
+    def link(target: str | None) -> dict | None:
+        if not target:
+            return None
+        cand = [d for d in ei.docs if d["doc_id"] == target]
+        csel = select_as_of(cand, t, mode)
+        return {"doc_id": target, "visible": bool(csel)} | ({f: cand[csel[0]].get(f) for f in _LINK_FIELDS} if csel else {})
+
+    visible = [ei.docs[i] for i in select_as_of(ei.docs, t, mode)]
+    show_summary = cur.get("license_scope") in _SUMMARY_SCOPES
+    return {
+        "doc": {f: cur.get(f) for f in _ARCHIVE_FIELDS}
+        | {"tickers": cur.get("tickers") or [], "statuses": _statuses(cur), "is_amendment": bool(cur.get("is_amendment")),
+           "summary": cur.get("summary") if show_summary else None},
+        "versions": [{f: d.get(f) for f in _VERSION_FIELDS} for d in versions],
+        "amends_candidate": link(cur.get("amends_candidate_doc_id")),
+        "amended_by_candidates": [{f: d.get(f) for f in _LINK_FIELDS} for d in visible
+                                  if d.get("amends_candidate_doc_id") == doc_id],
+        "content_policy": {"license_scope": cur.get("license_scope"), "summary_shown": show_summary, "body_shown": False},
+        "as_of": t.isoformat(), "mode": mode,
+    }
+
+
+COVERAGE_STATES = ("collected", "forward", "partial", "gap")
+
+
+def coverage(store, cfg: dict, as_of, mode: str = "observed", start: str | None = None, end: str | None = None) -> dict:
+    """기간 안 출처별 수집 상태 (P3-13, FR-N4·N7): 공백(gap)은 '자료 0건'과 다르다는 것을 보관함에 보이기 위함.
+
+    store.coverage() 는 수집기가 내보낸 수집 범위 이력(추가만)이다. (출처, 날짜, 시장)마다 마지막 기록이 그 시점 상태다.
+    - observed: observed_at ≤ as_of 인 기록만 — 그 시각 수집기가 실제로 알던 상태
+    - historical_assumed: 최종 기록 (소급을 받아들인 일봉 연구용) — 단 날짜는 as_of 의 KST 날짜까지만
+    날짜를 주지 않으면 기록이 있는 전체 날짜. 기록이 없는 날은 '시도 안 함'이라 세지 않는다.
+    """
+    errors: dict = {}
+    t = _as_of_mode(as_of, mode, errors)
+    days = {}
+    for k, v in (("start", start), ("end", end)):
+        if v:
+            try:
+                days[k] = date.fromisoformat(v).isoformat() if len(v) == 10 else None
+            except ValueError:
+                days[k] = None
+            if days[k] is None:
+                errors[k] = "YYYY-MM-DD 날짜"
+    if days.get("start") and days.get("end") and days["start"] > days["end"]:
+        errors["end"] = "시작일 이후 날짜"
+    if errors:
+        raise RetrievalError("validation_failed", "Check the input values.", {"fields": errors})
+    try:
+        rows = store.coverage()
+    except FileNotFoundError as e:
+        raise RetrievalError("data_unavailable", "External documents are not available.", {"error": str(e)}) from None
+    last_day = t.astimezone(_KST).date().isoformat()
+    lo, hi = days.get("start"), min(days.get("end") or last_day, last_day)
+    state: dict[tuple[str, str, str], str] = {}
+    for r in sorted(rows, key=lambda r: (r["source"], r["seq"])):
+        if mode == "observed" and aware(r["observed_at"]) > t:
+            continue
+        if (lo and r["day"] < lo) or r["day"] > hi:
+            continue
+        state[(r["source"], r["day"], r["corp_cls"])] = r["state"]
+    limit = cfg["archive"]["coverage_list_max"]
+    out: dict[str, dict] = {}
+    for (src, day, cls), st in sorted(state.items()):
+        o = out.setdefault(src, {"counts": dict.fromkeys(COVERAGE_STATES, 0), "gap_days": [], "partial_days": [],
+                                 "first_day": day, "last_day": day, "markets": set()})
+        o["counts"][st] = o["counts"].get(st, 0) + 1
+        o["markets"].add(cls)
+        o["last_day"] = max(o["last_day"], day)
+        key = {"gap": "gap_days", "partial": "partial_days"}.get(st)
+        if key and (not o[key] or o[key][-1] != day) and len(o[key]) < limit:
+            o[key].append(day)
+    for o in out.values():
+        o["markets"] = sorted(o["markets"])
+    return {"status": "ok" if out else "no_coverage", "sources": out, "as_of": t.isoformat(), "mode": mode,
+            "start": lo, "end": hi, "list_limit": limit}

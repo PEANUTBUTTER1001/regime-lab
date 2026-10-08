@@ -1,5 +1,71 @@
 # PROGRESS
 
+## 2026-10-08 18:37 KST (+09:00) — hongsungmin0315 백테스트 담당(10-08 오후 추가): 병합 반영·P3-13.3 선행조건·NXT-1 정리
+
+- 기준 develop `012ccad`(#44 까지), 열린 제 PR 0. 앞 10-08 항목의 "리뷰" 표기보다 아래 실제 병합 상태가 우선이다.
+
+### 병합 반영 (#36~#44)
+
+| PR | 내용 | 상태 |
+|---|---|---|
+| #36 | P3-13.1·13.2 자료 보관함·자료 상세 | 🟢 병합 |
+| #37 | 수집 범위 이력 coverage_log.parquet 내보내기 | 🟢 병합 |
+| #38 | NXT-1 실험 수치 정정(승률 ≤0.1%p·평균 초과 ≤0.01%p, 전 종목 미검증) | 🟢 병합 |
+| #39 | 보관함 수집 상태 표시(공백·부분을 0건과 구분) | 🟢 병합 |
+| #40 | PROGRESS 10-08 | 🟢 병합 |
+| #41 | 자료 상세 카드 간격·글자 크기 (헤드리스 Chrome 화면 확인) | 🟢 병합 |
+| #42 | 결과 화면 청산 사유별 건수 (app.css 충돌은 양쪽 규칙 유지로 해결) | 🟢 병합 |
+| #43 | 탐색 결과 화면 "null" 글자·선택 버튼 줄바꿈 수정 | 🟢 병합 |
+| #44 | (Seonghwanaa) bars.py — 리뷰 3건(tz-aware as_of·N7 종가·빈 결과 dtype) 반영 확인 GO | 🟢 병합 |
+
+### P3-13.3 영향 분석 차트·가중치 표 — ⏳ P3-12 결과 계약 대기 (구현 안 함)
+
+필요한 입력 (friends 채널 제안, P3-12 담당 확인 전):
+- 가중치 표: model_version, 목표(예: 다음 1거래일 지수 대비 초과수익), as_of_mode, 학습·검증·평가 기간, 기준선과 지표,
+  행마다 group_type(source_type·report_type·topic)·group·weight·direction·n_events·n_eval·eval_metric·ci_low·ci_high·sample_ok
+- 사건 표시: doc_id·ticker·available_at·연결 봉 시작(`bar.start > available_at`)·group·contribution (가격은 기존 /stocks 일봉)
+- 결과가 없을 때: status=no_model 과 "학습 결과 없음" 자리 (빈 화면 대신 이유 표시)
+
+대기 조건: P3-12 결과 형식 합의 → 합성 데이터로 엔진 읽기·API·화면 → 실제 결과로 확인. 10-18 동결 전 P3-12 가 없으면 no_model 자리만 둔다.
+
+### NXT-1 — A 적용 / B 실험만
+
+- A(한계 문서화): #35·#38 병합. README "알아 두실 한계" + 결정 §5.3 NXT-1
+- B(loader 보정): **미적용**. 실험 `exp/NXT-1-price-impact` ffe762f(병합 대상 아님)
+  - 비율: 같은 구간 t-1 일까지 최근 60일 close/close_raw 중앙값, 구간 = 직전 close_raw vs 당일 open_raw(>0) ±30%(정확히 30% 는 같은 구간)
+  - 입력 이용 가능 시점: t 일 일봉·원주가는 장 마감 뒤 확정 → t+1 일부터 사용
+  - `--self-check`(sample30): 절단 불변 True(37,646행), 당일 값 미사용 True. 결과 차이 승률 ≤0.1%p·평균 초과 ≤0.01%p
+  - 전 종목 실행 전 확인 조건: 구간 함수를 P2-4.3 `price_segments` 로 맞춤 · 전 종목 self-check · 원본 읽기 전용·캐시 미사용·집계만 · 실행 위치와 사람 승인
+- 생산 loader 보정·설정·PREP_VERSION 변경은 별도 결정 전 하지 않는다
+
+---
+
+## 2026-10-08 16:27 KST (+09:00) — hongsungmin0315 백테스트 담당: P3-13 자료 보관함·수집 상태, NXT 가격 기준, P3-8 게시
+
+- 시작 시각: 2026-10-08 오전 (기록 시각 2026-10-08 16:27). Claude Code, Agent Relay friends 채널에서 codex-01a0fb4b·seonghwan-claude·hchee99-codex 와 협업
+- 목표: 남은 WBS(P3-13)를 develop 에 넣고, 새로 발견된 NXT 이후 일봉 가격 문제를 백테스트 관점에서 판단한다.
+
+### 단계 상태
+
+| 단계 | 상태 | 비고 |
+|---|---|---|
+| 1. P3-13.1·13.2 자료 보관함·자료 상세 | 🟢 완료 | PR #36. retrieval.browse·document, `GET /api/evidence/documents`·`/documents/{doc_id}`, 웹 `#/archive`·`#/archive/doc`. 근거 검색과 같은 시점 규칙, 미래 자료·버전 숨김, 정정은 후보로만, metadata_only 는 제목·링크만. 엔진 20·API 12 테스트(select_as_of 일치·절단 불변) |
+| 2. 수집 범위 내보내기 (P3-7 후속) | 🟢 완료 | PR #37. 커밋마다 `<ext_store>/coverage/source=<s>/coverage_log.parquet`(추가만, 커밋한 출처만, tmp→replace). ingest 137 passed |
+| 3. 보관함 수집 상태 표시 | 🟡 리뷰 | PR #39. 기간 안 날짜×시장 완료·순방향·부분·공백과 공백 날짜, 0건일 때도 표시. 엔진 5·API 2 |
+| 4. P3-13.3 영향 분석 차트·가중치 표 | ⏳ 대기 | P3-12(PEANUTBUTTER1001) 결과 형식 뒤 |
+| 5. NXT 이후 일봉 가격 (결정 NXT-1) | 🟡 A 적용 | seonghwan-claude 발견. 전 종목 NXT 이후 종가 약 3.7%·시가 약 2.1% 가 KRX 정규장 가격과 어긋남(데이터 서버 조회·메모리 비교). sample30 실험에서 승률 차이 ≤0.1%p·평균 초과 ≤0.01%p. A(한계 문서화) PR #35·#38 병합, B(loader 보정)는 전 종목 결과 뒤 — 시점 정합 실험 스크립트 `exp/NXT-1-price-impact`(구간 규칙은 seonghwan 과 합의, `--self-check` 절단 불변) |
+| 6. P3-8 뉴스(hchee99) 게시 | 🟢 완료 | #29(입력 기반)·#34(실행 경로) — 패치 sha256 대조 후 git am, 작성자 hchee99 유지. #30 staging 정리 출처 범위 수정(리뷰 반영) |
+| 7. 발표 점검 | 🟢 완료 | API 서버 E2E(14 패턴·새 청산·검증 오류), 역방향 탐색 실데이터 시연 후보(high_52w OR bb_squeeze_break 10일: 탐색 52.3% → 평가 55.4%), 새 패턴 4종 3,000종목 신호 계산 0.17~1.35초 |
+
+### 최종 결과
+
+- develop 반영(오늘): #29·#30·#34·#35·#36·#37·#38 (+ 팀 #31·#32·#33)
+- 남은 결정: NXT-1 B, 뉴스 위치 G2 3차, X6-2 범위 확장·SRS FR-E3 문구(PEANUTBUTTER1001)
+- 한계: 웹 화면은 이 PC 에 Node·브라우저 자동화가 없어 JavaScriptCore 문법 검사와 서버 응답 확인까지만 함 — 리뷰 때 화면 확인 요청
+- 실수·정정: #21 브랜치 전환 실패로 `.DS_Store` 커밋(정리됨), 실험 스크립트 수정비율이 미래 행을 쓰던 것(codex 지적, 시점 정합으로 수정), README 실험 수치 묶어 쓴 것(#38 정정)
+
+---
+
 ## 2026-10-08 12:44:08 KST (+09:00) — PEANUTBUTTER1001 P3-11 근거 검색(RAG 검색 단계) 구현
 
 - 시작 시각: 2026-10-08 12:44:08 KST (+09:00)

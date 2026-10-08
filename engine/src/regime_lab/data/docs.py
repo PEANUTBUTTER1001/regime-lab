@@ -57,6 +57,15 @@ class DocsStore:
             h.update(hashlib.sha256(f.read_bytes()).digest())
         return h.hexdigest()[:16]
 
+    def coverage(self) -> list[dict]:
+        """수집 범위 이력 (P3-13 수집 상태 표시, FR-N4). 수집기가 커밋마다 내보낸
+        <ext_store>/coverage/source=<s>/coverage_log.parquet 를 읽기만 한다. 파일이 없으면 빈 목록(기록 없음)."""
+        if self.ext_store is None:
+            raise FileNotFoundError("ext_store 경로가 설정되지 않음 (engine/config/paths.local.yaml)")
+        base = self.ext_store / "coverage"
+        files = sorted(base.glob("source=*/coverage_log.parquet")) if base.is_dir() else []
+        return [r for f in files for r in pq.read_table(f).to_pylist()]
+
     def read(self, files: list[Path]) -> list[dict]:
         return [r for f in files for r in pq.read_table(f).to_pylist()]
 

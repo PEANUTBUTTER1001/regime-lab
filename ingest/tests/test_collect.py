@@ -333,3 +333,67 @@ def test_recover_is_scoped_to_locked_source(tmp_path):
     Store(tmp_path).lock("opendart")
     assert active.exists()  # 다른 출처: 그대로
     assert not stale.exists()  # 내 출처의 미커밋 tmp: 정리
+
+
+def _coverage_at(rows, t_iso):
+    """소비자 규칙: (day, corp_cls) 마다 observed_at ≤ T 인 마지막 행."""
+    out = {}
+    for r in sorted(rows, key=lambda r: r["seq"]):
+        if r["observed_at"] <= t_iso:
+            out[(r["day"], r["corp_cls"])] = r["state"]
+    return out
+
+
+def test_coverage_exported_on_commit_append_only(tmp_path, cfg):
+    """수집 범위 이력이 커밋마다 Parquet 로 내보내지고(추가만), 과거 시점 상태를 다시 만들 수 있다 (FR-N4·N7)."""
+    import pyarrow.parquet as pq
+
+    items = make_items(date(2026, 10, 6), date(2026, 10, 7))
+    _run(Store(tmp_path), FakeDart(items), cfg, date(2026, 10, 7), date(2026, 10, 7), mode="forward")
+    f = tmp_path / "coverage" / "source=opendart" / "coverage_log.parquet"
+    first = pq.read_table(f).to_pylist()
+    assert {(r["day"], r["corp_cls"], r["state"]) for r in first} == {("2026-10-07", "Y", "forward"), ("2026-10-07", "K", "forward")}
+    t_forward = max(r["observed_at"] for r in first)
+    night = Clock()
+    night.t += timedelta(hours=12)  # 밤 소급은 12시간 뒤에 돈다
+    collect(Store(tmp_path), OpenDartList(FakeDart(items), cfg, sleep=lambda s: None), cfg, date(2026, 10, 6),
+            date(2026, 10, 7), mode="backfill", now=night, run_id="r2")
+    rows = pq.read_table(f).to_pylist()
+    assert rows[:len(first)] == first and len(rows) == len(first) + 4  # 앞 기록은 그대로, 새 기록만 추가
+    assert _coverage_at(rows, t_forward) == {("2026-10-07", "Y"): "forward", ("2026-10-07", "K"): "forward"}
+    now = _coverage_at(rows, "9999")
+    assert now[("2026-10-07", "Y")] == "collected" and now[("2026-10-06", "K")] == "collected"
+    sql = Store(tmp_path).db.execute("SELECT COUNT(*) FROM coverage_log WHERE source='opendart'").fetchone()[0]
+    assert sql == len(rows) and not list(f.parent.glob("*.tmp"))
+    assert not (tmp_path / "docs" / "source=opendart" / "coverage_log.parquet").exists()  # 문서 폴더와 분리
+
+
+def test_coverage_export_gap_and_rollback(tmp_path, cfg):
+    import pyarrow.parquet as pq
+
+    items = make_items(date(2021, 1, 1), date(2021, 2, 28))
+    fake = FakeDart(items, fail={3: {"status": "020", "message": "limit"}})
+    _run(Store(tmp_path), fake, cfg, date(2021, 1, 1), date(2021, 2, 28))
+    rows = pq.read_table(tmp_path / "coverage" / "source=opendart" / "coverage_log.parquet").to_pylist()
+    assert "gap" in {r["state"] for r in rows}  # 실패 창은 공백으로 남는다
+    store = Store(tmp_path)
+    store.set_coverage("opendart", ["2030-01-01"], "Y", "collected", "x", "2030-01-01T00:00:00+09:00")
+    store.rollback()  # 되돌린 변경은 내보내지 않는다
+    store.commit()
+    again = pq.read_table(tmp_path / "coverage" / "source=opendart" / "coverage_log.parquet").to_pylist()
+    assert again == rows
+
+
+def test_coverage_export_only_touches_committed_source(tmp_path):
+    """커밋한 출처 파일만 다시 쓴다 — 다른 출처 writer 의 내보내기를 오래된 상태로 덮지 않는다."""
+    from regime_ingest.store import NEWS_MANIFEST, NEWS_SCHEMA
+
+    store = Store(tmp_path, formats={"naver_news": (NEWS_SCHEMA, NEWS_MANIFEST)})
+    store.set_coverage("naver_news", ["2026-10-07"], "news", "forward", "n1", "2026-10-07T10:00:00+09:00")
+    store.commit()
+    news = tmp_path / "coverage" / "source=naver_news" / "coverage_log.parquet"
+    before = news.stat().st_mtime_ns
+    store.set_coverage("opendart", ["2026-10-07"], "Y", "forward", "o1", "2026-10-07T10:05:00+09:00")
+    store.commit()
+    assert news.stat().st_mtime_ns == before
+    assert (tmp_path / "coverage" / "source=opendart" / "coverage_log.parquet").exists()

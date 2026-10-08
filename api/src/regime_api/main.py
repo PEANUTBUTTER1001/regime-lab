@@ -57,6 +57,7 @@ class AppState:
         self.llm_source = "env"
         # 근거 검색 색인 (P3-11). 준비 프레임과 따로 불러오며, 실패해도 다른 기능에는 영향이 없다.
         self.rag = rag
+        self.docs = DocsStore(self.paths.ext_store, self.paths.cache)  # 근거 검색 색인·보관함 수집 상태가 같이 쓴다 (R3)
         self.rag_status = "ready" if rag is not None else "warming_up"
         self.rag_error: dict | None = None
 
@@ -69,7 +70,7 @@ class AppState:
 
     def load_rag(self) -> None:
         try:
-            self.rag = retrieval.open_index(DocsStore(self.paths.ext_store, self.paths.cache), self.cfg)
+            self.rag = retrieval.open_index(self.docs, self.cfg)
             self.rag_status = "ready"
         except retrieval.RetrievalError as e:
             self.rag_status, self.rag_error = "failed", e.detail
