@@ -115,3 +115,41 @@ def test_unavailable_and_warming_up(tmp_path, market):
     app2 = _app(tmp_path / "w", market, write_store(tmp_path / "ext2", _docs()))
     r = TestClient(app2).get("/api/evidence/documents", params={"as_of": AS_OF})
     assert r.status_code == 503 and r.json()["code"] == "warming_up" and r.json()["retryable"] is True
+
+
+COVERAGE_KEYS = {"status", "sources", "as_of", "mode", "start", "end", "list_limit", "disclaimer"}
+SOURCE_KEYS = {"counts", "gap_days", "partial_days", "first_day", "last_day", "markets"}
+
+
+def _write_coverage(root):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    d = root / "coverage" / "source=opendart"
+    d.mkdir(parents=True, exist_ok=True)
+    rows = [("2026-10-06", "Y", "gap", "2026-10-06T23:00:00+09:00"), ("2026-10-07", "Y", "forward", "2026-10-07T09:05:00+09:00")]
+    pq.write_table(pa.Table.from_pylist([{"seq": i + 1, "source": "opendart", "day": a, "corp_cls": b, "state": c, "run_id": "r",
+                                          "observed_at": o} for i, (a, b, c, o) in enumerate(rows)]), d / "coverage_log.parquet")
+
+
+def test_coverage_contract(tmp_path, market):
+    ext = write_store(tmp_path / "ext", _docs())
+    _write_coverage(ext)
+    app = _app(tmp_path, market, ext)
+    with TestClient(app) as c:
+        r = c.get("/api/evidence/coverage", params={"as_of": AS_OF})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert set(body) == COVERAGE_KEYS and body["status"] == "ok"
+        od = body["sources"]["opendart"]
+        assert set(od) == SOURCE_KEYS and od["gap_days"] == ["2026-10-06"] and od["counts"]["forward"] == 1
+        r = c.get("/api/evidence/coverage", params={"as_of": AS_OF, "start": "x"})
+        assert r.status_code == 422 and "start" in r.json()["detail"]["fields"]
+        none = c.get("/api/evidence/coverage", params={"as_of": "2026-10-01T00:00:00+09:00"}).json()
+        assert none["status"] == "no_coverage" and none["sources"] == {}
+
+
+def test_coverage_unavailable_without_ext_store(tmp_path, market):
+    with TestClient(_app(tmp_path, market, None)) as c:
+        r = c.get("/api/evidence/coverage", params={"as_of": AS_OF})
+    assert r.status_code == 503 and r.json()["code"] == "data_unavailable"

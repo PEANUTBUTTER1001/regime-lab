@@ -7,6 +7,8 @@ GET /api/evidence/documents?as_of=&mode=&source_type=&start=&end=&tickers=&statu
 → {status: ok|no_documents, items: [...], total, page, page_size, pages, facets, index, disclaimer}
 GET /api/evidence/documents/{doc_id}?as_of=&mode=
 → {doc, versions, amends_candidate, amended_by_candidates, content_policy, as_of, mode, disclaimer}
+GET /api/evidence/coverage?as_of=&mode=&start=&end=
+→ {status: ok|no_coverage, sources: {출처: {counts, gap_days, partial_days, first_day, last_day, markets}}, ...}
 """
 
 from __future__ import annotations
@@ -61,5 +63,17 @@ def document(doc_id: str, request: Request, as_of: str = "", mode: str = "observ
     try:
         res = retrieval.document(ei, state.cfg, doc_id, as_of, mode)
     except retrieval.RetrievalError as e:
+        _raise(e)
+    return {**res, "disclaimer": DISCLAIMER}
+
+
+@router.get("/evidence/coverage")
+def coverage(request: Request, as_of: str = "", mode: str = "observed", start: str = "", end: str = ""):
+    state = request.app.state.rl
+    try:
+        res = retrieval.coverage(state.docs, state.cfg, as_of, mode, start or None, end or None)
+    except retrieval.RetrievalError as e:
+        if e.code == "data_unavailable":
+            raise ApiError(503, e.code, e.message, e.detail) from None
         _raise(e)
     return {**res, "disclaimer": DISCLAIMER}
