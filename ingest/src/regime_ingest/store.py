@@ -3,6 +3,7 @@
 <ext_store>/
   raw/<source>/<YYYY-MM-DD>/<run_id>.jsonl.gz     원본 응답(목록 메타데이터), 추가만
   docs/source=<source>/date=<YYYY-MM>/part-<run_id>.parquet   정규화 문서, 추가만 (버전은 새 행)
+  coverage/source=<source>/coverage_log.parquet    수집 범위 이력 내보내기 (commit 마다 다시 씀, 내용은 추가만)
   state.sqlite                                     ingest_runs · coverage · cursors · seen_keys · report_history · doc_files
   locks/<source>.lock                              같은 출처 동시 실행 방지
 
@@ -19,6 +20,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import re
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
@@ -65,34 +67,49 @@ DOC_SCHEMA = pa.schema([
     ("is_amendment", pa.bool_()), ("amends_candidate_doc_id", pa.string()), ("amends_basis", pa.string()),
 ])
 
+NEWS_SCHEMA = DOC_SCHEMA.append(pa.field("article_key", pa.string()))
+COVERAGE_SCHEMA = pa.schema([("seq", pa.int64()), ("source", pa.string()), ("day", pa.string()), ("corp_cls", pa.string()),
+                             ("state", pa.string()), ("run_id", pa.string()), ("observed_at", pa.string())])
+NEWS_MANIFEST = {"schema_version": 1, "policy_version": "news-observed-2026-10-07.v1"}
+
 
 class Store:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, formats: dict | None = None):
         self.root = Path(root)
+        self.formats = {"opendart": (DOC_SCHEMA, MANIFEST), **(formats or {})}
         self.root.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.root / "state.sqlite")
+        self._coverage_dirty: set[str] = set()  # 이번 트랜잭션에서 수집 범위가 바뀐 출처 (commit 때 내보냄)
         self.db.executescript(SCHEMA)
 
     def rollback(self):
         self.db.rollback()
+        self._coverage_dirty.clear()
 
     def check_manifest(self, source: str):
         """docs/source=<s>/_manifest.json 의 스키마·정책 버전이 지금 코드와 같아야 쓴다 (다르면 섞지 않고 거부)."""
+        self._source(source)
+        manifest = self.formats[source][1]
         d = self.root / "docs" / f"source={source}"
         d.mkdir(parents=True, exist_ok=True)
         p = d / "_manifest.json"
         if p.exists():
             got = json.loads(p.read_text(encoding="utf-8"))
-            if {k: got.get(k) for k in MANIFEST} != MANIFEST:
-                raise RuntimeError(f"저장소 manifest {got} 가 코드 {MANIFEST} 와 다름 — 새 ext_store 를 쓰거나 이전을 먼저 정함")
+            if {k: got.get(k) for k in manifest} != manifest:
+                raise RuntimeError("저장소 manifest 불일치 — 새 ext_store 또는 명시적 이전 필요")
         else:
-            p.write_text(json.dumps(MANIFEST, ensure_ascii=False, indent=2), encoding="utf-8")
+            p.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _source(self, source: str):
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", source) or source not in self.formats:
+            raise ValueError("unknown storage source")
 
     def close(self):
         self.db.close()
 
     # ---------------------------------------------------------------- 잠금
     def lock(self, source: str):
+        self._source(source)
         d = self.root / "locks"
         d.mkdir(exist_ok=True)
         p = d / f"{source}.lock"
@@ -124,6 +141,7 @@ class Store:
 
     def stage_docs(self, source: str, run_id: str, docs: list[dict]) -> list[Path]:
         """1단계: 달별 tmp 파일을 쓰고 doc_files 에 최종 이름을 넣는다 (commit 은 호출자). 최종 경로 목록을 돌려준다."""
+        self._source(source)
         by_month = defaultdict(list)
         for d in docs:
             by_month[d["published_at"][:7]].append(d)
@@ -134,7 +152,7 @@ class Store:
             p, i = d / f"part-{run_id}.parquet", 1
             while p.exists() or self._tmp(p).exists():  # 같은 실행이 같은 달을 여러 번 쓰면 조각을 늘린다
                 p, i = d / f"part-{run_id}-{i}.parquet", i + 1
-            pq.write_table(pa.Table.from_pylist(rows, schema=DOC_SCHEMA), self._tmp(p))
+            pq.write_table(pa.Table.from_pylist(rows, schema=self.formats[source][0]), self._tmp(p))
             self.db.execute("INSERT INTO doc_files VALUES (?, ?)", (str(p.relative_to(self.root)), run_id))
             final.append(p)
         return final
@@ -152,6 +170,7 @@ class Store:
     def recover(self, source: str):
         """source 의 docs/source=<source>/ 아래 남은 tmp 만 정리한다. 잠금이 출처 단위라 정리 범위도 출처 단위여야
         다른 출처(예: 뉴스)가 동시에 쓰는 미커밋 tmp 를 지우지 않는다 (hchee99-codex 리뷰)."""
+        self._source(source)
         base = self.root / "docs" / f"source={source}"
         committed = {r[0] for r in self.db.execute("SELECT path FROM doc_files")}
         for t in base.rglob("*.parquet.tmp") if base.exists() else []:
@@ -167,6 +186,7 @@ class Store:
 
     def read_docs(self, source: str) -> list[dict]:
         """읽기 전용: 최종 파일 + commit 됐지만 이름을 아직 못 바꾼 tmp. 진행 중(미커밋) tmp 는 보지 않는다."""
+        self._source(source)
         base = self.root / "docs" / f"source={source}"
         if not base.exists():
             return []
@@ -174,7 +194,7 @@ class Store:
         files = sorted(base.rglob("*.parquet"))
         files += sorted(t for t in base.rglob("*.parquet.tmp")
                         if str(t.with_suffix("").relative_to(self.root)) in committed and not t.with_suffix("").exists())
-        return [r for f in files for r in pq.read_table(f, schema=DOC_SCHEMA).to_pylist()]
+        return [r for f in files for r in pq.read_table(f, schema=self.formats[source][0]).to_pylist()]
 
     # ---------------------------------------------------------------- 상태
     def seen(self, doc_ids: list[str]) -> dict[str, Seen]:
@@ -206,6 +226,7 @@ class Store:
         rows = [(source, d, corp_cls, state, run_id, observed_at) for d in days]
         self.db.executemany("INSERT OR REPLACE INTO coverage VALUES (?, ?, ?, ?, ?, ?)", rows)
         self.db.executemany("INSERT INTO coverage_log VALUES (?, ?, ?, ?, ?, ?)", rows)
+        self._coverage_dirty.add(source)
 
     def coverage(self, source: str) -> dict[tuple[str, str], str]:
         return {(d, c): s for d, c, s in self.db.execute(
@@ -239,3 +260,27 @@ class Store:
 
     def commit(self):
         self.db.commit()
+        for source in sorted(self._coverage_dirty):
+            self.export_coverage(source)
+        self._coverage_dirty.clear()
+
+    def export_coverage(self, source: str) -> Path:
+        """수집 범위 이력(coverage_log, 추가만)을 소비자용 Parquet 로 내보낸다 (FR-N4·N7, 계약 §5).
+
+        <ext_store>/coverage/source=<s>/coverage_log.parquet — docs/ 밖이라 근거 검색이 문서로 읽지 않는다.
+        커밋된 상태만 쓰고(commit 뒤 호출), tmp 에 쓴 뒤 이름을 바꿔 읽는 쪽이 반쯤 쓴 파일을 보지 않는다.
+        소비자는 (day, corp_cls) 마다 observed_at ≤ T 인 마지막 행으로 T 시점의 수집 상태를 다시 만든다
+        (collected·forward·partial·gap, 행이 없으면 시도 안 함). 커밋한 출처 것만 쓰므로 다른 출처 writer 와 겹치지 않는다.
+        """
+        self._source(source)
+        rows = self.db.execute("SELECT rowid, day, corp_cls, state, run_id, observed_at FROM coverage_log "
+                               "WHERE source = ? ORDER BY rowid", (source,)).fetchall()
+        d = self.root / "coverage" / f"source={source}"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / "coverage_log.parquet"
+        table = pa.Table.from_pylist([{"seq": r[0], "source": source, "day": r[1], "corp_cls": r[2], "state": r[3],
+                                       "run_id": r[4], "observed_at": r[5]} for r in rows], schema=COVERAGE_SCHEMA)
+        tmp = self._tmp(p)
+        pq.write_table(table, tmp)
+        os.replace(tmp, p)
+        return p
