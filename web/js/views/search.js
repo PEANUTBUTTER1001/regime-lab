@@ -474,11 +474,12 @@ export async function renderSearchResult(el, id) {
     { label: t('sr.col.evWin'), num: true, render: (r) => winPct(r.evaluate?.win_rate) },
     { label: t('sr.col.evFdr'), render: (r) => fdrPill(r.evaluate?.fdr_pass) },
     { label: t('sr.col.random'), num: true, render: (r) => (r.evaluate ? t('sr.pctile', { p: fmt.num(100 * r.evaluate.random_percentile, 0) }) : '—') },
-    { label: t('sr.col.save'), render: (r) => h('button', { type: 'button', class: 'secondary', 'aria-label': `${t('sr.pick')} ${r.id}`,
+    { label: t('sr.col.save'), render: (r) => h('button', { type: 'button', class: 'secondary', style: { whiteSpace: 'nowrap' }, 'aria-label': `${t('sr.pick')} ${r.id}`,
       onclick: () => { candSel.value = r.id; nameIn.placeholder = `${req.name} ${r.id}`; nameIn.focus(); saveCard.scrollIntoView({ block: 'center' }); } }, t('sr.pick')) },
   ];
 
-  el.append(
+  // 조건부 요소(취소 배너·가장 가까운 후보·저장 카드)는 없으면 null — DOM append 는 null 을 글자 "null" 로 넣으므로 걸러 낸다
+  el.append(...[
     h('div', { class: 'topline' },
       h('div', {}, h('div', { class: 'eyebrow' }, t('sp.id', { id: res.search_id })), h('h1', { text: t('sr.title') }),
         h('p', { class: 'lead', text: t('sr.tried', { n: fmt.int(c.candidates), w: winPct(req.target_win_rate), m: fmt.int(req.min_trades) }) })),
@@ -503,5 +504,5 @@ export async function renderSearchResult(el, id) {
       : h('p', { class: 'muted', text: t('sr.empty') }),
     res.rows.length ? saveCard : null,
     h('div', { style: { marginTop: '18px' } }, metricDefs(res.metric_definitions)),
-    h('div', { class: 'actions' }, linkButton(t('sr.newSearch'), '#/search', true)));
+    h('div', { class: 'actions' }, linkButton(t('sr.newSearch'), '#/search', true))].filter(Boolean));
 }
