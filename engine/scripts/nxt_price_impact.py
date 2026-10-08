@@ -1,7 +1,7 @@
 """실험 (병합 대상 아님, 결정 NXT-1 B안 판단용): NXT 이후 store 일봉 OHLC 를 KRX 원주가 × 구간 수정비율로 바꾸면
 백테스트 결과가 얼마나 달라지는지 본다. 원본은 읽기만 하고 집계만 출력한다 (원본 값·종목명 출력 없음).
 
-구간 규칙 (seonghwan-claude 와 합의, docs/분봉_데이터_설계.md N3 과 같은 정의):
+구간 규칙 (seonghwan-claude 와 합의, docs/분봉_데이터_설계.md N3 과 같은 정의 — bars.price_segments 를 그대로 쓴다):
   ① 직전 거래일 KRX 정규장 종가(close_raw) vs 당일 KRX 시가(open_raw)  ② open_raw > 0 인 날만
   ③ |변화| > --gap-pct(기본 30%) 면 그날부터 새 구간 (정확히 30% 는 같은 구간, 부동소수 여유 1e-9)
 수정비율 (시점 정합, codex-01a0fb4b 리뷰 반영): t 일 비율 = 같은 구간에서 **t-1 일까지**의 최근 --window(기본 60)
@@ -30,6 +30,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import regime_lab.pipeline as pl  # noqa: E402
+from regime_lab.bars import price_segments  # noqa: E402
 from regime_lab.config import load_config, load_paths  # noqa: E402
 from regime_lab.data.loader import load_sample_tickers  # noqa: E402
 from regime_lab.patterns import CORE_PATTERNS  # noqa: E402
@@ -40,11 +41,9 @@ EXTRA = {"high_52w+trail/be/ma": (["high_52w"], {"trailing_stop_pct": -10, "brea
 
 
 def segments(d: pd.DataFrame, gap_pct: float) -> pd.Series:
+    """분봉(add_segments)과 같은 공용 함수 — 직전 거래일 KRX 정규장 종가 vs 당일 KRX 시가(원주가)."""
     prev = d.groupby("ticker")["close_raw_k"].shift(1)
-    ok = d["open_raw_k"].gt(0) & prev.gt(0)
-    jump = ok & ((d["open_raw_k"] / prev - 1).abs() > gap_pct / 100 + 1e-9)
-    first = d["ticker"].ne(d["ticker"].shift(1))
-    return (jump | first).astype(int).groupby(d["ticker"]).cumsum()
+    return price_segments(d["ticker"], prev, d["open_raw_k"], gap_pct)
 
 
 def ratios(m: pd.DataFrame, seg: pd.Series, window: int) -> pd.Series:
