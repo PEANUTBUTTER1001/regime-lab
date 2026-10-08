@@ -3,6 +3,7 @@
 <ext_store>/
   raw/<source>/<YYYY-MM-DD>/<run_id>.jsonl.gz     원본 응답(목록 메타데이터), 추가만
   docs/source=<source>/date=<YYYY-MM>/part-<run_id>.parquet   정규화 문서, 추가만 (버전은 새 행)
+  coverage/source=<source>/coverage_log.parquet    수집 범위 이력 내보내기 (commit 마다 다시 씀, 내용은 추가만)
   state.sqlite                                     ingest_runs · coverage · cursors · seen_keys · report_history · doc_files
   locks/<source>.lock                              같은 출처 동시 실행 방지
 
@@ -67,6 +68,8 @@ DOC_SCHEMA = pa.schema([
 ])
 
 NEWS_SCHEMA = DOC_SCHEMA.append(pa.field("article_key", pa.string()))
+COVERAGE_SCHEMA = pa.schema([("seq", pa.int64()), ("source", pa.string()), ("day", pa.string()), ("corp_cls", pa.string()),
+                             ("state", pa.string()), ("run_id", pa.string()), ("observed_at", pa.string())])
 NEWS_MANIFEST = {"schema_version": 1, "policy_version": "news-observed-2026-10-07.v1"}
 
 
@@ -76,10 +79,12 @@ class Store:
         self.formats = {"opendart": (DOC_SCHEMA, MANIFEST), **(formats or {})}
         self.root.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.root / "state.sqlite")
+        self._coverage_dirty: set[str] = set()  # 이번 트랜잭션에서 수집 범위가 바뀐 출처 (commit 때 내보냄)
         self.db.executescript(SCHEMA)
 
     def rollback(self):
         self.db.rollback()
+        self._coverage_dirty.clear()
 
     def check_manifest(self, source: str):
         """docs/source=<s>/_manifest.json 의 스키마·정책 버전이 지금 코드와 같아야 쓴다 (다르면 섞지 않고 거부)."""
@@ -221,6 +226,7 @@ class Store:
         rows = [(source, d, corp_cls, state, run_id, observed_at) for d in days]
         self.db.executemany("INSERT OR REPLACE INTO coverage VALUES (?, ?, ?, ?, ?, ?)", rows)
         self.db.executemany("INSERT INTO coverage_log VALUES (?, ?, ?, ?, ?, ?)", rows)
+        self._coverage_dirty.add(source)
 
     def coverage(self, source: str) -> dict[tuple[str, str], str]:
         return {(d, c): s for d, c, s in self.db.execute(
@@ -254,3 +260,27 @@ class Store:
 
     def commit(self):
         self.db.commit()
+        for source in sorted(self._coverage_dirty):
+            self.export_coverage(source)
+        self._coverage_dirty.clear()
+
+    def export_coverage(self, source: str) -> Path:
+        """수집 범위 이력(coverage_log, 추가만)을 소비자용 Parquet 로 내보낸다 (FR-N4·N7, 계약 §5).
+
+        <ext_store>/coverage/source=<s>/coverage_log.parquet — docs/ 밖이라 근거 검색이 문서로 읽지 않는다.
+        커밋된 상태만 쓰고(commit 뒤 호출), tmp 에 쓴 뒤 이름을 바꿔 읽는 쪽이 반쯤 쓴 파일을 보지 않는다.
+        소비자는 (day, corp_cls) 마다 observed_at ≤ T 인 마지막 행으로 T 시점의 수집 상태를 다시 만든다
+        (collected·forward·partial·gap, 행이 없으면 시도 안 함). 커밋한 출처 것만 쓰므로 다른 출처 writer 와 겹치지 않는다.
+        """
+        self._source(source)
+        rows = self.db.execute("SELECT rowid, day, corp_cls, state, run_id, observed_at FROM coverage_log "
+                               "WHERE source = ? ORDER BY rowid", (source,)).fetchall()
+        d = self.root / "coverage" / f"source={source}"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / "coverage_log.parquet"
+        table = pa.Table.from_pylist([{"seq": r[0], "source": source, "day": r[1], "corp_cls": r[2], "state": r[3],
+                                       "run_id": r[4], "observed_at": r[5]} for r in rows], schema=COVERAGE_SCHEMA)
+        tmp = self._tmp(p)
+        pq.write_table(table, tmp)
+        os.replace(tmp, p)
+        return p
