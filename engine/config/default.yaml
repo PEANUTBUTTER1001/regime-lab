@@ -155,7 +155,6 @@ archive:                            # P3-13 자료 보관함 (SRS FR-N7). PREP_S
   max_page_size: 200                # 요청 page_size 상한
   coverage_list_max: 50             # 수집 상태: 출처마다 보여 줄 공백·부분 날짜 수 상한 (개수는 전부 센다)
 
-
 minutes:                            # P2-4 1분봉 정규화·시간봉 집계 (docs/분봉_데이터_설계.md §2). PREP_SECTIONS 밖 — 일봉 준비 캐시와 무관
   session_open: "09:00"             # N1 정규장 첫 분
   session_close: "15:30"            # N1 정규장 마지막 분 (종가 단일가 체결 분, 포함). 15:20~15:29 동시호가 포함
