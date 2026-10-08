@@ -217,3 +217,7 @@ body.bare footer.disclaimer { left:0; }
 .ar-meta th { text-align:left; width:9em; color:var(--muted); font-weight:500; padding:6px 8px 6px 0; vertical-align:top; }
 .ar-meta td { padding:6px 0; }
 .ar-summary { margin:12px 0 0; padding:10px 14px; border-left:3px solid var(--line); color:var(--text); }
+.ar-coverage { margin:8px 0 14px; padding:10px 14px; border:1px solid var(--line); border-radius:8px; background:rgba(27,36,41,.5); }
+.ar-coverage h3 { margin:0 0 4px; font-size:14px; }
+.ar-cov-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:6px; }
+.ar-cov-row details { flex-basis:100%; }
