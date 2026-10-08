@@ -188,6 +188,10 @@ def test_price_segments_daily_rule_skips_no_trade_open(cfg):
     prev_close = pd.Series([np.nan, 1000, 1000, 1000, np.nan, 50])
     open_raw = pd.Series([1000, 0, 1300, 200, 50, 100])  # 0원(무거래)·+30%(제한폭 안)·-80%(분할)·B +100%
     assert price_segments(code, prev_close, open_raw, 30.0).tolist() == [0, 0, 0, 1, 0, 1]
+    # 정확히 -30% 하한가(1000→700)·결측 직전 종가도 같은 구간, -30.1% 는 새 구간
+    edge = price_segments(pd.Series(["C"] * 4), pd.Series([1000, 1000, np.nan, 1000]),
+                          pd.Series([700, 700, 700, 699]), 30.0)
+    assert edge.tolist() == [0, 0, 0, 1]
 
 
 @pytest.mark.parametrize("as_of", ["2026-04-24 10:00", "2026-04-27 09:00", "2026-04-27 12:00"])
