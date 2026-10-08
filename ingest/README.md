@@ -57,6 +57,7 @@ Register-ScheduledTask -TaskName "regime-ingest-opendart" -Action $act -Trigger 
 | `docs/source=opendart/date=<YYYY-MM>/part-*.parquet` | 정규화 문서 (plan §5 스키마). 내용이 바뀐 공시는 `version` + 1 새 행 |
 | `state.sqlite` | `ingest_runs`·`coverage`(일 × 시장, collected/forward/partial/gap, 관측 시각) + 덮어쓰지 않는 `coverage_log`·`cursors`·`seen_keys`·`report_history`·`doc_files`·`request_days` |
 
+- `coverage/source=<출처>/coverage_log.parquet`: 수집 범위 이력(추가만)을 커밋마다 내보낸 파일. 열 `seq·source·day·corp_cls·state·run_id·observed_at`. 소비자는 (day, corp_cls)마다 `observed_at ≤ T`인 마지막 행으로 T 시점 수집 상태(collected·forward·partial·gap, 행 없음 = 시도 안 함)를 다시 만든다. 공백(`gap`)은 "자료 0건"과 다르다 (FR-N4)
 - 커서 = "여기까지 빠짐없이 완료". 잘못된 행이 있던 창(`partial`)·실패 창(`gap`) 뒤로는 커서를 넘기지 않아 다음 실행이 다시 받는다
 - 문서 파일은 `*.parquet.tmp` → SQLite commit → 이름 확정 순서. 중간에 죽으면 다음 실행 시작 때 정리된다
 
