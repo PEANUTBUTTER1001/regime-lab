@@ -4,7 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from regime_lab.bars import aggregate_bars, confirmed_bars, normalize_minutes, slot_edges
+from regime_lab.bars import (add_segments, aggregate_bars, apply_price_basis, confirmed_bars, judge_price_basis,
+                             normalize_minutes, slot_edges)
 
 COLS = ["code", "dt", "open_p", "high_p", "low_p", "close_p", "volume", "value"]
 
@@ -138,6 +139,89 @@ def test_as_of_truncation_invariant(cfg, timeframe, as_of):
     part = confirmed_bars(aggregate_bars(normalize_minutes(cut, cfg)[0], timeframe, cfg), t)
     pd.testing.assert_frame_equal(full, part)
     assert (full["available_at"] <= t).all()
+
+
+def _daily_raw(rows):
+    return pd.DataFrame(rows, columns=["code", "date", "close_raw"]).assign(date=lambda d: pd.to_datetime(d["date"]))
+
+
+def test_price_basis_judged_against_krx_close_and_used_next_day(cfg):
+    """N2: 정규장 종가가 KRX 원주가와 허용오차(0.2%) 안이면 raw. 판정은 다음 거래일부터 쓴다."""
+    raw = _raw(_day("005930", "2026-09-01", [("09:00", 1), ("15:30", 1)], price=1000)
+               + _day("005930", "2026-09-02", [("09:00", 1), ("15:30", 1)], price=500)     # 수정주가 기준 행
+               + _day("005930", "2026-09-03", [("09:00", 1)], price=1000)
+               + _day("005930", "2026-09-04", [("09:00", 1)], price=1000))
+    daily = _daily_raw([("005930", "2026-09-01", 1001), ("005930", "2026-09-02", 1000),
+                        ("005930", "2026-09-03", 1000), ("005930", "2026-09-04", 1000)])
+    minutes, _ = normalize_minutes(raw, cfg)
+    v = judge_price_basis(minutes, daily, cfg)
+    assert v["basis"].tolist() == ["raw", "mismatch", "raw", "raw"]  # 1001 은 0.1% 차이 → raw
+    assert v["available_at"].dt.strftime("%m-%d %H:%M").tolist()[:3] == ["09-02 09:00", "09-03 09:00", "09-04 09:00"]
+    kept, stats = apply_price_basis(minutes, v)
+    # 09-01: 직전 판정 없음, 09-02: 09-01 판정(raw)을 이어 써서 남음(그날 어긋남은 다음 날에야 앎), 09-03: 09-02 판정 mismatch → 제외
+    assert kept["date"].dt.strftime("%m-%d").unique().tolist() == ["09-02", "09-04"]
+    assert stats == {"no_verdict": 2, "not_raw": 1}
+
+
+def test_price_basis_missing_daily_is_not_raw(cfg):
+    minutes, _ = normalize_minutes(_raw(_day("005930", "2026-09-01", [("09:00", 1)])), cfg)
+    v = judge_price_basis(minutes, _daily_raw([("000660", "2026-09-01", 100)]), cfg)
+    assert v["basis"].tolist() == ["no_daily"]
+
+
+def test_segments_break_only_beyond_price_limit(cfg):
+    """N3: 전일 마지막 가격 대비 당일 첫 가격이 ±30% 밖이면 새 구간. 제한폭 안(상한가)은 같은 구간."""
+    rows = (_day("005930", "2026-09-01", [("15:30", 1)], price=1000)
+            + _day("005930", "2026-09-02", [("09:00", 1), ("15:30", 1)], price=1290)   # +29% (상한가 안)
+            + _day("005930", "2026-09-03", [("09:00", 1)], price=258)                  # 5:1 분할 (-80%)
+            + _day("000660", "2026-09-01", [("09:00", 1)], price=100))
+    seg = add_segments(normalize_minutes(_raw(rows), cfg)[0], cfg)
+    got = seg.groupby(["code", "date"])["segment"].first()
+    assert got.loc["005930"].tolist() == [0, 0, 1] and got.loc["000660"].tolist() == [0]
+    bars = aggregate_bars(seg, "1h", cfg)
+    assert "segment" in bars and bars.loc[bars["code"] == "005930", "segment"].tolist() == [0, 0, 0, 1]
+
+
+@pytest.mark.parametrize("as_of", ["2026-04-24 10:00", "2026-04-27 09:00", "2026-04-27 12:00"])
+def test_basis_and_segments_truncation_invariant(cfg, as_of):
+    """as_of 이후 1분 행·일봉을 지워도 가격 기준 적용·구간 번호·확정 봉이 같다 (FR-F4)."""
+    raw = _synthetic_days(seed=1)
+    t = pd.Timestamp(as_of)
+    days = raw["dt"].dt.normalize().drop_duplicates()
+    daily = pd.DataFrame([(c, d) for c in raw["code"].unique() for d in days], columns=["code", "date"])
+    last = raw[(raw["dt"].dt.strftime("%H:%M") >= "09:00") & (raw["dt"].dt.strftime("%H:%M") <= "15:30")]
+    last = last.sort_values("dt").groupby(["code", last["dt"].dt.normalize()])["close_p"].last()
+    daily["close_raw"] = [last.get((c, d), np.nan) for c, d in zip(daily["code"], daily["date"])]
+
+    def pipeline(raw_in, daily_in):
+        m, _ = normalize_minutes(raw_in, cfg)
+        m, _ = apply_price_basis(m, judge_price_basis(m, daily_in, cfg))
+        return confirmed_bars(aggregate_bars(add_segments(m, cfg), "1h", cfg), t)
+
+    full = pipeline(raw, daily)
+    part = pipeline(raw[raw["dt"] < t], daily[daily["date"] < t.normalize()])
+    pd.testing.assert_frame_equal(full, part)
+    assert not full.empty
+
+
+@pytest.mark.data
+def test_real_split_starts_new_segment_and_basis_mostly_raw(paths, cfg):
+    """실분봉: 000040 2026-07-28 기준가 변경(일봉 수정주가 비율 0.2)에서 새 가격 구간, 판정 대부분 raw."""
+    from regime_lab.data.loader import load_daily
+    from regime_lab.data.minutes import load_minutes, month_files
+
+    mdir = paths.store.parent / "minutes"
+    if not month_files(mdir):
+        pytest.skip(f"{mdir} 에 1분봉 사본 없음")
+    raw = load_minutes(mdir, codes=["000040"], start="2026-07-01", end="2026-08-31")
+    daily = load_daily(paths.store, tickers=["000040"], end="2026-08-31").rename(columns={"ticker": "code"})
+    daily = daily.assign(code=daily["code"].astype(str))[["code", "date", "close_raw"]]
+    m, _ = normalize_minutes(raw, cfg)
+    v = judge_price_basis(m, daily, cfg)
+    assert (v["basis"] == "raw").mean() > 0.9
+    seg = add_segments(apply_price_basis(m, v)[0], cfg).groupby("date")["segment"].first()
+    assert seg.diff().fillna(0).gt(0).sum() == 1
+    assert seg.idxmax() == pd.Timestamp("2026-07-28") and seg.loc[:"2026-07-27"].eq(0).all()
 
 
 @pytest.mark.data

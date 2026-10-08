@@ -1,7 +1,8 @@
 """1분봉 정규화·시간봉 집계 (P2-4, docs/분봉_데이터_설계.md §2). I/O 없음.
 
 처리 순서(종목·일 단위, §2.2): ① (code, dt) 정렬 → ② N4 value_1m 차분(장외 포함 전체 행)
-→ ③ N7 이상값 제외 → ④ N1 정규장 필터 → ⑤ N2·N3 가격 기준·조정(P2-4.3) → ⑥ §2.1 집계.
+→ ③ N7 이상값 제외 → ④ N1 정규장 필터 (normalize_minutes)
+→ ⑤ N2 가격 기준(judge_price_basis·apply_price_basis)·N3 가격 구간(add_segments) → ⑥ §2.1 집계(aggregate_bars).
 
 시각 규칙: 1분 행은 다음 분 시작에, 집계 봉은 확정 시각(마지막 분 + 1분)에 이용 가능하다.
 as_of 예측은 확정 시각 ≤ as_of 인 봉만 입력으로 쓴다(FR-F3). 결측 분은 채우지 않는다(N6).
@@ -81,16 +82,76 @@ def aggregate_bars(minutes: pd.DataFrame, timeframe: str, cfg: dict) -> pd.DataF
     slot = np.searchsorted(edges, tod, side="right")  # 1..n
     if (slot < 1).any() or (slot >= len(edges)).any():
         raise ValueError("정규장 밖 행이 있습니다 — normalize_minutes 를 먼저 적용하세요")
-    g = minutes.assign(slot=slot).groupby(["code", "date", "slot"], sort=True)
+    g = minutes.sort_values(["code", "dt"], kind="stable").assign(
+        slot=lambda d: np.searchsorted(edges, (d["dt"].dt.hour * 60 + d["dt"].dt.minute).to_numpy(), side="right")
+    ).groupby(["code", "date", "slot"], sort=True)
+    extra = {"segment": ("segment", "first")} if "segment" in minutes else {}
     bars = g.agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last"),
                  volume=("volume", "sum"), value_1m=("value_1m", "sum"), n_minutes=("dt", "size"),
-                 nxt_period=("nxt_period", "first")).reset_index()
+                 nxt_period=("nxt_period", "first"), **extra).reset_index()
     start = edges[bars["slot"] - 1]
     end = edges[bars["slot"]]
     bars["bar_start"] = bars["date"] + pd.to_timedelta(start, unit="min")
     bars["available_at"] = bars["date"] + pd.to_timedelta(end, unit="min")
     bars["bar_minutes"] = end - start
-    return bars[BAR_COLS]
+    return bars[BAR_COLS + list(extra)]
+
+
+def _next_trading_day(dates: pd.Series, calendar: pd.Series) -> pd.Series:
+    cal = np.sort(pd.Series(calendar).drop_duplicates().to_numpy(dtype="datetime64[ns]"))
+    pos = np.searchsorted(cal, dates.to_numpy(dtype="datetime64[ns]"), side="right")
+    nxt = np.where(pos < len(cal), cal[np.minimum(pos, len(cal) - 1)], np.datetime64("NaT", "ns"))
+    return pd.Series(pd.to_datetime(nxt), index=dates.index)
+
+
+def judge_price_basis(minutes: pd.DataFrame, daily_raw: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """N2: 종목·일마다 정규장 1분봉 종가를 KRX 원주가 종가(close_raw)와 대조해 가격 기준을 판정한다.
+
+    daily_raw: (code, date, close_raw). store 수정주가는 2026-04-24(NXT) 이후 시간외 가격이 섞여 쓰지 않는다
+    (docs/분봉_데이터_설계.md §1.3). 결과 basis: raw(허용오차 안) · mismatch · no_daily.
+    판정에 그날 종가가 필요하므로 available_at = 다음 거래일 장 시작 (거래일 달력은 daily_raw 의 날짜).
+    """
+    mcfg = cfg["minutes"]
+    last = (minutes.sort_values(["code", "dt"], kind="stable")
+            .groupby(["code", "date"], sort=True)["close"].last().rename("close_min").reset_index())
+    out = last.merge(daily_raw[["code", "date", "close_raw"]], on=["code", "date"], how="left")
+    off = (out["close_min"] / out["close_raw"] - 1).abs() * 100
+    out["basis"] = np.where(out["close_raw"].isna(), "no_daily",
+                            np.where(off <= mcfg["price_basis_tol_pct"], "raw", "mismatch"))
+    open_ = pd.to_timedelta(_minute_of_day(mcfg["session_open"]), unit="min")
+    out["available_at"] = _next_trading_day(out["date"], daily_raw["date"]) + open_
+    return out[["code", "date", "basis", "available_at"]]
+
+
+def apply_price_basis(minutes: pd.DataFrame, verdicts: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """당일 장중에는 전 거래일까지 확정된 판정을 이어 쓴다(N2). 직전 판정이 raw 인 종목·일만 남긴다.
+
+    직전 판정이 없거나(첫 거래일) raw 가 아니면 그날 행을 뺀다 — 원주가 기준이 확인된 가격만 쓰기 위함.
+    """
+    if minutes.empty:
+        return minutes.assign(basis=pd.Series(dtype=object)), {"no_verdict": 0, "not_raw": 0}
+    days = minutes[["code", "date"]].drop_duplicates().sort_values("date")
+    prev = pd.merge_asof(days, verdicts[["code", "date", "basis"]].sort_values("date"), on="date",
+                         by="code", allow_exact_matches=False)
+    m = minutes.merge(prev, on=["code", "date"], how="left")
+    stats = {"no_verdict": int(m["basis"].isna().sum()), "not_raw": int((m["basis"].notna() & (m["basis"] != "raw")).sum())}
+    return m[m["basis"] == "raw"].reset_index(drop=True), stats
+
+
+def add_segments(minutes: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """N3: 같은 가격 구간 번호 segment (종목별 0부터). 수익률·특징은 같은 segment 안에서만 이어 붙인다.
+
+    전 거래일 정규장 마지막 가격 대비 당일 첫 가격이 가격제한폭(event_gap_pct)을 넘으면 기준가가 바뀐 것
+    (분할·병합 등)으로 보고 그날부터 새 구간으로 끊는다. 그날 첫 분이 끝나면 알 수 있는 값이라 미래 정보가 아니다.
+    제한폭 안의 작은 조정(유·무상 권리락 등)은 잡지 못한다 — 채점에서 이벤트 당일을 따로 보고한다.
+    """
+    limit = cfg["minutes"]["event_gap_pct"]
+    df = minutes.sort_values(["code", "dt"], kind="stable").reset_index(drop=True)
+    day = df.groupby(["code", "date"], sort=True).agg(first=("open", "first"), last=("close", "last")).reset_index()
+    prev_last = day.groupby("code")["last"].shift(1)
+    jump = ((day["first"] / prev_last - 1).abs() * 100 > limit).fillna(False)
+    day["segment"] = jump.astype(int).groupby(day["code"]).cumsum()
+    return df.merge(day[["code", "date", "segment"]], on=["code", "date"], how="left")
 
 
 def confirmed_bars(bars: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
