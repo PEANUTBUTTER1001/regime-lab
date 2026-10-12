@@ -11,18 +11,19 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from array import array
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 
 from regime_lab.rag.metrics import abstention, ndcg_at_k, percentile, reciprocal_rank, unique_clusters_at_k
-from regime_lab.rag.rank import Index, build_index
+from regime_lab.rag.rank import Index, build_index, title_sets
 from regime_lab.rag.rank import search as rank_search
 from regime_lab.rag.select import AS_OF_MODES, aware, select_as_of, with_tickers
 from regime_lab.rag.text import doc_text, tokenize
 
-INDEX_VERSION = 1  # 토큰화·순위·시점 선택 규칙이나 캐시 형식을 바꾸면 올린다 (AGENTS.md §4)
+INDEX_VERSION = 2  # 토큰화·순위·시점 선택 규칙이나 캐시 형식을 바꾸면 올린다 (AGENTS.md §4). 2: 캐시 postings = [행 목록, 빈도 목록]
 SPLITS = ("dev", "test")
 _DOC_FIELDS = ("doc_id", "version", "source", "title", "corp_name", "url", "published_at", "time_precision",
                "first_seen_at", "available_at")
@@ -80,16 +81,16 @@ def open_index(store, cfg: dict, fields: list[str] | None = None, use_cache: boo
     cached = store.read_cache(key) if use_cache else None
     if cached is not None:
         docs = cached["docs"]
-        index = Index({t: [tuple(x) for x in p] for t, p in cached["postings"].items()}, cached["lengths"],
-                      [frozenset(t) for t in cached["title_tokens"]])
+        index = Index({t: (array("i", r), array("i", f)) for t, (r, f) in cached["postings"].items()},
+                      array("i", cached["lengths"]), title_sets(cached["title_tokens"]))
     else:
         docs = store.read(files)
         if not docs:
             raise RetrievalError("data_unavailable", "External documents are not available.", {"error": "0 rows"})
-        index = build_index([tokenize(doc_text(d, fields)) for d in docs], [tokenize(d.get("title")) for d in docs])
+        index = build_index((tokenize(doc_text(d, fields)) for d in docs), (tokenize(d.get("title")) for d in docs))
         if use_cache:
-            store.write_cache(key, {"key": key, "docs": docs, "lengths": index.lengths,
-                                    "postings": {t: [list(x) for x in p] for t, p in index.postings.items()},
+            store.write_cache(key, {"key": key, "docs": docs, "lengths": index.lengths.tolist(),
+                                    "postings": {t: [r.tolist(), f.tolist()] for t, (r, f) in index.postings.items()},
                                     "title_tokens": [sorted(t) for t in index.title_tokens]})
     keys = [(d["doc_id"], d["version"]) for d in docs]
     return EvidenceIndex(docs, keys, index, tuple(fields), key, fp, manifests, cached is not None)
