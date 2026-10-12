@@ -332,6 +332,7 @@ const D = {
   'reason.stop_loss': ['손절', 'Stop loss'], 'reason.take_profit': ['익절', 'Take profit'], 'reason.time': ['최대 보유', 'Max holding'],
   'reason.delisted': ['상장폐지 (마지막 종가)', 'Delisted (last close)'], 'reason.end_of_data': ['기준일 보유 중', 'Open at data date'],
   'r.exTrail': ['트레일링 {v}%', 'trailing {v}%'], 'r.exBe': ['본전 스톱 +{v}%', 'breakeven +{v}%'], 'r.exMa': ['{v}일선 이탈 청산', 'exit below {v}-day MA'],
+  'r.exitReasons': ['청산 사유', 'Exit reasons'],
   'reason.trailing_stop': ['트레일링 스톱', 'Trailing stop'], 'reason.breakeven_stop': ['본전 스톱', 'Breakeven stop'], 'reason.ma_exit': ['이동평균 이탈', 'Moving-average exit'],
 
   // AI 보고서
