@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from scipy.stats import binomtest
 
 
 def direction(p_up: pd.Series, cfg: dict) -> pd.Series:
@@ -38,3 +39,29 @@ def score(targets: pd.DataFrame, pred: pd.DataFrame, cfg: dict, by: list[str]) -
         n=("cov", "size"), coverage=("cov", "mean"), pinball=("pin", "mean"),
         dir_share=("called", "mean"), dir_hit=("hit", "mean")).reset_index()
     return out
+
+
+def direction_policy(y: pd.Series, model_p_up: pd.Series, baseline_p_up: pd.Series, cfg: dict) -> dict:
+    """P2-8: 이 봉·h 에서 화면에 방향("상승 쪽"·"하락 쪽")을 보여도 되는지 판정 표본(y 와 같은 index)으로 정한다.
+
+    조건 (모두): 모델이 방향을 낸 표본이 min_called 이상, 그 적중률이 0.5 보다 크다는 단측 이항검정 p < alpha,
+    그리고 같은 표본에서 기준선(과거 실현 분위) 방향 적중률보다 높음. 아니면 화면은 "불확실".
+    판정 표본은 호출자가 고른다 — 모델 보정에 쓴 표본·최종 평가 구간이 아니어야 한다(낙관 편향).
+    """
+    pcfg = cfg["forecast"]["direction_policy"]
+    va = y.notna()
+    y = y[va]
+
+    def hits(p_up: pd.Series) -> tuple[int, int]:
+        d = direction(p_up[va], cfg)
+        called = d.isin(["up", "down"])
+        ok = ((d == "up") & (y > 0)) | ((d == "down") & (y < 0))
+        return int(called.sum()), int((ok & called).sum())
+
+    n, k = hits(model_p_up)
+    bn, bk = hits(baseline_p_up)
+    p = float(binomtest(k, n, 0.5, alternative="greater").pvalue) if n else 1.0
+    hit, base_hit = (k / n if n else None), (bk / bn if bn else None)
+    enabled = (n >= pcfg["min_called"] and p < pcfg["alpha"] and base_hit is not None and hit > base_hit)
+    return {"enabled": bool(enabled), "valid_called": n, "valid_hit": hit, "p_value": p,
+            "baseline_called": bn, "baseline_hit": base_hit, "min_called": pcfg["min_called"], "alpha": pcfg["alpha"]}

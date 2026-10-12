@@ -80,14 +80,18 @@ def test_run_writes_contract_and_is_reproducible(cfg):
     assert "매매 신호가 아닙니다" in m["notice"]
     assert m["created_at"] == "2026-10-12T09:00:00+09:00" and set(m["versions"]) == {"scikit-learn", "numpy", "pandas"}
     assert list(pred.columns) == ["code", "as_of", "h", "split", "scored", "base_close", "q0.1", "q0.5", "q0.9",
-                                  "p_up", "direction", "reason", "y", "cross_day"]
+                                  "p_up", "direction", "direction_shown", "reason", "y", "cross_day"]
     assert set(pred["split"]) == {"test"} and set(pred["h"]) == {1, 2}
     assert (pred["q0.1"] <= pred["q0.9"]).all() and pred["direction"].isin(["up", "down", "uncertain"]).all()
     # 마지막 표본은 목표가 아직 없는(실현 전) 예측 — 저장은 되고 채점 대상은 아님
     last = pred[pred["as_of"] == pred["as_of"].max()]
     assert last["y"].isna().all() and not last["scored"].any()
     assert last["cross_day"].all()  # 마지막(15:31 확정) 시점의 다음 봉은 실현 전이어도 다음 거래일로 표시
-    assert set(scores) == {"1", "2"} and {"model", "baseline", "conformal_widen"} <= set(scores["1"])
+    assert set(scores) == {"1", "2"} and {"model", "baseline", "conformal_widen", "direction_policy", "model_by_slot",
+                                         "model_by_cross_day"} <= set(scores["1"])
+    for h in ("1", "2"):  # 판정을 통과하지 못한 h 는 화면 방향이 모두 "불확실"
+        if not scores[h]["direction_policy"]["enabled"]:
+            assert (pred.loc[pred["h"] == int(h), "direction_shown"] == "uncertain").all()
     assert all(isinstance(r["n"], int) for r in scores["1"]["model"])  # JSON 기본형
     # 같은 데이터·설정·시각 → 같은 결과
     store2 = MemoryStore(_raw())
