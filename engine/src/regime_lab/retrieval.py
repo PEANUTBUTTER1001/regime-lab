@@ -310,20 +310,24 @@ def browse(ei: EvidenceIndex, cfg: dict, as_of, mode: str = "observed", source_t
     rows = with_tickers(ei.docs, select_as_of(ei.docs, t, mode), tickers)
     if start or end:
         rows = [i for i in rows if (not start or _pub_date(ei.docs[i]) >= start) and (not end or _pub_date(ei.docs[i]) <= end)]
+    sts = {i: _statuses(ei.docs[i]) for i in rows}  # 행마다 한 번만 (facets·상태 필터·항목이 같이 쓴다)
+    n_status = Counter(s for i in rows for s in sts[i])
     facets = {"source_type": dict(Counter(ei.docs[i].get("source_type") for i in rows)),
-              "status": {s: sum(1 for i in rows if s in _statuses(ei.docs[i])) for s in ARCHIVE_STATUSES[1:]}}
+              "status": {s: n_status[s] for s in ARCHIVE_STATUSES[1:]}}
     if source_type:
         rows = [i for i in rows if ei.docs[i].get("source_type") == source_type]
     if status != "all":
-        rows = [i for i in rows if status in _statuses(ei.docs[i])]
+        rows = [i for i in rows if status in sts[i]]
     rows.sort(key=lambda i: (_pub_date(ei.docs[i]), ei.docs[i]["available_at"], ei.docs[i]["doc_id"]), reverse=True)
-    counts = Counter(d["doc_id"] for d in ei.docs if _visible(d, t, mode))
     lo = (page - 1) * page_size
+    shown = rows[lo:lo + page_size]
+    ids = {ei.docs[i]["doc_id"] for i in shown}  # 보이는 버전 수는 이 페이지 문서만 센다 (수십만 건이면 요청마다 전체 판정이 느림)
+    counts = Counter(d["doc_id"] for d in ei.docs if d["doc_id"] in ids and _visible(d, t, mode))
     items = [{f: ei.docs[i].get(f) for f in _ARCHIVE_FIELDS}
-             | {"tickers": _codes(ei.docs[i]), "statuses": _statuses(ei.docs[i]),
+             | {"tickers": _codes(ei.docs[i]), "statuses": sts[i],
                 "versions_visible": counts[ei.docs[i]["doc_id"]],
                 "has_amendment_candidate": bool(ei.docs[i].get("amends_candidate_doc_id"))}
-             for i in rows[lo:lo + page_size]]
+             for i in shown]
     return {"status": "ok" if items else "no_documents", "items": items, "total": len(rows), "page": page,
             "page_size": page_size, "pages": max(1, -(-len(rows) // page_size)), "facets": facets,
             "index": {"docs_fingerprint": ei.docs_fingerprint, "total_docs": len(ei.docs), "mode": mode,
