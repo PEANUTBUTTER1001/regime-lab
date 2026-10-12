@@ -49,7 +49,8 @@ def options(request: Request):
 @router.post("/searches/preview")
 def preview(req: SearchRequestIn, request: Request):
     """실행하지 않고 후보 수·예상 시간만 계산한다. 상한을 넘어도 200 으로 within_limit = false."""
-    cfg = request.app.state.rl.cfg
+    state = request.app.state.rl
+    cfg = state.cfg
     try:
         n = count_candidates(SearchRequest.from_dict(to_engine_dict(req), cfg))
     except SearchError as e:
@@ -58,7 +59,12 @@ def preview(req: SearchRequestIn, request: Request):
         n = e.detail["candidates"]
     cap = int(cfg["search"]["max_candidates"])
     return {"candidates": n, "max_candidates": cap, "within_limit": n <= cap,
-            "estimated_sec": estimate_seconds(n, cfg)}
+            "estimated_sec": estimate_seconds(n, cfg, _n_tickers(state))}
+
+
+def _n_tickers(state) -> int | None:
+    """실행 종목 수 (sample 모드면 그 수, 전 종목이면 None → 실측값 그대로)."""
+    return len(state.tickers) if state.tickers is not None else None
 
 
 @router.post("/searches", status_code=202)
@@ -73,7 +79,7 @@ def submit(req: SearchRequestIn, request: Request):
                                  {"kind": b.kind, "id": b.run_id}, retryable=True), status_code=409)
     n = count_candidates(sreq)
     return {"search_id": job.run_id, "status": job.status, "candidates": n,
-            "estimated_sec": estimate_seconds(n, s.cfg)}
+            "estimated_sec": estimate_seconds(n, s.cfg, _n_tickers(s))}
 
 
 @router.get("/searches")
