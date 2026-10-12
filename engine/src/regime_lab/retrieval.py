@@ -11,18 +11,19 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from array import array
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 
 from regime_lab.rag.metrics import abstention, ndcg_at_k, percentile, reciprocal_rank, unique_clusters_at_k
-from regime_lab.rag.rank import Index, build_index
+from regime_lab.rag.rank import Index, build_index, title_sets
 from regime_lab.rag.rank import search as rank_search
 from regime_lab.rag.select import AS_OF_MODES, aware, select_as_of, with_tickers
 from regime_lab.rag.text import doc_text, tokenize
 
-INDEX_VERSION = 1  # 토큰화·순위·시점 선택 규칙이나 캐시 형식을 바꾸면 올린다 (AGENTS.md §4)
+INDEX_VERSION = 2  # 토큰화·순위·시점 선택 규칙이나 캐시 형식을 바꾸면 올린다 (AGENTS.md §4). 2: 캐시 postings = [행 목록, 빈도 목록]
 SPLITS = ("dev", "test")
 _DOC_FIELDS = ("doc_id", "version", "source", "title", "corp_name", "url", "published_at", "time_precision",
                "first_seen_at", "available_at")
@@ -80,16 +81,16 @@ def open_index(store, cfg: dict, fields: list[str] | None = None, use_cache: boo
     cached = store.read_cache(key) if use_cache else None
     if cached is not None:
         docs = cached["docs"]
-        index = Index({t: [tuple(x) for x in p] for t, p in cached["postings"].items()}, cached["lengths"],
-                      [frozenset(t) for t in cached["title_tokens"]])
+        index = Index({t: (array("i", r), array("i", f)) for t, (r, f) in cached["postings"].items()},
+                      array("i", cached["lengths"]), title_sets(cached["title_tokens"]))
     else:
         docs = store.read(files)
         if not docs:
             raise RetrievalError("data_unavailable", "External documents are not available.", {"error": "0 rows"})
-        index = build_index([tokenize(doc_text(d, fields)) for d in docs], [tokenize(d.get("title")) for d in docs])
+        index = build_index((tokenize(doc_text(d, fields)) for d in docs), (tokenize(d.get("title")) for d in docs))
         if use_cache:
-            store.write_cache(key, {"key": key, "docs": docs, "lengths": index.lengths,
-                                    "postings": {t: [list(x) for x in p] for t, p in index.postings.items()},
+            store.write_cache(key, {"key": key, "docs": docs, "lengths": index.lengths.tolist(),
+                                    "postings": {t: [r.tolist(), f.tolist()] for t, (r, f) in index.postings.items()},
                                     "title_tokens": [sorted(t) for t in index.title_tokens]})
     keys = [(d["doc_id"], d["version"]) for d in docs]
     return EvidenceIndex(docs, keys, index, tuple(fields), key, fp, manifests, cached is not None)
@@ -310,20 +311,24 @@ def browse(ei: EvidenceIndex, cfg: dict, as_of, mode: str = "observed", source_t
     rows = with_tickers(ei.docs, select_as_of(ei.docs, t, mode), tickers)
     if start or end:
         rows = [i for i in rows if (not start or _pub_date(ei.docs[i]) >= start) and (not end or _pub_date(ei.docs[i]) <= end)]
+    sts = {i: _statuses(ei.docs[i]) for i in rows}  # 행마다 한 번만 (facets·상태 필터·항목이 같이 쓴다)
+    n_status = Counter(s for i in rows for s in sts[i])
     facets = {"source_type": dict(Counter(ei.docs[i].get("source_type") for i in rows)),
-              "status": {s: sum(1 for i in rows if s in _statuses(ei.docs[i])) for s in ARCHIVE_STATUSES[1:]}}
+              "status": {s: n_status[s] for s in ARCHIVE_STATUSES[1:]}}
     if source_type:
         rows = [i for i in rows if ei.docs[i].get("source_type") == source_type]
     if status != "all":
-        rows = [i for i in rows if status in _statuses(ei.docs[i])]
+        rows = [i for i in rows if status in sts[i]]
     rows.sort(key=lambda i: (_pub_date(ei.docs[i]), ei.docs[i]["available_at"], ei.docs[i]["doc_id"]), reverse=True)
-    counts = Counter(d["doc_id"] for d in ei.docs if _visible(d, t, mode))
     lo = (page - 1) * page_size
+    shown = rows[lo:lo + page_size]
+    ids = {ei.docs[i]["doc_id"] for i in shown}  # 보이는 버전 수는 이 페이지 문서만 센다 (수십만 건이면 요청마다 전체 판정이 느림)
+    counts = Counter(d["doc_id"] for d in ei.docs if d["doc_id"] in ids and _visible(d, t, mode))
     items = [{f: ei.docs[i].get(f) for f in _ARCHIVE_FIELDS}
-             | {"tickers": _codes(ei.docs[i]), "statuses": _statuses(ei.docs[i]),
+             | {"tickers": _codes(ei.docs[i]), "statuses": sts[i],
                 "versions_visible": counts[ei.docs[i]["doc_id"]],
                 "has_amendment_candidate": bool(ei.docs[i].get("amends_candidate_doc_id"))}
-             for i in rows[lo:lo + page_size]]
+             for i in shown]
     return {"status": "ok" if items else "no_documents", "items": items, "total": len(rows), "page": page,
             "page_size": page_size, "pages": max(1, -(-len(rows) // page_size)), "facets": facets,
             "index": {"docs_fingerprint": ei.docs_fingerprint, "total_docs": len(ei.docs), "mode": mode,

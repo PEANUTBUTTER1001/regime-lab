@@ -3,14 +3,17 @@
 // 조건(실행·종목·기준 시각)은 주소(#/forecast?run=…&code=…&as_of=…)에 남긴다.
 import { api } from '../api.js';
 import { forecastBand } from '../charts.js';
-import { errorView, fmt, h, loading, pill, stateView, table } from '../components/ui.js';
+import { errorView, fmt, h, helpTip, loading, pill, stateView, table, updown } from '../components/ui.js';
 import { t } from '../i18n.js';
 
 const KST = '+09:00';
 const toIso = (local) => (local ? `${local}:00${KST}` : '');
 const toLocal = (iso) => (iso ? iso.slice(0, 16) : '');
 const won = (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 }));
-const DIR_KIND = { up: '', down: 'bad', uncertain: 'neutral' };
+// 방향 표시는 한국식 색(E18 ④): 상승 쪽 빨강 ▲, 하락 쪽 파랑 ▼, 불확실은 색 없는 표시
+const DIR_SIGN = { up: 1, down: -1 };
+const dirCell = (dir) => (dir in DIR_SIGN ? updown(DIR_SIGN[dir], t(`fc.dir.${dir}`)) : pill(t('fc.dir.uncertain'), 'neutral'));
+const withTip = (label, tip) => h('span', { class: 'with-tip' }, label, helpTip(tip, label));
 
 // 평가 기간(test) 방향 적중률 — NXT 구간별로 나뉜 채점 행을 방향을 낸 표본 수로 가중해 합친다
 function testHit(scores, h) {
@@ -81,10 +84,10 @@ async function show(out, f) {
       columns: [
         { label: t('fc.col.h'), render: (s) => (s.cross_day
           ? h('span', {}, t('fc.step', { h: s.h }), ' ', pill(t('fc.col.nextDay'), 'neutral')) : t('fc.step', { h: s.h })) },
-        { label: t('fc.col.range'), num: true, render: (s) => `${won(s.low)} ~ ${won(s.high)}` },
-        { label: t('fc.col.dir'), render: (s) => pill(t(`fc.dir.${s.direction}`), DIR_KIND[s.direction]) },
+        { label: withTip(t('fc.col.range'), t('help.fcRange')), num: true, render: (s) => `${won(s.low)} ~ ${won(s.high)}` },
+        { label: t('fc.col.dir'), render: (s) => dirCell(s.direction) },
         { label: t('fc.col.pUp'), num: true, render: (s) => fmt.pct(s.p_up, 0, false) },
-        { label: t('fc.col.testHit'), num: true, render: (s) => fmt.pct(testHit(sc.scores, s.h), 1, false) },
+        { label: withTip(t('fc.col.testHit'), t('help.fcHit')), num: true, render: (s) => fmt.pct(testHit(sc.scores, s.h), 1, false) },
         { label: t('fc.col.actual'), num: true, render: (s) => won(s.actual) },
       ],
       rows: d.steps,

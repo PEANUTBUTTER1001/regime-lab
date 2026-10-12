@@ -3,7 +3,7 @@
 // (/api/evidence/documents)이 하고, 화면은 조건을 넘기고 응답을 표시만 한다 (FR-X6).
 // 조건은 주소(#/archive?…, #/archive/doc?id=…)에 남겨 새로고침·뒤로 가기에도 같은 화면을 다시 연다.
 import { api } from '../api.js';
-import { errorView, fmt, h, loading, pill, stateView, table } from '../components/ui.js';
+import { errorView, fmt, h, helpTip, loading, pill, stateView, table } from '../components/ui.js';
 import { has, t } from '../i18n.js';
 
 const MODES = ['observed', 'historical_assumed'];
@@ -96,10 +96,13 @@ export async function renderArchive(el, query) {
     const next = `#/archive?${p}`;
     if (location.hash === next) { el.replaceChildren(); renderArchive(el, p); } else location.hash = next;
   };
-  const field = (id, key, label, hint) => h('div', {}, h('label', { for: id }, label), inputs[key], hint ? h('p', { class: 'hint', text: hint }) : null, errorSlot(key));
+  // tip: 늘 보이는 안내 대신 ? 도움말로 보여 줄 문구 (E18)
+  const field = (id, key, label, hint, tip) => h('div', {},
+    tip ? h('div', { class: 'label-row' }, h('label', { for: id }, label), helpTip(tip, label)) : h('label', { for: id }, label),
+    inputs[key], hint ? h('p', { class: 'hint', text: hint }) : null, errorSlot(key));
   const form = h('form', { class: 'card', novalidate: true },
     h('h2', {}, t('ar.formTitle')), h('p', { class: 'card-sub', text: t('ar.formSub') }),
-    h('div', { class: 'field-two' }, field('ar-asof', 'as_of', t('ev.asOf'), t('ev.asOfHint')), field('ar-mode', 'mode', t('ev.mode'), t('ev.modeHint'))),
+    h('div', { class: 'field-two' }, field('ar-asof', 'as_of', t('ev.asOf'), t('ev.asOfHint')), field('ar-mode', 'mode', t('ev.mode'), null, t('ev.modeHint'))),
     h('div', { class: 'field-two' }, field('ar-type', 'source_type', t('ar.type')), field('ar-status', 'status', t('ar.status'), t('ar.statusHint'))),
     h('div', { class: 'field-two' }, field('ar-start', 'start', t('ar.start')), field('ar-end', 'end', t('ar.end'), t('ar.periodHint'))),
     h('div', { class: 'field-two' }, field('ar-tickers', 'tickers', t('ev.tickers'), t('ev.tickersHint')), h('div', {})),

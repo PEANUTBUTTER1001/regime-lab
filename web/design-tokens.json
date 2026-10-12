@@ -10,7 +10,9 @@
     "accent-mint": "#88E6BC",
     "text-on-mint": "#0C2B20",
     "accent-amber": "#EAC07A",
-    "state-negative": "#EF8F8F",
+    "state-up": "#EF8F8F",
+    "state-down": "#8AC4E8",
+    "state-error": "#F2A065",
     "state-info": "#8AC4E8"
   },
   "layout": {

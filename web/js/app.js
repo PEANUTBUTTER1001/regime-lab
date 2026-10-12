@@ -1,7 +1,7 @@
 // 공통 프레임과 해시 라우터 (FR-X1). 화면 데이터는 모두 API JSON 에서만 읽는다 (FR-X2).
 import { api } from './api.js';
 import { disposeAll } from './charts.js';
-import { h } from './components/ui.js';
+import { h, runTabs } from './components/ui.js';
 import { BRAND } from './config.js';
 import { t } from './i18n.js';
 import { state } from './state.js';
@@ -20,18 +20,20 @@ import { renderSearch, renderSearchProgress, renderSearchResult } from './views/
 import { renderSettings } from './views/settings.js';
 import { renderStock } from './views/stock.js';
 
+// 사이드바는 사용자 작업 순서대로 묶는다 (2026-10-12 UI 개편 결정 E18). 새 화면은 알맞은 group 으로 항목을 추가한다.
+// soon: 화면 자리만 있고 내용이 아직 없는 메뉴 ("준비 중" 표시). 화면을 붙일 때 지운다.
+const NAV_GROUPS = ['test', 'results', 'docs', 'market'];
 const NAV = [
-  { id: 'builder', icon: '⌘', label: 'nav.builder', href: () => '#/builder' },
-  { id: 'search', icon: '⟲', label: 'nav.search', href: () => '#/search' },
-  { id: 'presets', icon: '☆', label: 'nav.presets', href: () => '#/presets' },
-  { id: 'runs', icon: '☰', label: 'nav.runs', href: () => '#/runs' },
-  { id: 'results', icon: '▦', label: 'nav.results', href: () => (state.lastRun ? `#/runs/${state.lastRun}/results` : '#/results') },
-  { id: 'stock', icon: '⌁', label: 'nav.stock', href: () => (state.lastRun ? `#/runs/${state.lastRun}/stock` : '#/stock') },
-  { id: 'report', icon: '✦', label: 'nav.report', href: () => (state.lastRun ? `#/runs/${state.lastRun}/report` : '#/report') },
-  { id: 'forecast', icon: '◫', label: 'nav.forecast', href: () => '#/forecast' },
-  { id: 'evidence', icon: '⌕', label: 'nav.evidence', href: () => '#/evidence' },
-  { id: 'archive', icon: '▤', label: 'nav.archive', href: () => '#/archive' },
-  { id: 'briefing', icon: '◌', label: 'nav.briefing', href: () => '#/briefing' },
+  { id: 'builder', group: 'test', icon: '⌘', label: 'nav.builder', href: () => '#/builder' },
+  { id: 'search', group: 'test', icon: '⟲', label: 'nav.search', href: () => '#/search' },
+  { id: 'presets', group: 'test', icon: '☆', label: 'nav.presets', href: () => '#/presets' },
+  { id: 'runs', group: 'test', icon: '☰', label: 'nav.runs', href: () => '#/runs' },
+  // 결과·종목별 거래·AI 보고서는 한 실행의 탭이다 (runTabs). 메뉴는 최근 실행의 요약으로 간다
+  { id: 'results', group: 'results', icon: '▦', label: 'nav.results', href: () => (state.lastRun ? `#/runs/${state.lastRun}/results` : '#/results') },
+  { id: 'evidence', group: 'docs', icon: '⌕', label: 'nav.evidence', href: () => '#/evidence' },
+  { id: 'archive', group: 'docs', icon: '▤', label: 'nav.archive', href: () => '#/archive' },
+  { id: 'briefing', group: 'market', icon: '◌', label: 'nav.briefing', href: () => '#/briefing', soon: true },
+  { id: 'forecast', group: 'market', icon: '◫', label: 'nav.forecast', href: () => '#/forecast' },
 ];
 
 const ROUTES = [
@@ -39,10 +41,10 @@ const ROUTES = [
   [/^#\/builder$/, () => ({ nav: 'builder', view: renderBuilder })],
   [/^#\/runs$/, () => ({ nav: 'runs', view: renderRuns })],
   [/^#\/runs\/([^/]+)\/progress$/, (m) => ({ nav: 'builder', view: (el) => renderProgress(el, m[1]) })],
-  [/^#\/runs\/([^/]+)\/results$/, (m) => ({ nav: 'results', view: (el, q) => renderResults(el, m[1], q) })],
-  [/^#\/runs\/([^/]+)\/stock(?:\/([^/]+))?$/, (m) => ({ nav: 'stock', view: (el, q) => renderStock(el, m[1], m[2], q) })],
-  [/^#\/runs\/([^/]+)\/report$/, (m) => ({ nav: 'report', view: (el, q) => renderReport(el, m[1], q) })],
-  [/^#\/(results|stock|report)$/, (m) => ({ nav: m[1], view: (el) => renderNoRun(el, m[1]) })],
+  [/^#\/runs\/([^/]+)\/results$/, (m) => ({ nav: 'results', run: [m[1], 'results'], view: (el, q) => renderResults(el, m[1], q) })],
+  [/^#\/runs\/([^/]+)\/stock(?:\/([^/]+))?$/, (m) => ({ nav: 'results', run: [m[1], 'stock'], view: (el, q) => renderStock(el, m[1], m[2], q) })],
+  [/^#\/runs\/([^/]+)\/report$/, (m) => ({ nav: 'results', run: [m[1], 'report'], view: (el, q) => renderReport(el, m[1], q) })],
+  [/^#\/(results|stock|report)$/, (m) => ({ nav: 'results', view: (el) => renderNoRun(el, m[1]) })],
   [/^#\/search$/, () => ({ nav: 'search', view: renderSearch })],
   [/^#\/presets$/, () => ({ nav: 'presets', view: renderPresets })],
   [/^#\/searches\/([^/]+)\/progress$/, (m) => ({ nav: 'search', view: (el) => renderSearchProgress(el, m[1]) })],
@@ -64,8 +66,16 @@ function renderNoRun(el, which) {
 
 function navLink(n, navId) {
   const label = t(n.label);
-  return h('a', { class: `nav${n.id === navId ? ' active' : ''}`, href: n.href(), 'aria-label': label, 'aria-current': n.id === navId ? 'page' : null },
-    h('span', { 'aria-hidden': 'true' }, n.icon), h('span', {}, label));
+  const soon = n.soon ? t('nav.soon') : null;
+  return h('a', { class: `nav${n.id === navId ? ' active' : ''}`, href: n.href(), 'aria-label': soon ? `${label} (${soon})` : label, 'aria-current': n.id === navId ? 'page' : null },
+    h('span', { 'aria-hidden': 'true' }, n.icon), h('span', {}, label),
+    soon && h('span', { class: 'nav-soon', 'aria-hidden': 'true' }, soon));
+}
+
+function navGroups(navId) {
+  return NAV_GROUPS.map((g) => h('div', { class: 'nav-group', role: 'group', 'aria-label': t(`nav.g.${g}`) },
+    h('div', { class: 'nav-title', 'aria-hidden': 'true' }, t(`nav.g.${g}`)),
+    NAV.filter((n) => n.group === g).map((n) => navLink(n, navId))));
 }
 
 let cleanup = null;
@@ -85,8 +95,7 @@ function shell(navId) {
         h('button', { class: 'link-btn', onclick: () => { state.signedIn = false; state.guest = false; location.hash = '#/login'; } },
           state.guest ? t('header.signIn') : t('header.signOut')))),
     h('aside', { class: 'nav-panel', 'aria-label': t('nav.main') },
-      h('div', { class: 'nav-title' }, t('nav.workspace')),
-      NAV.map((n) => navLink(n, navId)),
+      navGroups(navId),
       // 사이드바 하단: 설정 탭, 그 아래 구분선과 고지 문구 (2026-09-22 사용자 요청)
       h('div', { class: 'nav-bottom' }, navLink({ id: 'settings', icon: '⚙', label: 'nav.settings', href: () => '#/settings' }, navId)),
       h('div', { class: 'sidebar-foot' }, t('sidebar.foot', { b: BRAND }))),
@@ -110,6 +119,7 @@ async function route() {
   let el;
   if (match.bare) { root.replaceChildren(); el = h('div', { id: 'main' }); root.append(el); }
   else { el = shell(match.nav); }
+  if (match.run) el.append(runTabs(...match.run));
   const wrap = h('div', { class: 'view' });
   el.append(wrap);
   cleanup = (await match.view(wrap, query)) || null;

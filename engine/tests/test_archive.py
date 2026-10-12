@@ -113,8 +113,10 @@ def test_filters_facets_and_paging(tmp_path, cfg):
     p1 = retrieval.browse(ei, cfg, AFTER, page=1, page_size=3)
     p3 = retrieval.browse(ei, cfg, AFTER, page=3, page_size=3)
     assert (p1["pages"], len(p1["items"]), len(p3["items"]), p3["total"]) == (3, 3, 1, 7)
-    allp = [x["doc_id"] for p in (1, 2, 3) for x in retrieval.browse(ei, cfg, AFTER, page=p, page_size=3)["items"]]
-    assert allp == [x["doc_id"] for x in retrieval.browse(ei, cfg, AFTER, page_size=200)["items"]]
+    allp = [x for p in (1, 2, 3) for x in retrieval.browse(ei, cfg, AFTER, page=p, page_size=3)["items"]]
+    # 쪽마다 따로 센 보이는 버전 수·상태도 한 쪽에 다 받을 때와 같다
+    assert allp == retrieval.browse(ei, cfg, AFTER, page_size=200)["items"]
+    assert sum(x["versions_visible"] == 2 for x in allp) == 1
 
 
 @pytest.mark.parametrize("kw,field", [({"as_of": "2026-10-07T09:00:00"}, "as_of"), ({"mode": "x"}, "mode"),

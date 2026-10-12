@@ -72,7 +72,8 @@ class AppState:
 
     def load_rag(self) -> None:
         try:
-            self.rag = retrieval.open_index(self.docs, self.cfg)
+            # 색인 JSON 캐시는 쓰지 않는다: 공시 수십만 건이면 캐시(1GB JSON) 읽기가 새로 만들기보다 느리고 메모리는 두 배 넘게 든다
+            self.rag = retrieval.open_index(self.docs, self.cfg, use_cache=False)
             self.rag_status = "ready"
         except retrieval.RetrievalError as e:
             self.rag_status, self.rag_error = "failed", e.detail

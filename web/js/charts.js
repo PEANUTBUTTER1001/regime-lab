@@ -1,7 +1,8 @@
 // ECharts 래퍼 (design.md §7). 축·단위·범례·툴팁을 차트 가까이에 두고, 색 외에 선 종류·마커 모양으로도 구분한다.
 import { t } from './i18n.js';
 
-const C = { mint: '#88E6BC', amber: '#EAC07A', red: '#EF8F8F', blue: '#8AC4E8', text: '#E8F0ED', muted: '#97A9A3', line: '#2A383B', gray: '#697b79' };
+// up/down: 한국식 손익 색 (E18 ④, css --up/--down 과 같은 값). 상승·이익·매수 = 빨강, 하락·손실·매도 = 파랑
+const C = { mint: '#88E6BC', amber: '#EAC07A', up: '#EF8F8F', down: '#8AC4E8', text: '#E8F0ED', muted: '#97A9A3', line: '#2A383B', gray: '#697b79' };
 const live = new Set();
 
 window.addEventListener('resize', () => live.forEach((c) => c.resize()));
@@ -37,7 +38,7 @@ export function histogram(el, bins, ariaLabel) {
     } },
     xAxis: { type: 'category', data: bins.map(label), name: t('c.netReturn'), nameLocation: 'middle', nameGap: 32, nameTextStyle: { color: C.muted }, ...axisCommon, axisLabel: { ...axisCommon.axisLabel, interval: 4 } },
     yAxis: { type: 'value', name: t('c.trades'), nameTextStyle: { color: C.muted }, ...axisCommon },
-    series: [{ type: 'bar', data: bins.map((b) => ({ value: b.count, itemStyle: { color: (b.hi != null && b.hi <= 0) ? C.red : C.mint } })), barCategoryGap: '8%' }],
+    series: [{ type: 'bar', data: bins.map((b) => ({ value: b.count, itemStyle: { color: (b.hi != null && b.hi <= 0) ? C.down : C.up } })), barCategoryGap: '8%' }],
   });
   return chart;
 }
@@ -87,7 +88,7 @@ export function forecastBand(el, d, ariaLabel) {
   return chart;
 }
 
-const REGIME_BG = { bull: 'rgba(136,230,188,0.08)', bear: 'rgba(239,143,143,0.09)' };
+const REGIME_BG = { bull: 'rgba(239,143,143,0.09)', bear: 'rgba(138,196,232,0.09)' };
 
 export function price(el, d, ariaLabel) {
   const s = d.series;
@@ -109,8 +110,8 @@ export function price(el, d, ariaLabel) {
         markArea: { silent: true, label: { show: false }, data: areas } },
       { name: t('c.ma20'), type: 'line', showSymbol: false, data: pts(s.sma20), lineStyle: { color: C.mint, width: 1.2, type: 'dashed' }, itemStyle: { color: C.mint } },
       { name: t('c.ma200'), type: 'line', showSymbol: false, data: pts(s.sma200), lineStyle: { color: C.amber, width: 1.2, type: 'dotted' }, itemStyle: { color: C.amber } },
-      { name: t('c.entry'), type: 'scatter', data: entries, symbol: 'triangle', symbolSize: 11, itemStyle: { color: C.mint, borderColor: '#0C1114', borderWidth: 1 } },
-      { name: t('c.exit'), type: 'scatter', data: exits, symbol: 'rect', symbolSize: 9, itemStyle: { color: C.red, borderColor: '#0C1114', borderWidth: 1 } },
+      { name: t('c.entry'), type: 'scatter', data: entries, symbol: 'triangle', symbolSize: 11, itemStyle: { color: C.up, borderColor: '#0C1114', borderWidth: 1 } },
+      { name: t('c.exit'), type: 'scatter', data: exits, symbol: 'rect', symbolSize: 9, itemStyle: { color: C.down, borderColor: '#0C1114', borderWidth: 1 } },
     ],
   });
   return chart;
