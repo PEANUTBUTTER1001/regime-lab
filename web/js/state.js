@@ -3,7 +3,7 @@ const get = (k) => { try { return sessionStorage.getItem(k); } catch { return nu
 const set = (k, v) => { try { v == null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch { /* 저장 불가 */ } };
 
 export const state = {
-  get signedIn() { return get('rl.signedIn') === '1'; },
+  get signedIn() { return this.authConfig?.enabled ? !!this.user : get('rl.signedIn') === '1'; },
   set signedIn(v) { set('rl.signedIn', v ? '1' : null); },
   // 게스트 모드: 가입·로그인 없이 진행 (UI 흐름만, 실제 인증은 원래 없음)
   get guest() { return get('rl.guest') === '1'; },
@@ -15,5 +15,18 @@ export const state = {
   // 빌더에 불러온 저장 조합 {id, name, revision, body} — 덮어쓰기·변경 여부 판단용 (P1-10)
   get loadedPreset() { try { return JSON.parse(get('rl.loadedPreset') || 'null'); } catch { return null; } },
   set loadedPreset(v) { set('rl.loadedPreset', v ? JSON.stringify(v) : null); },
+  user: null,
+  authConfig: null,
+  setUser(user) {
+    if (get('rl.userId') !== user?.id) this.clearWorkspace();
+    this.user = user;
+    set('rl.userId', user?.id || null);
+  },
+  clearWorkspace() {
+    this.lastRun = null; this.draft = null; this.loadedPreset = null; this.meta = null;
+  },
+  clearAuth() {
+    this.setUser(null); this.signedIn = false; this.guest = false;
+  },
   meta: null,
 };

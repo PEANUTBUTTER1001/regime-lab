@@ -6,6 +6,9 @@
 from __future__ import annotations
 
 import threading
+import time
+import secrets
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -94,9 +97,35 @@ class AppState:
 
 
 def create_app(settings: Settings | None = None, prep: Prepared | None = None, serve_web: bool = True,
-               rag: retrieval.EvidenceIndex | None = None) -> FastAPI:
+               rag: retrieval.EvidenceIndex | None = None, auth_provider=None, auth_store=None) -> FastAPI:
     settings = settings or Settings.from_env()
+    settings.validate_auth()
     state = AppState(settings, prep, rag)
+    from regime_api.auth.service import AuthService
+    from regime_api.auth.store import AuthStore
+    from regime_api.auth.supabase import SupabaseProvider, AuthAccessLogFilter
+    enabled = settings.auth_mode == "supabase"
+    policy = state.cfg["auth"]
+    provider = auth_provider
+    store = auth_store
+    if enabled:
+        provider = provider or SupabaseProvider(settings.supabase_url, settings.supabase_publishable_key, policy["http_timeout_seconds"], settings.auth_site_url)
+        store = store or AuthStore(settings.auth_state_dir, policy["max_sessions"])
+    state.auth = AuthService(provider, store, policy, settings.auth_site_url, settings.auth_admin_ids,
+                             time.time, lambda: secrets.token_urlsafe(policy["nonce_bytes"]), secrets.token_bytes(policy["nonce_bytes"]), enabled, threading.RLock())
+    preset_stores = {}
+    preset_lock = threading.Lock()
+    def presets_for(user_id=None):
+        if not enabled:
+            return state.presets
+        with preset_lock:
+            if user_id not in preset_stores:
+                preset_stores[user_id] = PresetStore(presets_dir(state.paths) / user_id, state.cfg, namespace=user_id)
+            return preset_stores[user_id]
+    state.presets_for = presets_for
+    logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, AuthAccessLogFilter) for f in logger.filters):
+        logger.addFilter(AuthAccessLogFilter())
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -104,7 +133,11 @@ def create_app(settings: Settings | None = None, prep: Prepared | None = None, s
             threading.Thread(target=state.load, name="prepare", daemon=True).start()
         if state.rag is None:
             threading.Thread(target=state.load_rag, name="rag-index", daemon=True).start()
-        yield
+        try:
+            yield
+        finally:
+            if enabled and hasattr(provider, "close"):
+                provider.close()
 
     app = FastAPI(title="regime-lab API", version=API_VERSION, lifespan=lifespan,
                   description="과거 데이터 분석 API. 투자 권유가 아닙니다 (Historical analysis — not investment advice).")
@@ -114,9 +147,10 @@ def create_app(settings: Settings | None = None, prep: Prepared | None = None, s
         app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"],
                            allow_headers=["*"])
 
-    from regime_api.routes import briefing, evidence, llm, meta, presets, report, results, runs, searches
+    from regime_api.routes import auth, briefing, evidence, llm, meta, presets, report, results, runs, searches
 
-    for r in (meta.router, runs.router, results.router, report.router, briefing.router, llm.router,
+    auth.install(app)
+    for r in (auth.router, meta.router, runs.router, results.router, report.router, briefing.router, llm.router,
               searches.router, presets.router, evidence.router):
         app.include_router(r, prefix="/api")
     if serve_web and settings.web_dir.exists():

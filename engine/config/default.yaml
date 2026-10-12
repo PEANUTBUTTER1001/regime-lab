@@ -200,3 +200,21 @@ forecast:                           # P2 봉 예측 (D-2 확정 2026-10-07, docs
     min_called: 200                 # 모델이 방향을 낸 검증 표본 수 하한
     alpha: 0.05                     # 적중률 > 0.5 단측 이항검정 유의수준 (그리고 기준선 적중률보다 높아야 함)
     holdout_share: 0.5              # 검증 구간 뒷부분 비율 — 여기로 판정하고 앞부분으로 모델 확률을 보정 (같은 표본으로 둘 다 하면 낙관 편향)
+
+# X3.1: 인증 수치. 분석 준비 캐시(PREP_SECTIONS)와 무관. 키는 환경변수로만 받는다.
+auth:
+  session_ttl_seconds: 28800
+  idle_ttl_seconds: 1800
+  recovery_ttl_seconds: 600
+  csrf_ttl_seconds: 3600
+  http_timeout_seconds: 10
+  password_min_length: 8
+  password_max_length: 1024
+  demo_password_min_length: 4
+  email_max_length: 254
+  token_max_length: 2048
+  rate_window_seconds: 300
+  rate_max_attempts: 5
+  max_sessions: 5000
+  nonce_bytes: 32
+  list_limit: 200
