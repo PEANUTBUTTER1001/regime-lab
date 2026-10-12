@@ -18,7 +18,7 @@ Source of Truth: `engine/pyproject.toml`, `api/pyproject.toml`, `engine/config/d
 | 유스케이스 | `engine/src/regime_lab/runs.py`, `engine/src/regime_lab/pipeline.py`, `api/src/regime_api/jobs.py`, `api/src/regime_api/llm/service.py`, `engine/src/regime_lab/search.py`, `engine/src/regime_lab/retrieval.py`, `ingest/src/regime_ingest/collect.py` | 실행·결과 저장, 준비 프레임 생성, 작업 관리(1개·취소), 보고서 생성·검증·폴백, 역방향 탐색 실행·저장, 근거 검색 색인·as_of 검색·평가, 공시 수집 흐름 |
 | 유스케이스 | `engine/src/regime_lab/forecast_runs.py` (예정) | 과거 as_of 예측 생성·저장 (P2, `docs/분봉_데이터_설계.md` §4) |
 | 도메인 | `engine/src/regime_lab/indicators.py`, `engine/src/regime_lab/regime.py`, `engine/src/regime_lab/universe.py`, `engine/src/regime_lab/patterns/`, `engine/src/regime_lab/backtest/`, `engine/src/regime_lab/analysis/`, `api/src/regime_api/llm/prompt.py`, `api/src/regime_api/llm/verify.py`, `api/src/regime_api/llm/template.py`, `ingest/src/regime_ingest/timing.py`, `ingest/src/regime_ingest/normalize.py`, `ingest/src/regime_ingest/dedup.py`, `engine/src/regime_lab/rag/` | 지표·국면·유니버스·패턴·체결·집계·검증 계산, 보고서 근거 수치·숫자 대조·템플릿, 수집 시각·정규화·중복 판정, 근거 검색 토큰화·순위·시점 선택·비슷한 제목 묶기·평가 지표 |
-| 도메인 | `engine/src/regime_lab/bars.py`, `engine/src/regime_lab/forecast/` (예정) | 분봉 정규화·시간봉 집계, 예측 모델·채점 (P2) |
+| 도메인 | `engine/src/regime_lab/bars.py`, `engine/src/regime_lab/forecast/` | 분봉 정규화·시간봉 집계, 예측 모델·채점 (P2) |
 | 포트 | `engine/src/regime_lab/context.py`, `api/src/regime_api/llm/provider.py`, `ingest/src/regime_ingest/ports.py` | 진행·취소 문맥, LLM 공급사 인터페이스, 수집 목록·저장소 경계 |
 | 인프라 | `engine/src/regime_lab/data/`, `engine/src/regime_lab/config.py`, `engine/scripts/`, `api/src/regime_api/settings.py`, `api/src/regime_api/llm/openai.py`, `api/src/regime_api/llm/gemini.py`, `api/src/regime_api/llm/anthropic.py`, `api/src/regime_api/llm/cache.py`, `web/js/api.js`, `web/js/state.js`, `engine/src/regime_lab/presets.py`, `ingest/src/regime_ingest/sources/`, `ingest/src/regime_ingest/store.py`, `ingest/src/regime_ingest/config.py` | Parquet·SQL 덤프 읽기(외부 자료 docs Parquet·근거 검색 색인 캐시 포함), 설정·환경변수, LLM 공급사 호출(OpenAI만 구현), 보고서 캐시, fetch·브라우저 저장소, 찾은 조합 저장소, OpenDART HTTP·수집 저장소 |
 | 조립 | `api/src/regime_api/main.py`, `web/js/app.js`, `ingest/src/regime_ingest/app.py` | 앱 상태·라우터 연결, 웹 해시 라우터·공통 프레임, 수집기 시계·키·구현체 연결 |
@@ -49,6 +49,7 @@ Source of Truth: `engine/pyproject.toml`, `api/pyproject.toml`, `engine/config/d
 | 패턴·조정 수치·청산 이름 [강제] | `web/js/i18n.js`의 `pat.*`·`pp.*`와 `api/src/regime_api/llm/prompt.py`의 `PATTERN_KO`·`PARAM_KO`·`EXIT_KO`에 같은 한국어 이름 (어긋나면 `test_i18n_keys`·`test_llm_verify` 실패) |
 | 스타일·토큰 | `web/css/app.css`, `web/design-tokens.json` |
 | 기획·결정 문서 | `docs/` |
+| 활성 진행 기록·지난 기록 보관 | `progress/PROGRESS.md` · `progress/archive/` (날짜별 원문 보관) |
 | CI 워크플로 | `.github/workflows/tests.yml` — engine·api·ingest를 원본·키 없이 실행, 핵심 테스트가 빠지거나 skip되면 실패 (F2) |
 
 ## 5. 새 기능 레시피
