@@ -20,6 +20,7 @@ from pathlib import Path
 from regime_lab.config import ENGINE_DIR, load_config, load_paths
 from regime_lab.context import RecordingContext
 from regime_lab import retrieval
+from regime_lab.data.forecast_store import ForecastStore
 from regime_lab.data.loader import DocsStore, load_sample_tickers
 from regime_lab.pipeline import prepare
 from regime_lab.runs import Strategy, StrategyError, run_and_save
@@ -57,6 +58,25 @@ def _rag(args, cfg, paths) -> int:
     return 0
 
 
+def _forecast(args, cfg, paths) -> int:
+    """P2-7 과거 as_of 예측 일괄 생성 → runs/forecasts/<run_id>/."""
+    from datetime import datetime
+
+    from regime_lab import forecast_runs  # scikit-learn 을 끌어오므로 예측 명령에서만 불러온다 (다른 명령 시작 시간)
+
+    store = ForecastStore(paths.store, args.minutes or paths.store.parent / "minutes", paths.runs)
+    codes = sorted(set(load_sample_tickers(paths.store)) & set(store.common_codes())) if args.sample else None
+    t = time.time()
+    try:
+        run_id, meta = forecast_runs.run_forecast(store, cfg, args.timeframe, datetime.now(), codes)
+    except ValueError as e:
+        print(f"[error] {e}", file=sys.stderr)
+        return 2
+    print(f"[forecast] {run_id}: codes={meta['codes']:,} bars={meta['bars']:,} H={meta['horizon']} "
+          f"{time.time() - t:.1f}s -> {paths.runs / 'forecasts' / run_id}", flush=True)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="regime-lab")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -80,9 +100,15 @@ def main(argv: list[str] | None = None) -> int:
         if name == "rag-eval":
             sp.add_argument("--gold", type=Path, required=True, help="평가셋 JSON (저장소 밖)")
             sp.add_argument("--split", required=True, choices=["dev", "test"])
+    sp = sub.add_parser("forecast-run", help="P2-7 과거 as_of 예측 일괄 생성")
+    sp.add_argument("--timeframe", required=True, help="봉 단위 (설정 forecast.timeframes, 예: 1h·3h)")
+    sp.add_argument("--sample", action="store_true", help="store/sample30 종목만 사용")
+    sp.add_argument("--minutes", type=Path, help="1분봉 사본 폴더 (기본: store 옆 minutes)")
     args = ap.parse_args(argv)
 
     cfg, paths = load_config(), load_paths()
+    if args.cmd == "forecast-run":
+        return _forecast(args, cfg, paths)
     if args.cmd.startswith("rag-"):
         return _rag(args, cfg, paths)
     strategies: list[Strategy] = []
