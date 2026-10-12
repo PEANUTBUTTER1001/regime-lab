@@ -34,6 +34,12 @@ def test_bm25_matches_hand_calculation():
     assert 2 not in got and got[0][1] == ["aa"]
 
 
+def test_build_index_reads_generators_once():
+    """제너레이터로 넘겨도(문서별 토큰 목록을 한꺼번에 들지 않음) 목록으로 넘긴 것과 같은 색인."""
+    texts, titles = [["aa", "bb"], ["aa"], ["cc", "cc", "dd"]], [["aa"], [], ["cc", "dd"]]
+    assert build_index(iter(texts), iter(titles)) == build_index(texts, titles)
+
+
 def test_future_docs_do_not_change_past_search():
     """절단 불변: as_of 뒤에 질의어가 든 문서 50건을 더해도 순위와 점수가 비트 단위로 같다."""
     docs = make_docs()

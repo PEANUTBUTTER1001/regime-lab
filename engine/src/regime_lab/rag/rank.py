@@ -11,14 +11,18 @@
 from __future__ import annotations
 
 import math
+import sys
+from array import array
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class Index:
-    postings: dict[str, list[tuple[int, int]]]  # 토큰 → [(행, 빈도)] (행 오름차순)
-    lengths: list[int]                           # 행별 토큰 수
+    # 토큰 → (행, 빈도) 두 정수 배열 (행 오름차순). 수십만 문서에서 (행, 빈도) 튜플 목록은 수 GB 라 배열로 둔다
+    postings: dict[str, tuple[array, array]]
+    lengths: array                               # 행별 토큰 수 (array('i'))
     title_tokens: list[frozenset[str]]           # MMR 중복 판정용 제목 토큰 집합
 
 
@@ -30,12 +34,24 @@ class Hit:
     members: tuple[int, ...] = ()  # 대표 행과 제목이 비슷해 묶인 다른 행 (순위 순)
 
 
-def build_index(texts: list[list[str]], titles: list[list[str]]) -> Index:
-    postings: dict[str, list[tuple[int, int]]] = {}
+def build_index(texts: Iterable[list[str]], titles: Iterable[list[str]]) -> Index:
+    """texts·titles 는 한 번만 읽는다 (제너레이터면 문서별 토큰 목록을 한꺼번에 들고 있지 않는다)."""
+    postings: dict[str, tuple[array, array]] = {}
+    lengths = array("i")
     for i, toks in enumerate(texts):
+        lengths.append(len(toks))
         for t, c in sorted(Counter(toks).items()):
-            postings.setdefault(t, []).append((i, c))
-    return Index(postings, [len(t) for t in texts], [frozenset(t) for t in titles])
+            p = postings.get(t)
+            if p is None:
+                p = postings[t] = (array("i"), array("i"))
+            p[0].append(i)
+            p[1].append(c)
+    return Index(postings, lengths, title_sets(titles))
+
+
+def title_sets(titles: Iterable[list[str]]) -> list[frozenset[str]]:
+    """제목 토큰 집합. 같은 토큰은 한 문자열 객체를 같이 쓴다 (문서마다 따로 만든 두 글자 토큰이 수백 MB)."""
+    return [frozenset(map(sys.intern, t)) for t in titles]
 
 
 def bm25(index: Index, q_tokens: list[str], visible: set[int], k1: float, b: float) -> dict[int, tuple[float, list[str]]]:
@@ -46,7 +62,8 @@ def bm25(index: Index, q_tokens: list[str], visible: set[int], k1: float, b: flo
     avgdl = sum(index.lengths[i] for i in visible) / n or 1.0
     out: dict[int, tuple[float, list[str]]] = {}
     for t in sorted(set(q_tokens)):  # 토큰 순서를 고정해 부동소수 합을 재현 가능하게
-        plist = [(i, tf) for i, tf in index.postings.get(t, ()) if i in visible]
+        rows, tfs = index.postings.get(t, ((), ()))
+        plist = [(i, tf) for i, tf in zip(rows, tfs) if i in visible]
         if not plist:
             continue
         idf = math.log(1 + (n - len(plist) + 0.5) / (len(plist) + 0.5))
