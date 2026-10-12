@@ -1,8 +1,9 @@
 """계정·세션·접근 권한 유스케이스. 시계·난수·저장소·공급사를 주입받는다."""
+import base64
 import hashlib
 import hmac
 from urllib.parse import urlsplit
-from regime_api.auth.contracts import Session, Provider, Store
+from regime_api.auth.contracts import Session, OAuthFlow, Provider, Store
 from regime_api.errors import ApiError
 
 class AuthService:
@@ -58,19 +59,57 @@ class AuthService:
                 raise ApiError(429, "auth_rate_limited", "Please wait before trying again.", retryable=True)
             self._limits[key] = (count + 1, until)
 
-    def issue(self, tokens, old_sid=None, purpose="login"):
-        if not tokens.user.confirmed:
+    def issue(self, tokens, old_sid=None, purpose="login", provider=None):
+        if provider is not None and provider not in tokens.user.providers:
+            raise ApiError(401, "auth_oauth_failed", "Social sign-in could not be completed.")
+        if provider is None and not tokens.user.confirmed:
             raise ApiError(401, "auth_unconfirmed", "Verify your email before signing in.")
         now = self.now()
         self.store.prune(now - self.policy["idle_ttl_seconds"])
         sid = self.nonce()
         try:
-            self.store.put(sid, Session(tokens, now, now, now + tokens.expires_in, purpose))
+            self.store.put(sid, Session(tokens, now, now, now + tokens.expires_in, purpose, provider))
         except Exception:
             raise ApiError(503, "auth_unavailable", "Authentication is temporarily unavailable.", retryable=True) from None
         if old_sid:
             self.store.drop(old_sid)
         return sid, tokens.user.public()
+
+    def social_providers(self):
+        # Discovery failures disable social buttons while preserving email sign-in.
+        try:
+            return self.provider.social_providers()
+        except ApiError:
+            return {"google": False, "kakao": False}
+
+    def start_oauth(self, provider, old_flow, client):
+        if provider not in {"google", "kakao"}:
+            raise ApiError(422, "auth_oauth_provider", "Unsupported sign-in provider.")
+        self.rate("login", client)
+        if not self.provider.social_providers().get(provider):
+            raise ApiError(503, "auth_oauth_unavailable", "Social sign-in is not available yet.")
+        now = self.now()
+        fid, verifier = self.nonce(), self.nonce()
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+        url = self.provider.oauth_url(provider, challenge, self.site_url + "/api/auth/oauth/callback")
+        try:
+            self.store.put_flow(fid, OAuthFlow(provider, verifier, now),
+                                now - self.policy["oauth_ttl_seconds"], old_flow)
+        except Exception:
+            raise ApiError(503, "auth_unavailable", "Authentication is temporarily unavailable.") from None
+        return fid, url
+
+    def finish_oauth(self, fid, code, error, old_sid):
+        flow = self.store.take_flow(fid) if fid and len(fid) <= self.policy["token_max_length"] else None
+        if (flow is None or error or not code or len(code) > self.policy["token_max_length"]
+                or not 0 <= self.now() - flow.created < self.policy["oauth_ttl_seconds"]):
+            raise ApiError(401, "auth_oauth_failed", "Social sign-in could not be completed.")
+        tokens = self.provider.exchange(code, flow.verifier)
+        user = self.provider.user(tokens.access)
+        if user.id != tokens.user.id or flow.provider not in user.providers:
+            raise ApiError(401, "auth_oauth_failed", "Social sign-in could not be completed.")
+        tokens.user = user
+        return self.issue(tokens, old_sid, provider=flow.provider)
 
     def login(self, email, password, old_sid, client):
         self.rate("login", client)
@@ -122,7 +161,8 @@ class AuthService:
                     session.tokens = tokens
                     session.access_until = now + tokens.expires_in
                 user = self.provider.user(session.tokens.access)
-                if user.id != session.tokens.user.id or not user.confirmed:
+                verified = session.provider in user.providers if session.provider else user.confirmed
+                if user.id != session.tokens.user.id or not verified:
                     raise ApiError(401, "authentication_required", "Sign in to continue.")
             except ApiError as e:
                 if e.status == 401:

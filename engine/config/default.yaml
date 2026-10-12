@@ -206,6 +206,7 @@ auth:
   session_ttl_seconds: 28800
   idle_ttl_seconds: 1800
   recovery_ttl_seconds: 600
+  oauth_ttl_seconds: 300
   csrf_ttl_seconds: 3600
   http_timeout_seconds: 10
   password_min_length: 8

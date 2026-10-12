@@ -38,6 +38,7 @@ export const api = {
   authConfig: async () => { authConfig = await request('GET', '/auth/config'); return authConfig; },
   me: () => request('GET', '/auth/me'),
   login: (email, password) => request('POST', '/auth/login', {email, password}),
+  startOAuth: (provider) => request('POST', '/auth/oauth', {provider}),
   signup: (email, password) => request('POST', '/auth/signup', {email, password}),
   logout: () => request('POST', '/auth/logout'),
   recover: (email) => request('POST', '/auth/recover', {email}),

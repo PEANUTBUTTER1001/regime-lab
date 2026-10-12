@@ -18,7 +18,12 @@ export function setLang(lang) {
 document.documentElement.lang = current;
 
 const D = {
-  'login.authHint': ['이메일 인증 후 로그인하여 내 분석 결과와 전략을 관리하세요.', 'Verify your email, then sign in to manage your results and strategies.'],
+  'login.authHint': ['내 분석 결과와 전략을 관리할 계정으로 로그인하세요.', 'Sign in to manage your results and strategies.'],
+  'login.kakao': ['카카오로 계속하기', 'Continue with Kakao'],
+  'login.google': ['Google로 계속하기', 'Continue with Google'],
+  'login.emailAlternative': ['또는 이메일로 계속하기', 'Or continue with email'],
+  'login.socialPending': ['소셜 로그인은 준비 중입니다. 이메일로 계속할 수 있습니다.', 'Social sign-in is being prepared. You can continue with email.'],
+  'login.socialFailed': ['소셜 로그인을 완료하지 못했습니다. 다시 시도하세요.', 'Social sign-in could not be completed. Please try again.'],
   'login.forgot': ['비밀번호를 잊으셨나요?', 'Forgot password?'],
   'login.reset': ['비밀번호 재설정', 'Reset password'],
   'login.sendReset': ['재설정 메일 보내기', 'Send reset email'],
