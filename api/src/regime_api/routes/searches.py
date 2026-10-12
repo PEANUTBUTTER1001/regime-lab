@@ -84,7 +84,7 @@ def submit(req: SearchRequestIn, request: Request):
 
 @router.get("/searches")
 def list_searches(request: Request, limit: int = 50):
-    return {"searches": request.app.state.rl.jobs.list_searches(limit)}
+    return {"searches": request.app.state.rl.jobs.list_searches(None if request.app.state.rl.auth.enabled else limit)}
 
 
 def _snap(request: Request, search_id: str) -> dict:

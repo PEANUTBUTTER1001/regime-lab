@@ -10,6 +10,7 @@ import { renderArchive, renderArchiveDoc } from './views/archive.js';
 import { renderBuilder } from './views/builder.js';
 import { renderEvidence } from './views/evidence.js';
 import { renderLogin } from './views/login.js';
+import { renderPassword } from './views/password.js';
 import { renderProgress } from './views/progress.js';
 import { renderReport } from './views/report.js';
 import { renderResults } from './views/results.js';
@@ -35,6 +36,7 @@ const NAV = [
 ];
 
 const ROUTES = [
+  [/^#\/password$/, () => ({ nav: null, view: renderPassword, bare: true })],
   [/^#\/login$/, () => ({ nav: null, view: renderLogin, bare: true })],
   [/^#\/builder$/, () => ({ nav: 'builder', view: renderBuilder })],
   [/^#\/runs$/, () => ({ nav: 'runs', view: renderRuns })],
@@ -89,7 +91,12 @@ function shell(navId) {
       h('div', { class: 'header-meta' }, h('span', { class: 'hide-sm' }, t('header.workspace')), scope,
         state.guest ? h('span', { class: 'badge warn' }, t('header.guest')) : null,
         h('span', { class: 'badge' }, asOf),
-        h('button', { class: 'link-btn', onclick: () => { state.signedIn = false; state.guest = false; location.hash = '#/login'; } },
+        h('button', { class: 'link-btn', onclick: async (event) => {
+          const button = event.currentTarget; button.disabled = true;
+          try { if (state.authConfig?.enabled) await api.logout(); state.clearAuth(); location.hash = '#/login'; }
+          catch { button.title = t('login.unavailable'); }
+          finally { button.disabled = false; }
+        } },
           state.guest ? t('header.signIn') : t('header.signOut')))),
     h('aside', { class: 'nav-panel', 'aria-label': t('nav.main') },
       navGroups(navId),
@@ -105,7 +112,7 @@ async function route() {
   disposeAll();
   const [path, qs] = (location.hash || '#/builder').split('?');
   const query = new URLSearchParams(qs || '');
-  if (!state.signedIn && path !== '#/login') { location.replace('#/login'); return; }
+  if (!state.signedIn && !['#/login', '#/password'].includes(path)) { location.replace('#/login'); return; }
   let match = null;
   for (const [re, make] of ROUTES) { const m = path.match(re); if (m) { match = make(m); break; } }
   if (!match) { location.replace('#/builder'); return; }
@@ -135,4 +142,19 @@ window.addEventListener('rl:lang', route); // 언어 변경 시 현재 화면을
 new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty('--disclaimer-height', `${entry.target.getBoundingClientRect().height}px`);
 }).observe(document.getElementById('disclaimer'));
-loadMeta().then(route);
+async function start() {
+  try {
+    state.authConfig = await api.authConfig();
+    if (state.authConfig.enabled) {
+      state.guest = false;
+      if (!(location.hash || '').startsWith('#/password')) {
+        try { const data = await api.me(); state.setUser(data.user); }
+        catch { state.clearAuth(); }
+      }
+    }
+  } catch { state.authConfig = {enabled:true, available:false}; state.clearAuth(); }
+  if (state.signedIn) await loadMeta();
+  await route();
+}
+window.addEventListener('rl:unauthorized', () => { state.clearAuth(); location.hash = '#/login'; });
+start();

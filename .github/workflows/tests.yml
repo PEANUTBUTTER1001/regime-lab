@@ -64,7 +64,7 @@ jobs:
           failed = [c for c in cases if c.find('failure') is not None or c.find('error') is not None]
           required = {
               'engine': ('test_search', 'test_win_rate', 'test_rag_rank'),
-              'api': ('test_llm_verify', 'test_search_contract'),
+              'api': ('test_llm_verify', 'test_search_contract', 'test_auth_contract', 'test_auth_ownership'),
               'ingest': ('test_collect', 'test_contract'),
           }[project]
           missing = [name for name in required if not any(c.get('classname', '').endswith('.' + name) for c in cases)]
