@@ -20,17 +20,18 @@ def cfg():
 
 
 class Clock:
-    def __init__(self):
-        self.t = datetime(2026, 10, 7, 9, 0, tzinfo=KST)
+    def __init__(self, day: date = date(2026, 10, 7)):
+        self.t = datetime(day.year, day.month, day.day, 9, 0, tzinfo=KST)
 
     def __call__(self):
         self.t += timedelta(seconds=1)
         return self.t
 
 
-def _run(store, fake, cfg, start, end, mode="backfill", run_id="r1", refetch=False, **kw):
+def _run(store, fake, cfg, start, end, mode="backfill", run_id="r1", refetch=False, clock=None, **kw):
     client = OpenDartList(fake, {**cfg, **kw}, sleep=lambda s: None)
-    return collect(store, client, {**cfg, **kw}, start, end, mode=mode, now=Clock(), run_id=run_id, refetch=refetch)
+    return collect(store, client, {**cfg, **kw}, start, end, mode=mode, now=clock or Clock(), run_id=run_id,
+                   refetch=refetch)
 
 
 def _stable(docs):
@@ -305,7 +306,7 @@ def test_api_key_never_leaks(monkeypatch):
 
 
 def test_forward_day_is_not_treated_as_fully_collected(tmp_path, cfg):
-    """순방향은 그날 일부만 본 것 → coverage=forward. 밤에 소급하면 그 날을 다시 받아 늦게 나온 공시를 채우고,
+    """순방향은 그날 일부만 본 것 → coverage=forward. 다음 날 소급하면 그 날을 다시 받아 늦게 나온 공시를 채우고,
     아침에 본 공시는 중복으로 걸러져 available_at(처음 본 시각)이 그대로다."""
     morning = make_items(date(2026, 10, 7), date(2026, 10, 7), per_day=2)
     st = _run(Store(tmp_path), FakeDart(morning), cfg, date(2026, 10, 7), date(2026, 10, 7), mode="forward")
@@ -313,11 +314,28 @@ def test_forward_day_is_not_treated_as_fully_collected(tmp_path, cfg):
     first = {d["doc_id"]: d["available_at"] for d in Store(tmp_path).read_docs("opendart")}
     full_day = make_items(date(2026, 10, 7), date(2026, 10, 7), per_day=5)  # 오후에 3건 더
     fake = FakeDart(full_day)
-    st = _run(Store(tmp_path), fake, cfg, date(2026, 10, 7), date(2026, 10, 7), run_id="r2")
+    st = _run(Store(tmp_path), fake, cfg, date(2026, 10, 7), date(2026, 10, 7), run_id="r2", clock=Clock(date(2026, 10, 8)))
     assert fake.calls and st.skipped_windows == 0 and st.new == 3 and st.duplicate == 2
     docs = Store(tmp_path).read_docs("opendart")
     assert len(docs) == 5 and all(d["available_at"] == first[d["doc_id"]] for d in docs if d["doc_id"] in first)
     assert set(Store(tmp_path).coverage("opendart").values()) == {"collected"}
+
+
+def test_backfill_through_today_leaves_today_open(tmp_path, cfg):
+    """소급을 오늘(KST)까지 돌려도 오늘은 하루가 끝나기 전 일부만 본 것 → forward 로 남는다. 그래야 다음 소급이
+    그 날을 다시 받아 오후에 접수된 공시를 채운다 (collected 로 두면 소급도 순방향도 그 날을 다시 받지 않는다)."""
+    seen = make_items(date(2026, 10, 6), date(2026, 10, 6), per_day=5) + make_items(date(2026, 10, 7), date(2026, 10, 7), per_day=2)
+    _run(Store(tmp_path), FakeDart(seen), cfg, date(2026, 10, 6), date(2026, 10, 7))  # 시계 = 10-07 09:00
+    cov = Store(tmp_path).coverage("opendart")
+    assert {v for (d, _), v in cov.items() if d == "2026-10-06"} == {"collected"}
+    assert {v for (d, _), v in cov.items() if d == "2026-10-07"} == {"forward"}
+    assert Store(tmp_path).cursor("opendart", "backfill") == "2026-10-06"  # 빠짐없이 끝난 마지막 날
+    full = make_items(date(2026, 10, 6), date(2026, 10, 6), per_day=5) + make_items(date(2026, 10, 7), date(2026, 10, 7), per_day=5)
+    fake = FakeDart(full)
+    st = _run(Store(tmp_path), fake, cfg, date(2026, 10, 6), date(2026, 10, 7), run_id="r2", clock=Clock(date(2026, 10, 8)))
+    assert fake.calls and st.skipped_windows == 0 and st.new == 3 and st.duplicate == 7
+    assert set(Store(tmp_path).coverage("opendart").values()) == {"collected"}
+    assert Store(tmp_path).cursor("opendart", "backfill") == "2026-10-07"
 
 
 def test_recover_is_scoped_to_locked_source(tmp_path):
@@ -354,10 +372,10 @@ def test_coverage_exported_on_commit_append_only(tmp_path, cfg):
     first = pq.read_table(f).to_pylist()
     assert {(r["day"], r["corp_cls"], r["state"]) for r in first} == {("2026-10-07", "Y", "forward"), ("2026-10-07", "K", "forward")}
     t_forward = max(r["observed_at"] for r in first)
-    night = Clock()
-    night.t += timedelta(hours=12)  # 밤 소급은 12시간 뒤에 돈다
+    next_day = Clock()
+    next_day.t += timedelta(hours=24)  # 다음 날 소급 (같은 날 소급은 오늘을 forward 로 남긴다)
     collect(Store(tmp_path), OpenDartList(FakeDart(items), cfg, sleep=lambda s: None), cfg, date(2026, 10, 6),
-            date(2026, 10, 7), mode="backfill", now=night, run_id="r2")
+            date(2026, 10, 7), mode="backfill", now=next_day, run_id="r2")
     rows = pq.read_table(f).to_pylist()
     assert rows[:len(first)] == first and len(rows) == len(first) + 4  # 앞 기록은 그대로, 새 기록만 추가
     assert _coverage_at(rows, t_forward) == {("2026-10-07", "Y"): "forward", ("2026-10-07", "K"): "forward"}
