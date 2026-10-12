@@ -188,6 +188,12 @@ footer.disclaimer { position:fixed; left:260px; right:0; bottom:0; background:rg
 .login-intro h1 { font-size:42px; max-width:520px; }
 .login-form { display:flex; align-items:center; justify-content:center; padding:48px 32px; }
 .login-form form { width:100%; max-width:380px; }
+.login-social { display:grid; gap:10px; margin:20px 0; }
+.login-social .card-sub { text-align:center; margin:4px 0; }
+.social-login { width:100%; padding:12px; border-radius:8px; font-weight:600; }
+.social-login.kakao { background:#FEE500; color:#191919; border:1px solid #FEE500; }
+.social-login.google { background:#fff; color:#1f1f1f; border:1px solid #747775; }
+.social-login:disabled { opacity:.55; cursor:not-allowed; }
 .login-form .primary { width:100%; margin-top:22px; }
 
 @media(max-width:1050px) {

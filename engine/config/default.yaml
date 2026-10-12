@@ -206,6 +206,7 @@ auth:
   session_ttl_seconds: 28800        # 로그인 세션 최대 수명 (8시간). 세션 쿠키 수명도 같다
   idle_ttl_seconds: 1800            # 요청이 이만큼 없으면 세션 만료 (30분)
   recovery_ttl_seconds: 600         # 비밀번호 재설정 링크로 연 세션 수명 (10분)
+  oauth_ttl_seconds: 300            # 소셜 로그인 PKCE 흐름의 최대 수명 (5분, 한 번 사용)
   csrf_ttl_seconds: 3600            # CSRF 토큰 유효 시간 (1시간)
   http_timeout_seconds: 10          # Supabase 인증 서버 요청 제한 시간
   password_min_length: 8            # 비밀번호 길이 하한 (로그인 켰을 때)

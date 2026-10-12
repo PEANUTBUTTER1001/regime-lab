@@ -2,7 +2,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from regime_api.auth.store import AuthStore
-from test_auth_contract import auth_app, signin, csrf, A, B
+from test_auth_contract import auth_app, signin, csrf, start_social, A, B
 
 STRATEGY={"patterns":["breakout_20d"]}
 
@@ -66,3 +66,18 @@ def test_failed_ownership_record_returns_no_success(auth_app,monkeypatch):
         assert response.status_code==503
         assert 'internal disk failure' not in response.text
         assert c.get('/api/runs/fake-run').status_code==404
+
+
+def test_social_login_preserves_uuid_ownership(auth_app):
+    with TestClient(auth_app) as c, TestClient(auth_app) as other:
+        headers = signin(c)
+        run = c.post('/api/runs',json={'strategies':[{'name':'mine',**STRATEGY}]},headers=headers)
+        rid = run.json()['run_id']
+        old_sid = c.cookies.get('rl_session')
+        start_social(c, 'kakao')
+        c.get('/api/auth/oauth/callback?code=fake-code',follow_redirects=False)
+        assert auth_app.state.rl.auth.store.get(old_sid) is None
+        assert c.get('/api/runs/'+rid).status_code == 200
+        signin(other, 'b')
+        assert other.get('/api/runs/'+rid).status_code == 404
+        assert other.get('/api/runs').json() == {'runs':[]}

@@ -2,6 +2,7 @@
 import httpx
 import logging
 from uuid import UUID
+from urllib.parse import urlencode
 from regime_api.auth.contracts import Tokens, User
 from regime_api.errors import ApiError
 
@@ -45,10 +46,15 @@ class SupabaseProvider:
     def _user(data):
         try:
             uid = str(UUID(data["id"]))
-            email = data["email"]
-            if not isinstance(email, str):
+            identities = data.get("identities", [])
+            if not isinstance(identities, list):
                 raise ValueError()
-            return User(uid, email, bool(data.get("email_confirmed_at")))
+            providers = tuple(sorted({item.get("provider") for item in identities
+                                      if isinstance(item, dict) and item.get("provider") in {"google", "kakao"}}))
+            email = data.get("email")
+            if (email is not None and not isinstance(email, str)) or (not email and not providers):
+                raise ValueError()
+            return User(uid, email or None, bool(data.get("email_confirmed_at")), providers)
         except (KeyError, TypeError, ValueError):
             raise ApiError(503, "auth_unavailable", "Authentication is temporarily unavailable.", retryable=True) from None
 
@@ -62,6 +68,25 @@ class SupabaseProvider:
             return Tokens(user, access, refresh, ttl)
         except (KeyError, TypeError, ValueError):
             raise ApiError(503, "auth_unavailable", "Authentication is temporarily unavailable.", retryable=True) from None
+
+    def social_providers(self):
+        data = self._request("GET", "settings")
+        external = data.get("external", {}) if isinstance(data, dict) else {}
+        if not isinstance(external, dict):
+            raise ApiError(503, "auth_unavailable", "Authentication is temporarily unavailable.")
+        return {provider: external.get(provider) is True for provider in ("google", "kakao")}
+
+    def oauth_url(self, provider, challenge, callback):
+        if provider not in {"google", "kakao"}:
+            raise ApiError(422, "auth_oauth_provider", "Unsupported sign-in provider.")
+        return self.url + "/auth/v1/authorize?" + urlencode({
+            "provider": provider, "redirect_to": callback,
+            "code_challenge": challenge, "code_challenge_method": "s256",
+        })
+
+    def exchange(self, code, verifier):
+        return self._tokens(self._request("POST", "token?grant_type=pkce",
+                                         {"auth_code": code, "code_verifier": verifier}))
 
     def signup(self, email, password):
         self._request("POST", "signup", {"email": email, "password": password})

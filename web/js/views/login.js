@@ -38,6 +38,21 @@ export function renderLogin(el, query = new URLSearchParams()) {
   const toggle = h('button', {class:'link-btn', type:'button'});
   const recover = h('button', {class:'link-btn', type:'button'}, t('login.forgot'));
   const message = h('p', {class:'field-error hidden', role:'alert', id:'login-error'});
+  const socials = ['kakao', 'google'].map(provider => {
+    const button = h('button', {class:'social-login ' + provider, type:'button', disabled:!config.social_providers?.[provider] || config.available === false}, t(provider === 'kakao' ? 'login.kakao' : 'login.google'));
+    button.onclick = async () => {
+      socials.forEach(item => { item.disabled = true; });
+      pw.value = ''; pw2.value = ''; message.classList.add('hidden');
+      try { const result = await api.startOAuth(provider); location.assign(result.url); }
+      catch (error) {
+        show(t(error.code === 'auth_rate_limited' ? 'login.limited' : error.code === 'auth_oauth_unavailable' ? 'login.socialPending' : 'login.socialFailed'));
+        socials.forEach((item, index) => { item.disabled = !config.social_providers?.[['kakao', 'google'][index]]; });
+      }
+    };
+    return button;
+  });
+  const socialWrap = h('div', {class:'login-social'}, ...socials,
+    h('p', {class:'card-sub'}, t(Object.values(config.social_providers || {}).some(Boolean) ? 'login.emailAlternative' : 'login.socialPending')));
   email.setAttribute('aria-describedby', 'login-error'); pw.setAttribute('aria-describedby', 'login-error');
   function show(text) { message.textContent = text; message.classList.remove('hidden'); }
   function update() {
@@ -45,6 +60,7 @@ export function renderLogin(el, query = new URLSearchParams()) {
     submit.textContent = t(mode === 'signup' ? 'login.create' : mode === 'recover' ? 'login.sendReset' : 'login.signIn');
     toggle.textContent = t(mode === 'signin' ? 'login.signUp' : 'login.back');
     pwWrap.classList.toggle('hidden', mode === 'recover'); pw2Wrap.classList.toggle('hidden', mode !== 'signup');
+    socialWrap.classList.toggle('hidden', mode === 'recover' || !config.enabled);
     recover.classList.toggle('hidden', mode !== 'signin' || !config.enabled);
     pw.autocomplete = mode === 'signup' ? 'new-password' : 'current-password';
   }
@@ -54,7 +70,7 @@ export function renderLogin(el, query = new URLSearchParams()) {
   guest.onclick = () => { state.guest = true; state.signedIn = true; location.hash = '#/builder'; };
   guest.classList.toggle('hidden', !config.guest_allowed);
   const form = h('form', {'aria-labelledby':'form-title', novalidate:true}, title,
-    h('p', {class:'card-sub'}, t(config.enabled ? 'login.authHint' : 'login.demo')),
+    h('p', {class:'card-sub'}, t(config.enabled ? 'login.authHint' : 'login.demo')), socialWrap,
     h('label', {for:'email'}, t('login.email')), email, pwWrap, pw2Wrap, message, submit,
     h('div', {class:'login-alt'}, toggle, guest), recover);
   form.onsubmit = async (event) => {
@@ -79,7 +95,7 @@ export function renderLogin(el, query = new URLSearchParams()) {
   };
   update();
   if (query.has('verified')) show(t('login.verified'));
-  if (query.has('auth_error')) show(t('login.linkExpired'));
+  if (query.has('auth_error')) show(t(query.get('auth_error') === 'auth_oauth_failed' ? 'login.socialFailed' : 'login.linkExpired'));
   if (config.available === false) {
     submit.disabled = true; toggle.disabled = true; recover.disabled = true;
     show(t('login.unavailable'));
