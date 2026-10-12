@@ -203,18 +203,18 @@ forecast:                           # P2 봉 예측 (D-2 확정 2026-10-07, docs
 
 # X3.1: 인증 수치. 분석 준비 캐시(PREP_SECTIONS)와 무관. 키는 환경변수로만 받는다.
 auth:
-  session_ttl_seconds: 28800
-  idle_ttl_seconds: 1800
-  recovery_ttl_seconds: 600
-  csrf_ttl_seconds: 3600
-  http_timeout_seconds: 10
-  password_min_length: 8
-  password_max_length: 1024
-  demo_password_min_length: 4
-  email_max_length: 254
-  token_max_length: 2048
-  rate_window_seconds: 300
-  rate_max_attempts: 5
-  max_sessions: 5000
-  nonce_bytes: 32
-  list_limit: 200
+  session_ttl_seconds: 28800        # 로그인 세션 최대 수명 (8시간). 세션 쿠키 수명도 같다
+  idle_ttl_seconds: 1800            # 요청이 이만큼 없으면 세션 만료 (30분)
+  recovery_ttl_seconds: 600         # 비밀번호 재설정 링크로 연 세션 수명 (10분)
+  csrf_ttl_seconds: 3600            # CSRF 토큰 유효 시간 (1시간)
+  http_timeout_seconds: 10          # Supabase 인증 서버 요청 제한 시간
+  password_min_length: 8            # 비밀번호 길이 하한 (로그인 켰을 때)
+  password_max_length: 1024         # 비밀번호 길이 상한
+  demo_password_min_length: 4       # 로그인을 끈 시연 모드에서 로그인 화면에 알려 주는 하한
+  email_max_length: 254             # 이메일 길이 상한 (RFC 5321)
+  token_max_length: 2048            # 세션 ID·메일 확인 토큰 길이 상한 (넘으면 바로 거부)
+  rate_window_seconds: 300          # 시도 횟수를 세는 창 (5분) — 로그인·가입/재설정 메일·AI 보고서
+  rate_max_attempts: 5              # 창 안 최대 시도 수 (종류마다, 접속 주소별·AI 보고서는 사용자별)
+  max_sessions: 5000                # 서버에 보관하는 세션 수 상한
+  nonce_bytes: 32                   # 세션 ID·CSRF 서명 비밀값의 난수 바이트 수
+  list_limit: 200                   # 로그인 시 실행·탐색 목록 최대 행 수 (본인 소유만 거른 뒤)
