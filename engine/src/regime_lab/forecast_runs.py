@@ -61,7 +61,9 @@ def _split_valid(t: pd.DataFrame, va: pd.Series, holdout_share: float) -> tuple[
         return va, va & False
     first_pol = days[len(days) - n_pol]
     pol = va & (t["as_of"].dt.normalize() >= first_pol)
-    return va & ~pol, pol
+    # 보정 표본 중 목표가 판정 구간에 실현되는 것은 판정 구간 가격을 보므로 뺀다 (seongmin-claude #54 제안)
+    cal = va & ~pol & (t["realized_at"] < first_pol)
+    return cal, pol
 
 
 def _date_split(as_of: pd.Series, cfg: dict) -> np.ndarray:
