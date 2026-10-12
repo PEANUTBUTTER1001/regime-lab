@@ -1,7 +1,7 @@
 // Strategy Builder (FR-U1, FR-X5, design.md §6.2). 기본값·허용 범위는 모두 /api/meta 에서 받는다.
 // 입력 검증은 전송 전(여기)과 서버(422) 양쪽에서 한다. 서버 오류 필드는 같은 입력칸 아래에 표시한다.
 import { api } from '../api.js';
-import { errorView, fmt, h, loading, toast } from '../components/ui.js';
+import { errorView, fmt, h, helpTip, loading, toast } from '../components/ui.js';
 import { has, t } from '../i18n.js';
 import { state } from '../state.js';
 
@@ -169,17 +169,25 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
   const patternChecks = meta.patterns.map((p) => {
     const box = h('input', { type: 'checkbox', checked: f.patterns.includes(p.name), 'aria-label': patLabel(p), 'aria-describedby': described('patterns') });
     const rule = meta.pattern_params?.[p.name] ? t('pp.baseRule', { r: patRule(p) }) : patRule(p);
-    const lab = h('label', { class: `check${f.patterns.includes(p.name) ? ' selected' : ''}` }, box, h('span', {}, patLabel(p), h('small', {}, rule)));
+    const lab = h('label', { class: `check${f.patterns.includes(p.name) ? ' selected' : ''}` }, box,
+      h('span', {}, patLabel(p), has(`pd.${p.name}`) && h('small', {}, t(`pd.${p.name}`)), h('small', { class: 'rule-text' }, rule)));
     box.addEventListener('change', () => {
       f.patterns = meta.patterns.map((q) => q.name).filter((n) => (n === p.name ? box.checked : f.patterns.includes(n)));
       lab.classList.toggle('selected', box.checked); renderPP(); save();
     });
     return lab;
   });
-  const buyCard = h('article', { class: 'card' }, h('h2', {}, t('b.buy')),
+  const patternList = h('div', { class: 'checks pattern-list', role: 'group', 'aria-label': t('b.patterns') }, patternChecks);
+  const rulesBtn = h('button', { type: 'button', class: 'secondary small', 'aria-pressed': 'false',
+    onclick: () => { const on = rulesBtn.getAttribute('aria-pressed') !== 'true'; rulesBtn.setAttribute('aria-pressed', String(on)); patternList.classList.toggle('show-rules', on); } }, t('b.showRules'));
+  // 3단계 흐름 (E18 2차): 언제 살까 → 언제 팔까 → 무엇을, 언제. 카드 대신 한 바탕 위에 구분선으로 나눈다
+  const step = (n, title, sub, ...children) => h('section', { class: 'flow-step', 'aria-labelledby': `flow-step-${n}` },
+    h('h2', { id: `flow-step-${n}` }, h('span', { class: 'step-no', 'aria-hidden': 'true' }, String(n)), title, h('small', {}, sub)), ...children);
+  const buyStep = step(1, t('b.step1'), t('b.buy'),
     h('p', { class: 'card-sub', text: t('b.buySub') }),
-    h('span', { class: 'label' }, t('b.logic')), seg,
-    h('div', { class: 'checks', role: 'group', 'aria-label': t('b.patterns') }, patternChecks), errorSlot('patterns'), ppBox);
+    h('div', { class: 'label-row' }, h('span', { class: 'label' }, t('b.logic')), helpTip(t('help.combine'), t('b.logic'))), seg,
+    h('div', { class: 'pattern-head' }, h('span', { class: 'label' }, t('b.patterns')), rulesBtn),
+    patternList, errorSlot('patterns'), ppBox);
 
   // ---------------------------------------------------------------- Exit rules
   const numInput = (id, key, value, mode = 'decimal') => h('input', { id, inputmode: mode, value: String(value ?? ''), 'aria-describedby': described(key),
@@ -197,7 +205,7 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     return h('span', { class: 'opt' }, box, h('span', { class: 'muted', style: { fontSize: '11px' } }, t('b.use')));
   };
   const lim = meta.exit_limits;
-  const exitCard = h('article', { class: 'card' }, h('h2', {}, t('b.exit')),
+  const exitStep = step(2, t('b.step2'), t('b.exit'),
     h('p', { class: 'card-sub', text: t('b.exitSub') }),
     h('div', { class: 'field-two' },
       h('div', {}, h('label', { for: 'stop' }, t('b.stop')), stopIn, useToggle('useStop', stopIn, t('b.stopWord')),
@@ -206,15 +214,19 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
         h('p', { class: 'hint', text: `+${lim.take_profit_pct[0]} ~ +${lim.take_profit_pct[1]}` }), errorSlot('exit.take_profit_pct'))),
     h('div', { class: 'field-two' },
       h('div', {}, h('label', { for: 'hold' }, t('b.hold')), holdIn,
-        h('p', { class: 'hint', text: t('b.holdHint', { a: lim.max_hold_days[0], b: lim.max_hold_days[1] }) }), errorSlot('exit.max_hold_days')),
-      h('div', {}, h('label', { for: 'trail' }, t('b.trail')), trailIn, useToggle('useTrail', trailIn, t('b.trailWord')),
-        h('p', { class: 'hint', text: t('b.trailHint2', { a: lim.trailing_stop_pct[0], b: lim.trailing_stop_pct[1] }) }), errorSlot('exit.trailing_stop_pct'))),
-    h('div', { class: 'field-two' },
-      h('div', {}, h('label', { for: 'be' }, t('b.be')), beIn, useToggle('useBe', beIn, t('b.beWord')),
-        h('p', { class: 'hint', text: t('b.beHint', { a: lim.breakeven_trigger_pct[0], b: lim.breakeven_trigger_pct[1] }) }), errorSlot('exit.breakeven_trigger_pct')),
-      h('div', {}, h('label', { for: 'maWin' }, t('b.maExit')), maIn, useToggle('useMa', maIn, t('b.maWord')),
-        h('p', { class: 'hint', text: t('b.maHint', { a: lim.ma_exit_window[0], b: lim.ma_exit_window[1] }) }), errorSlot('exit.ma_exit_window'))),
-    h('div', { class: 'callout info', style: { marginTop: '16px' } }, t('b.exitCallout')));
+        h('p', { class: 'hint', text: t('b.holdHint', { a: lim.max_hold_days[0], b: lim.max_hold_days[1] }) }), errorSlot('exit.max_hold_days'))),
+    // 하나라도 켜져 있으면 펼친 채로 시작한다
+    h('details', { class: 'more', open: f.useTrail || f.useBe || f.useMa ? true : null },
+      h('summary', {}, t('b.moreExits')),
+      h('div', { class: 'field-two' },
+        h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'trail' }, t('b.trail')), helpTip(t('help.trail'), t('b.trailWord'))), trailIn, useToggle('useTrail', trailIn, t('b.trailWord')),
+          h('p', { class: 'hint', text: t('b.trailHint2', { a: lim.trailing_stop_pct[0], b: lim.trailing_stop_pct[1] }) }), errorSlot('exit.trailing_stop_pct')),
+        h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'be' }, t('b.be')), helpTip(t('help.be'), t('b.beWord'))), beIn, useToggle('useBe', beIn, t('b.beWord')),
+          h('p', { class: 'hint', text: t('b.beHint', { a: lim.breakeven_trigger_pct[0], b: lim.breakeven_trigger_pct[1] }) }), errorSlot('exit.breakeven_trigger_pct'))),
+      h('div', { class: 'field-two' },
+        h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'maWin' }, t('b.maExit')), helpTip(t('help.maExit'), t('b.maWord'))), maIn, useToggle('useMa', maIn, t('b.maWord')),
+          h('p', { class: 'hint', text: t('b.maHint', { a: lim.ma_exit_window[0], b: lim.ma_exit_window[1] }) }), errorSlot('exit.ma_exit_window'))),
+      h('div', { class: 'callout info', style: { margin: '16px 0' } }, t('b.exitCallout'))));
 
   // ---------------------------------------------------------------- Universe & period
   const multi = (key, options, labelOf, groupLabel) => h('div', { class: 'inline-checks', role: 'group', 'aria-label': groupLabel },
@@ -229,17 +241,16 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
   const valueIn = h('input', { id: 'value', inputmode: 'numeric', value: String(f.minValue), 'aria-describedby': described('min_avg_value_krw'),
     oninput: (e) => { f.minValue = e.target.value.replace(/[,\s]/g, ''); save(true); } });
   const previewBox = h('div', { class: 'callout', style: { marginTop: '18px' }, 'aria-live': 'polite' }, t('b.estimating'));
-  const uniCard = h('article', { class: 'card' }, h('h2', {}, t('b.uni')),
+  const uniStep = step(3, t('b.step3'), t('b.uni'),
     h('p', { class: 'card-sub', text: t('b.uniSub') }),
     h('span', { class: 'label' }, t('b.market')), multi('markets', meta.markets, (m) => m, t('b.market')), errorSlot('markets'),
     h('div', { class: 'field-two' },
       h('div', {}, h('label', { for: 'start' }, t('b.start')), dateIn('start', 'start'), errorSlot('period.start')),
       h('div', {}, h('label', { for: 'end' }, t('b.end')), dateIn('end', 'end'), errorSlot('period.end'))),
     errorSlot('period'),
-    h('label', { for: 'value' }, t('b.value')), valueIn,
+    h('div', { class: 'label-row' }, h('label', { for: 'value' }, t('b.value')), helpTip(t('help.minValue'), t('b.value'))), valueIn,
     h('p', { class: 'hint', text: t('b.valueHint', { v: fmt.int(meta.min_avg_value_krw) }) }), errorSlot('min_avg_value_krw'),
-    h('span', { class: 'label' }, t('b.cap')), multi('caps', meta.cap_groups, (c) => t(`cap.${c}`), t('b.cap')), errorSlot('cap_groups'),
-    previewBox);
+    h('div', { class: 'label-row' }, h('span', { class: 'label' }, t('b.cap')), helpTip(t('help.cap'), t('b.cap'))), multi('caps', meta.cap_groups, (c) => t(`cap.${c}`), t('b.cap')), errorSlot('cap_groups'));
 
   // ---------------------------------------------------------------- Run bar
   const nameIn = h('input', { id: 'sname', value: f.name, style: { maxWidth: '260px' }, 'aria-describedby': described('name'),
@@ -250,7 +261,7 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
       h('div', { class: 'run-facts' },
         h('span', {}, h('b', {}, t('b.execution')), t('b.nextOpen')),
         h('span', {}, h('b', {}, t('b.cost')), `${cost}%`),
-        h('span', {}, h('b', {}, t('b.validation')), t('b.validationVal')))),
+        h('span', { class: 'with-tip' }, h('b', {}, t('b.validation')), t('b.validationVal'), helpTip(t('help.validation'), t('b.validation'), { up: true })))),
     runBtn);
 
   // ---------------------------------------------------------------- 저장한 조합 (P1-10)
@@ -292,17 +303,40 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
   }
   saveNewBtn.addEventListener('click', () => savePreset(false));
   overwriteBtn.addEventListener('click', () => savePreset(true));
-  const presetCard = h('article', { class: 'card', style: { marginTop: '18px' } }, h('h2', {}, t('pb.title')), presetStatus,
+  const presetBlock = h('div', { class: 'sum-preset' }, h('h3', {}, t('pb.title')), presetStatus,
     h('label', { for: 'pname' }, t('pb.name')), presetName, presetErr,
-    h('div', { class: 'actions', style: { justifyContent: 'flex-start' } }, saveNewBtn, overwriteBtn,
+    h('div', { class: 'actions' }, saveNewBtn, overwriteBtn,
       h('a', { class: 'secondary', href: '#/presets' }, t('pb.list'))));
+
+  // ---------------------------------------------------------------- 내 전략 요약 (E18 2차)
+  // 입력값을 문장으로 옮겨 적기만 한다 (계산·판단 없음)
+  const sumBuy = h('dd', {});
+  const sumSell = h('dd', {});
+  const sumScope = h('dd', {});
+  function renderSummary() {
+    const names = meta.patterns.filter((p) => f.patterns.includes(p.name)).map(patLabel);
+    sumBuy.textContent = names.length ? t(f.combine === 'and' ? 'b.sumAnd' : 'b.sumOr', { p: names.join(', ') }) : t('b.sumNoPattern');
+    const sell = [];
+    if (f.useStop) sell.push(`${t('b.stopWord')} ${f.stop}%`);
+    if (f.useProfit) sell.push(`${t('b.profitWord')} +${f.profit}%`);
+    sell.push(t('b.sumHold', { d: f.hold }));
+    if (f.useTrail) sell.push(`${t('b.trailWord')} ${f.trail}%`);
+    if (f.useBe) sell.push(`${t('b.beWord')} +${f.be}%`);
+    if (f.useMa) sell.push(t('r.exMa', { v: f.maWin }));
+    sumSell.textContent = sell.join(' · ');
+    sumScope.textContent = [f.markets.join(' + ') || '—', f.caps.map((c) => t(`cap.${c}`)).join(', ') || '—', `${f.start} ~ ${f.end}`].join(' · ');
+  }
+  const summary = h('aside', { class: 'builder-summary', 'aria-labelledby': 'builder-summary-title' },
+    h('h2', { id: 'builder-summary-title' }, t('b.sumTitle')),
+    h('dl', { class: 'sum-list' }, h('dt', {}, t('b.sumBuy')), sumBuy, h('dt', {}, t('b.sumSell')), sumSell, h('dt', {}, t('b.sumScope')), sumScope),
+    previewBox, presetBlock);
 
   el.append(
     h('div', { class: 'topline' },
       h('div', {}, h('div', { class: 'eyebrow' }, t('b.eyebrow')), h('h1', { text: t('b.title') }),
         h('p', { class: 'lead', text: t('b.lead') })),
       h('div', { class: 'notice' }, t('b.notice', { c: cost, d: meta.data_as_of }))),
-    h('div', { class: 'grid-three' }, buyCard, exitCard, uniCard), presetCard, runbar);
+    h('div', { class: 'builder-layout' }, h('div', { class: 'flow' }, buyStep, exitStep, uniStep), summary), runbar);
 
   // ---------------------------------------------------------------- behaviour
   let previewTimer;
@@ -335,6 +369,7 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
   function save(universeChanged = false) {
     state.draft = { ...f };
     renderPresetStatus();
+    renderSummary();
     if (Object.keys(errs).length) showErrors(validate(f, meta));
     if (universeChanged) { clearTimeout(previewTimer); previewTimer = setTimeout(refreshPreview, 350); }
   }
@@ -375,6 +410,7 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
   });
 
   renderPresetStatus();
+  renderSummary();
   refreshPreview();
   return () => clearTimeout(previewTimer);
 }

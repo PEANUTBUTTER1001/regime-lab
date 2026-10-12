@@ -1,7 +1,7 @@
 // 역방향 백테스트 (P1-8, 설계 §3·§4, plan/01 작업 ②). 입력 → 진행 → 결과 세 화면.
 // 허용 값·기본값은 /api/searches/options, 후보 수·예상 시간은 /api/searches/preview 에서 받는다. 화면은 계산하지 않는다.
 import { api } from '../api.js';
-import { errorView, fmt, h, linkButton, loading, metricDefs, pill, table, toast } from '../components/ui.js';
+import { errorView, fmt, h, helpTip, linkButton, loading, metricDefs, pill, table, toast } from '../components/ui.js';
 import { has, t } from '../i18n.js';
 import { state } from '../state.js';
 
@@ -112,12 +112,15 @@ export async function renderSearch(el) {
   const minIn = numIn('s-min', 'minTrades', 'numeric');
   targetIn.setAttribute('aria-describedby', slotId('target_win_rate'));
   minIn.setAttribute('aria-describedby', slotId('min_trades'));
-  const goalCard = h('article', { class: 'card' }, h('h2', {}, t('sx.goal')),
-    h('p', { class: 'card-sub', text: t('sx.goalSub') }),
-    h('label', { for: 's-target' }, t('sx.target')), targetIn, errorSlot('target_win_rate'),
-    h('label', { for: 's-min' }, t('sx.minTrades')), minIn,
-    h('p', { class: 'hint', text: t('sx.minTradesHint', { a: opt.min_trades.min, b: opt.min_trades.max, d: opt.min_trades.default }) }),
-    errorSlot('min_trades'));
+  const nameIn = h('input', { id: 's-name', value: f.name, 'aria-describedby': slotId('name'),
+    oninput: (e) => { f.name = e.target.value.trim(); changed(); } });
+  const goalRow = h('section', { class: 'goal-row', 'aria-label': t('sx.goal') },
+    h('div', {}, h('label', { for: 's-name' }, t('sx.name')), nameIn, errorSlot('name')),
+    h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 's-target' }, t('sx.target')), helpTip(t('sx.goalSub'), t('sx.target'))),
+      targetIn, errorSlot('target_win_rate')),
+    h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 's-min' }, t('sx.minTrades')), helpTip(t('help.minTrades'), t('sx.minTrades'))), minIn,
+      h('p', { class: 'hint', text: t('sx.minTradesHint', { a: opt.min_trades.min, b: opt.min_trades.max, d: opt.min_trades.default }) }),
+      errorSlot('min_trades')));
 
   // 패턴 수치 축 (P1-4): 고른 패턴 중 탐색할 수 있는 수치마다 값 칩
   f.pax = f.pax || {};
@@ -148,7 +151,7 @@ export async function renderSearch(el) {
   const rangeCard = h('article', { class: 'card' }, h('h2', {}, t('sx.range')),
     h('p', { class: 'card-sub', text: t('sx.rangeSub') }),
     h('span', { class: 'label' }, t('b.patterns')),
-    h('div', { class: 'checks', role: 'group', 'aria-label': t('b.patterns') }, opt.patterns.map((p) => {
+    h('div', { class: 'checks range-patterns', role: 'group', 'aria-label': t('b.patterns') }, opt.patterns.map((p) => {
       const box = h('input', { type: 'checkbox', checked: f.patterns.includes(p), 'aria-label': patLabel(p), 'aria-describedby': slotId('axes.patterns') });
       const lab = h('label', { class: `check${f.patterns.includes(p) ? ' selected' : ''}` }, box, patLabel(p));
       box.addEventListener('change', () => {
@@ -159,17 +162,18 @@ export async function renderSearch(el) {
       });
       return lab;
     })), errorSlot('axes.patterns'), paxBox,
-    h('span', { class: 'label' }, t('sx.combine')), multi('combine', opt.axes.combine, (c) => c.toUpperCase(), t('sx.combine'), 'axes.combine'), errorSlot('axes.combine'),
-    h('span', { class: 'label' }, t('sx.stop')), multi('stop', opt.axes.stop_loss_pct, pctLabel, t('sx.stop'), 'axes.stop'), errorSlot('axes.stop'),
-    h('span', { class: 'label' }, t('sx.profit')), multi('profit', opt.axes.take_profit_pct, pctLabel, t('sx.profit'), 'axes.profit'), errorSlot('axes.profit'),
-    h('span', { class: 'label' }, t('sx.hold')), multi('hold', opt.axes.max_hold_days, (d) => String(d), t('sx.hold'), 'axes.hold'), errorSlot('axes.hold'));
+    h('div', { class: 'range-axes' },
+      h('div', {}, h('span', { class: 'label' }, t('sx.combine')), multi('combine', opt.axes.combine, (c) => c.toUpperCase(), t('sx.combine'), 'axes.combine'), errorSlot('axes.combine')),
+      h('div', {}, h('span', { class: 'label' }, t('sx.stop')), multi('stop', opt.axes.stop_loss_pct, pctLabel, t('sx.stop'), 'axes.stop'), errorSlot('axes.stop')),
+      h('div', {}, h('span', { class: 'label' }, t('sx.profit')), multi('profit', opt.axes.take_profit_pct, pctLabel, t('sx.profit'), 'axes.profit'), errorSlot('axes.profit')),
+      h('div', {}, h('span', { class: 'label' }, t('sx.hold')), multi('hold', opt.axes.max_hold_days, (d) => String(d), t('sx.hold'), 'axes.hold'), errorSlot('axes.hold'))));
 
   // ---------------------------------------------------------------- 대상·기간
   const dateIn = (id, key) => h('input', { id, type: 'date', value: f[key], min: meta.backtest_start, max: meta.data_as_of,
     'aria-describedby': slotId('filters.period'), onchange: (e) => { f[key] = e.target.value; changed(); } });
   const valueIn = h('input', { id: 's-value', inputmode: 'numeric', value: String(f.minValue), 'aria-describedby': slotId('filters.min_avg_value_krw'),
     oninput: (e) => { f.minValue = e.target.value.replace(/[,\s]/g, ''); changed(); } });
-  const scopeCard = h('article', { class: 'card' }, h('h2', {}, t('sx.scope')),
+  const scopeCard = h('article', { class: 'card' }, h('h2', { class: 'with-tip' }, t('sx.scope'), helpTip(t('help.periods'), t('sx.scope'))),
     h('p', { class: 'card-sub', text: t('sx.scopeSub', { d: opt.split_date }) }),
     h('span', { class: 'label' }, t('b.market')), multi('markets', meta.markets, (m) => m, t('b.market'), 'filters.markets'), errorSlot('filters.markets'),
     h('div', { class: 'field-two' },
@@ -180,21 +184,23 @@ export async function renderSearch(el) {
     h('p', { class: 'hint', text: t('b.valueHint', { v: fmt.int(meta.min_avg_value_krw) }) }), errorSlot('filters.min_avg_value_krw'),
     h('span', { class: 'label' }, t('b.cap')), multi('caps', meta.cap_groups, (c) => t(`cap.${c}`), t('b.cap'), 'filters.cap_groups'), errorSlot('filters.cap_groups'));
 
-  // ---------------------------------------------------------------- 실행 막대
-  const nameIn = h('input', { id: 's-name', value: f.name, style: { maxWidth: '260px' }, 'aria-describedby': slotId('name'),
-    oninput: (e) => { f.name = e.target.value.trim(); changed(); } });
-  const countBox = h('div', { 'aria-live': 'polite', class: 'run-facts', style: { display: 'block' } }, t('sx.counting'));
+  // ---------------------------------------------------------------- 실행 (오른쪽 아래 고정 버튼, 스크롤해도 같은 자리)
+  const countBox = h('div', { 'aria-live': 'polite', class: 'fab-info' }, t('sx.counting'));
   const serverBox = h('div', { class: 'callout hidden', role: 'alert' });
   const runBtn = h('button', { class: 'primary', type: 'button' }, `${t('sx.run')} `, h('span', { 'aria-hidden': 'true' }, '→'));
-  const runbar = h('div', { class: 'runbar' },
-    h('div', {}, h('label', { for: 's-name', style: { margin: '0 0 4px' } }, t('sx.name')), nameIn, errorSlot('name'), countBox),
-    runBtn);
+  const fab = h('div', { class: 'fab-run' }, countBox, runBtn);
 
+  // 제목 줄 오른쪽: 최근 탐색 기록 버튼 → 버튼 아래 펼침 목록
+  const histToggle = historyToggle();
   el.append(
-    h('div', { class: 'topline' },
-      h('div', {}, h('div', { class: 'eyebrow' }, t('sx.eyebrow')), h('h1', { text: t('sx.title') }), h('p', { class: 'lead', text: t('sx.lead') })),
+    h('div', { class: 'search-head' },
+      h('div', { class: 'eyebrow' }, t('sx.eyebrow')),
+      h('div', { class: 'title-row' }, h('h1', { text: t('sx.title') }), histToggle.wrap),
+      h('p', { class: 'lead', text: t('sx.lead') }),
       h('div', { class: 'notice' }, t('sx.notice', { s: opt.split_date, e: dayAfter(opt.split_date), n: opt.max_candidates }))),
-    h('div', { class: 'grid-three' }, goalCard, rangeCard, scopeCard), serverBox, runbar);
+    goalRow,
+    h('div', { class: 'search-grid' }, rangeCard, scopeCard), serverBox,
+    h('div', { class: 'fab-spacer', 'aria-hidden': 'true' }), fab);
 
   // ---------------------------------------------------------------- 동작
   let timer;
@@ -219,7 +225,7 @@ export async function renderSearch(el) {
       if (my !== seq) return;
       withinLimit = p.within_limit;
       countBox.replaceChildren(p.within_limit
-        ? h('span', {}, h('b', {}, t('sx.count', { n: fmt.int(p.candidates), t: duration(p.estimated_sec) })), h('br'), h('small', { class: 'muted' }, t('sx.countSub')))
+        ? h('span', { class: 'with-tip' }, h('b', {}, t('sx.count', { n: fmt.int(p.candidates), t: duration(p.estimated_sec) })), helpTip(t('sx.countSub'), t('sx.estimate'), { up: true }))
         : h('b', { class: 'warning' }, t('sx.over', { n: fmt.int(p.candidates), m: p.max_candidates })));
     } catch (err) {
       if (my === seq) { withinLimit = false; countBox.textContent = t('sx.countErr', { m: err.message }); }
@@ -267,29 +273,44 @@ export async function renderSearch(el) {
   });
 
   refreshCount();
-  renderHistory(el);
-  return () => clearTimeout(timer);
+  return () => { clearTimeout(timer); histToggle.dispose(); };
 }
 
-// 최근 탐색 기록 (plan/01 작업 ③-3): 과거 탐색을 다시 연다. 목록 값은 /api/searches 상태 그대로
+// 최근 탐색 기록 (plan/01 작업 ③-3): 과거 탐색을 다시 연다. 목록 값은 /api/searches 상태 그대로.
+// 제목 줄 오른쪽 버튼을 누르면 버튼 아래에 펼친다. Esc·바깥 클릭으로 닫고, Esc 는 초점을 버튼으로 돌린다.
 const RUN_KIND = { completed: '', cancelled: 'warn', failed: 'bad', running: 'neutral', queued: 'neutral' };
-async function renderHistory(el) {
-  const box = h('section', { style: { marginTop: '26px' } }, h('h2', {}, t('sh.title')));
-  el.append(box);
-  let list;
-  try { list = (await api.searches()).searches; } catch (e) { box.append(h('p', { class: 'muted', text: e.message })); return; }
-  if (!list.length) { box.append(h('p', { class: 'muted', text: t('sh.empty') })); return; }
-  const href = (s) => (s.status === 'running' || s.status === 'queued' ? `#/searches/${s.search_id}/progress` : `#/searches/${s.search_id}/results`);
-  box.append(h('article', { class: 'card', style: { marginTop: '12px' } }, table({
-    caption: t('sh.caption'),
-    columns: [
-      { label: t('sh.col.name'), render: (s) => h('a', { href: href(s) }, s.name) },
-      { label: t('sh.col.status'), render: (s) => pill(has(`sh.st.${s.status}`) ? t(`sh.st.${s.status}`) : s.status, RUN_KIND[s.status] ?? 'neutral') },
-      { label: t('sh.col.created'), render: (s) => s.created_at.replace('T', ' ') },
-      { label: t('sh.col.id'), render: (s) => h('small', { class: 'muted' }, s.search_id) },
-    ],
-    rows: list.filter((s) => s.status !== 'failed' || s.error),
-  })));
+function historyToggle() {
+  const panel = h('div', { class: 'history-panel', id: 'search-history', hidden: true, role: 'region', 'aria-label': t('sh.title') });
+  const btn = h('button', { type: 'button', class: 'secondary', 'aria-expanded': 'false', 'aria-controls': 'search-history' }, t('sh.title'));
+  const wrap = h('div', { class: 'history-wrap' }, btn, panel);
+  const close = (refocus = false) => {
+    panel.hidden = true; btn.setAttribute('aria-expanded', 'false');
+    if (refocus) btn.focus();
+  };
+  async function open() {
+    panel.hidden = false; btn.setAttribute('aria-expanded', 'true');
+    panel.replaceChildren(loading());
+    let list;
+    try { list = (await api.searches()).searches; } catch (e) { panel.replaceChildren(h('p', { class: 'muted', text: e.message })); return; }
+    if (!list.length) { panel.replaceChildren(h('p', { class: 'muted', text: t('sh.empty') })); return; }
+    const href = (s) => (s.status === 'running' || s.status === 'queued' ? `#/searches/${s.search_id}/progress` : `#/searches/${s.search_id}/results`);
+    panel.replaceChildren(table({
+      caption: t('sh.caption'),
+      columns: [
+        { label: t('sh.col.name'), render: (s) => h('a', { href: href(s) }, s.name) },
+        { label: t('sh.col.status'), render: (s) => pill(has(`sh.st.${s.status}`) ? t(`sh.st.${s.status}`) : s.status, RUN_KIND[s.status] ?? 'neutral') },
+        { label: t('sh.col.created'), render: (s) => s.created_at.replace('T', ' ') },
+        { label: t('sh.col.id'), render: (s) => h('small', { class: 'muted' }, s.search_id) },
+      ],
+      rows: list.filter((s) => s.status !== 'failed' || s.error),
+    }));
+  }
+  btn.addEventListener('click', () => (panel.hidden ? open() : close()));
+  const onKey = (e) => { if (e.key === 'Escape' && !panel.hidden) close(true); };
+  const onClick = (e) => { if (!panel.hidden && !wrap.contains(e.target)) close(); };
+  document.addEventListener('keydown', onKey);
+  document.addEventListener('click', onClick);
+  return { wrap, dispose: () => { document.removeEventListener('keydown', onKey); document.removeEventListener('click', onClick); } };
 }
 
 // ================================================================ 진행 화면 (#/searches/:id/progress)
