@@ -207,9 +207,18 @@ def count_candidates(req: SearchRequest) -> int:
     return combos * len(a["stop_loss_pct"]) * len(a["take_profit_pct"]) * len(a["max_hold_days"])
 
 
-def estimate_seconds(n_candidates: int, cfg: dict) -> float:
-    """실행 전 예상 시간 (탐색 구간 전 후보 기준, NFR-14). 평가 구간 재평가 수는 실행 전에 알 수 없다."""
-    return round(n_candidates * float(cfg["search"]["sec_per_candidate"]), 1)
+def estimate_seconds(n_candidates: int, cfg: dict, n_tickers: int | None = None) -> float:
+    """실행 전 예상 시간 (탐색 구간 전 후보 기준, NFR-14). 평가 구간 재평가 수는 실행 전에 알 수 없다.
+
+    후보당 시간은 실측(sec_per_candidate, 전 종목 sec_per_candidate_tickers 개 기준)을 종목 수에 비례해 줄이고,
+    고정 비용 하한 min_sec_per_candidate 을 둔다. n_tickers 가 없으면(전 종목) 실측값 그대로.
+    예: sample30 52후보 → 약 5초 (실측 3초), 전 종목 57후보 → 142.5초 (실측 2.27초/후보).
+    """
+    s = cfg["search"]
+    per = float(s["sec_per_candidate"])
+    if n_tickers is not None:
+        per = max(float(s["min_sec_per_candidate"]), per * n_tickers / float(s["sec_per_candidate_tickers"]))
+    return round(n_candidates * per, 1)
 
 
 def generate_candidates(req: SearchRequest, period: dict | None = None) -> list[Strategy]:
