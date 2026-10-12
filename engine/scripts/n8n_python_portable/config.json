@@ -1,0 +1,46 @@
+{
+  "spreadsheet_id": "YOUR_SPREADSHEET_ID",
+  "sheet_ids": {
+    "raw": 0,
+    "briefing": 1,
+    "stocks": 2
+  },
+  "storage": "google_sheets",
+  "gemini_model": "gemini-3.5-flash-lite",
+  "sources": {
+    "hankyung": true,
+    "mk": true,
+    "naver": true,
+    "dart": true
+  },
+  "rss_urls": {
+    "hankyung": "https://www.hankyung.com/feed/finance",
+    "mk": "https://www.mk.co.kr/rss/50200011/"
+  },
+  "naver_url": "https://naverapihub.apigw.ntruss.com/search/v1/news",
+  "naver_queries": [
+    "실적 전망",
+    "공급계약",
+    "목표주가",
+    "유상증자"
+  ],
+  "naver_display": 30,
+  "dart_page_count": 10,
+  "rss_limit_per_source": 50,
+  "news_limit": 30,
+  "disclosure_limit": 10,
+  "lookback_days": 7,
+  "batch_size": 5,
+  "request_interval_seconds": 0.5,
+  "news_batch_wait_seconds": 10,
+  "disclosure_batch_wait_seconds": 1,
+  "http_timeout_seconds": 20,
+  "article_timeout_seconds": 15,
+  "gemini_timeout_seconds": 120,
+  "http_attempts": 3,
+  "max_sync_rows": 25000,
+  "article_text_limit": 5000,
+  "schedule_kst": "09:10",
+  "disclaimer": "뉴스·공시를 정리한 참고 자료이며 실제 가격 전망이나 매매 신호가 아닙니다.",
+  "store_root": "output/db"
+}

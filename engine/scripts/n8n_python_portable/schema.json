@@ -1,0 +1,104 @@
+{
+  "type": "array",
+  "minItems": 1,
+  "maxItems": 1,
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "date": {
+        "type": "string"
+      },
+      "sector": {
+        "type": "string",
+        "enum": [
+          "반도체",
+          "IT·소프트웨어",
+          "바이오·헬스케어",
+          "자동차·배터리",
+          "조선·방산",
+          "에너지·화학",
+          "금융",
+          "소비재·유통",
+          "시장 공통 이슈",
+          "기타"
+        ]
+      },
+      "title": {
+        "type": "string"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "stocks": {
+        "type": "string"
+      },
+      "sources": {
+        "type": "string"
+      },
+      "is_relevant": {
+        "type": "boolean"
+      },
+      "relevance_reason": {
+        "type": "string",
+        "description": "기사의 포함/제외 이유. 이 필드명을 사용한다. stock_impacts 내부 reason과 구분한다."
+      },
+      "relevance_evidence": {
+        "type": "string"
+      },
+      "stock_impacts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "stock": {
+              "type": "string"
+            },
+            "impact": {
+              "type": "string",
+              "enum": [
+                "상승 요인",
+                "하락 요인",
+                "혼재",
+                "판단 어려움"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "uncertainty": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "stock",
+            "impact",
+            "reason",
+            "uncertainty",
+            "evidence"
+          ]
+        }
+      },
+      "reason": {
+        "type": "string",
+        "description": "기존 모델의 필드명 혼동 호환용. 새 출력은 relevance_reason을 사용한다."
+      }
+    },
+    "required": [
+      "date",
+      "sector",
+      "title",
+      "summary",
+      "stocks",
+      "sources",
+      "is_relevant",
+      "relevance_evidence",
+      "stock_impacts",
+      "relevance_reason"
+    ]
+  }
+}

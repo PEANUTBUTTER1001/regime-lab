@@ -1,0 +1,5 @@
+requests==2.34.2
+beautifulsoup4==4.15.0
+google-auth==2.61.0
+jsonschema==4.26.0
+pyarrow==23.0.1

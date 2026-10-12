@@ -1,0 +1,16 @@
+{
+  "export_date": "2026-10-12",
+  "workflows": [
+    {
+      "name": "My workflow",
+      "nodes": 55,
+      "sha256": "15f600a7791285fb2397c465dfea48fb6765ed0f5d38a27fe0d5b7856c5b1a55"
+    },
+    {
+      "name": "시트 → Python → DB 자동 동기화",
+      "nodes": 12
+    }
+  ],
+  "runtime": "Python only; no n8n or Node.js",
+  "company_snapshot": "2026-10-01"
+}
