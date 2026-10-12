@@ -78,6 +78,7 @@ def test_run_writes_contract_and_is_reproducible(cfg):
     m, pred, scores = store.runs[run_id]
     assert m["format_version"] == FORECAST_RUN_VERSION and m["horizon"] == 2 and m["codes"] == 3
     assert "매매 신호가 아닙니다" in m["notice"]
+    assert m["created_at"] == "2026-10-12T09:00:00+09:00" and set(m["versions"]) == {"scikit-learn", "numpy", "pandas"}
     assert list(pred.columns) == ["code", "as_of", "h", "split", "scored", "base_close", "q0.1", "q0.5", "q0.9",
                                   "p_up", "direction", "reason", "y", "cross_day"]
     assert set(pred["split"]) == {"test"} and set(pred["h"]) == {1, 2}
