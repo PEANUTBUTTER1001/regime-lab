@@ -196,13 +196,13 @@ uv run --project api regime-api
 
 | 화면 | 내용 |
 |---|---|
-| Login | UI 흐름만 제공합니다. 실제 인증은 하지 않습니다. **게스트 모드로 진행**을 누르면 가입 없이 바로 사용합니다 |
+| Login | 기본 데모 모드는 UI 흐름만 제공하며(실제 인증 없음) **게스트 모드로 진행**으로 바로 사용합니다. Supabase 모드(`REGIME_AUTH_MODE=supabase`)는 이메일·비밀번호 가입·로그인·비밀번호 재설정을 하고 게스트가 없습니다 |
 | Strategy Builder | 패턴·결합 방식·청산 규칙·시장·기간·거래대금 하한·시총 그룹 입력, 예상 대상 종목 수, 입력 검증(전송 전 + 서버) |
 | Progress | 서버가 보내는 단계·처리 수/전체 수·경과 시간만 표시하고, 실행을 취소할 수 있습니다 |
 | Results | 3중 검증(m 표시), 성과 카드, 자산곡선, 국면 × 시총 히트맵(표본 부족 빗금), 손익 분포, 기간 분할, 종목별 표 |
 | Stock Detail | 가격·이동평균·국면 배경·매매 마커, 종목 자산곡선과 단순 보유 비교, 거래 표 |
 | AI Report | 검증을 통과한 AI 해설(`verified`) 또는 템플릿(`fallback`), 근거 수치, 데이터 한계 |
-| Morning Briefing | 야간·뉴스 입력이 없어 `Data unavailable`과 사유만 표시합니다(추후 과제 T-2) |
+| Morning Briefing (사이드바 '시장 브리핑', 준비 중) | 야간·뉴스 입력이 없어 `Data unavailable`과 사유만 표시합니다(추후 과제 T-2) |
 | 설정 (⚙) | 화면 언어(한국어 기본 / English), **AI 보고서 모델명·API 키 입력**(서버 메모리에만 보관, 서버 종료 시 소멸 — 결정 E10 잠정, 추후 T-9 재논의), 데이터 기준일·범위 등 서버 데이터 정보 |
 
 **환경변수** (모두 선택)
@@ -216,11 +216,16 @@ uv run --project api regime-api
 | `REGIME_RUNS_DIR` | `runs/` | 실행 결과 폴더 |
 | `REGIME_CORS_ORIGINS` | 없음 | 개발용 추가 허용 출처(쉼표 구분). 기본은 같은 출처만 허용합니다 |
 | `REGIME_HOST` / `REGIME_PORT` | 127.0.0.1 / 8000 | 서버 주소 |
+| `REGIME_AUTH_MODE` | `demo` | `demo`(loopback 전용, 실제 인증 없음) 또는 `supabase`. Supabase 변수가 있으면 `supabase` |
+| `REGIME_SUPABASE_URL` / `REGIME_SUPABASE_PUBLISHABLE_KEY` | 없음 | Supabase 모드의 프로젝트 주소(HTTPS)와 공개 키(`sb_publishable_`). 파일에 적지 않습니다 |
+| `REGIME_AUTH_SITE_URL` | `http://127.0.0.1:<포트>` | 인증 메일 링크가 돌아올 주소. loopback 개발 주소 또는 HTTPS |
+| `REGIME_AUTH_STATE_DIR` | 없음 (Supabase 모드 필수) | 실행·탐색 소유자 기록 폴더. 저장소 밖의 지속 경로 |
+| `REGIME_AUTH_ADMIN_IDS` | 없음 | AI 보고서 설정(`/api/llm/config`)을 바꿀 수 있는 Supabase 사용자 ID(쉼표 구분). Supabase 모드에서 비어 있으면 아무도 바꿀 수 없습니다 |
 
 - API 명세는 `http://127.0.0.1:8000/docs`(OpenAPI)에서 볼 수 있습니다. 오류 응답은 모두 `{code, message, detail, retryable}` 형식입니다.
 - `GET/PUT/DELETE /api/llm/config`: AI 보고서 모델명·키 조회·적용·지우기. 응답에는 키 마지막 4자리만 담고, PUT·DELETE는 이 PC(루프백) 요청만 받습니다(`403 local_only`). 적용한 값은 서버 메모리에만 있고 재시작하면 환경변수 값으로 돌아갑니다. 보고서 캐시(`cache/llm_reports/`)는 유지되며 키를 담지 않습니다.
 - 실행은 한 번에 1개만 할 수 있습니다. 실행 중 새 요청은 `409 busy`와 현재 `run_id`를 받습니다.
-- 서버는 기본적으로 `127.0.0.1`에만 열립니다. 로그인이 실제 인증이 아니므로 외부에 공개하지 마세요.
+- 서버는 기본적으로 `127.0.0.1`에만 열립니다. 데모 모드는 실제 인증이 아니어서 loopback이 아닌 주소에서는 시작을 거부합니다. Supabase 모드도 배포·HTTPS 설정(X3.3)은 아직 하지 않았으므로 외부에 공개하지 마세요. 인증 API는 `/api/auth/*`이며 설계·운영 설정은 [`X3_로그인_설계.md`](X3_로그인_설계.md)에 있습니다.
 - 제품명 표기(`regime-lab`)는 `web/js/config.js` 한 곳에서 관리합니다.
 - **화면 언어**: 기본은 한국어입니다. 사이드바 맨 아래 **⚙ 설정**에서 한국어/English를 바꿀 수 있으며, 선택은 이 브라우저에 저장됩니다. AI 보고서 본문은 언어 설정과 관계없이 한국어입니다. 번역 문구는 `web/js/i18n.js`에 있습니다.
 
