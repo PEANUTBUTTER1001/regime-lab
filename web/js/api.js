@@ -63,4 +63,8 @@ export const api = {
   documents: (params) => request('GET', `/evidence/documents?${new URLSearchParams(params)}`),
   document: (id, params) => request('GET', `/evidence/documents/${encodeURIComponent(id)}?${new URLSearchParams(params)}`),
   coverage: (params) => request('GET', `/evidence/coverage?${new URLSearchParams(params)}`),
+  // 봉 예측 (P2-9·P2-10)
+  forecastRuns: () => request('GET', '/forecasts/runs'),
+  forecastStock: (runId, code, params) => request('GET', `/forecasts/runs/${encodeURIComponent(runId)}/stocks/${encodeURIComponent(code)}?${new URLSearchParams(params)}`),
+  forecastScores: (runId) => request('GET', `/forecasts/runs/${encodeURIComponent(runId)}/scores`),
 };

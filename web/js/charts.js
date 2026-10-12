@@ -58,6 +58,35 @@ export function lines(el, series, { ariaLabel, yName, percentBase = null } = {})
   return chart;
 }
 
+// 봉 예측 (P2-10, E17): 직전 종가 선 + 다음 h 봉의 회색 띠(10~90%)만 그린다. 예상 캔들·가운데 선은 그리지 않는다.
+// x축은 봉 순서(밤·휴장 공백 없이). 실제 종가가 있으면 점으로 겹친다.
+export function forecastBand(el, d, ariaLabel) {
+  const cats = [...d.history.map((p) => p.as_of.slice(5, 16).replace('T', ' ')), ...d.steps.map((s) => t('fc.step', { h: s.h }))];
+  const nh = d.history.length;
+  const pad = (arr) => [...Array(nh).fill(null), ...arr];
+  const chart = base(el, ariaLabel);
+  chart.setOption({
+    grid: { left: 64, right: 16, top: 42, bottom: 48 },
+    legend: { top: 0, right: 8, textStyle: { color: C.muted, fontSize: 11 }, data: [t('fc.hist'), t('fc.band'), t('fc.actual')] },
+    tooltip: { ...tooltip, valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })) },
+    xAxis: { type: 'category', data: cats, ...axisCommon, splitLine: { show: false }, axisLabel: { ...axisCommon.axisLabel, hideOverlap: true } },
+    yAxis: { type: 'value', scale: true, name: t('c.price'), nameTextStyle: { color: C.muted }, ...axisCommon },
+    series: [
+      { name: t('fc.hist'), type: 'line', showSymbol: false, data: [...d.history.map((p) => p.close), ...Array(d.steps.length).fill(null)],
+        lineStyle: { color: C.text, width: 1.6 }, itemStyle: { color: C.text } },
+      // 띠: 아래값(투명) 위에 (위값 − 아래값)을 쌓는다
+      { name: 'low', type: 'line', stack: 'band', showSymbol: false, silent: true, tooltip: { show: false },
+        data: pad(d.steps.map((s) => s.low)), lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 } },
+      { name: t('fc.band'), type: 'line', stack: 'band', showSymbol: false, data: pad(d.steps.map((s) => s.high - s.low)),
+        lineStyle: { opacity: 0 }, itemStyle: { color: C.gray }, areaStyle: { color: 'rgba(151,169,163,0.35)' },
+        tooltip: { valueFormatter: () => '' } },
+      { name: t('fc.actual'), type: 'scatter', symbol: 'diamond', symbolSize: 9, data: pad(d.steps.map((s) => s.actual)),
+        itemStyle: { color: C.amber, borderColor: '#0C1114', borderWidth: 1 } },
+    ],
+  });
+  return chart;
+}
+
 const REGIME_BG = { bull: 'rgba(136,230,188,0.08)', bear: 'rgba(239,143,143,0.09)' };
 
 export function price(el, d, ariaLabel) {
