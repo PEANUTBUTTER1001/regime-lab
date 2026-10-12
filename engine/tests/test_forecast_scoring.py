@@ -20,8 +20,11 @@ def test_policy_enabled_only_when_significant_and_better_than_baseline(cfg):
     p = direction_policy(y, up, coin, _cfg(cfg))
     assert p["valid_called"] == 100 and np.isclose(p["valid_hit"], 0.8) and p["p_value"] < 1e-6
     assert np.isclose(p["baseline_hit"], 0.5) and p["enabled"]
-    # 기준선이 방향을 하나도 안 내면 비교할 수 없어 표시 안 함
-    assert not direction_policy(y, up, flat, _cfg(cfg))["enabled"]
+    # 기준선이 방향을 하나도 안 내면 동전(0.5)과 비교 — 유의하게 0.5 보다 높으면 표시 (seongmin-claude #54)
+    fp = direction_policy(y, up, flat, _cfg(cfg))
+    assert fp["baseline_called"] == 0 and fp["baseline_hit"] is None and fp["enabled"]
+    weak = pd.Series([0.01] * 52 + [-0.01] * 48)         # 52% — 0.5 보다 높지만 유의하지 않음
+    assert not direction_policy(weak, up, flat, _cfg(cfg))["enabled"]
     # 표본이 min_called 보다 적으면 표시 안 함
     assert not direction_policy(y, up, coin, _cfg(cfg, min_called=101))["enabled"]
 
@@ -42,12 +45,17 @@ def test_policy_disabled_for_coin_flip(cfg):
 def test_validation_split_is_chronological_and_disjoint():
     days = pd.bdate_range("2026-02-02", periods=10)
     t = pd.DataFrame({"as_of": [d + pd.Timedelta(hours=h) for d in days for h in (10, 11)]})
+    t["realized_at"] = t["as_of"].shift(-1)  # h=1: 다음 봉 확정 시각 (하루 마지막 봉은 다음 거래일에 실현)
     va = pd.Series(True, index=t.index)
     va.iloc[:2] = False  # 첫날은 검증 아님
     cal, pol = _split_valid(t, va, 0.5)
-    assert not (cal & pol).any() and (cal | pol).equals(va)
+    assert not (cal & pol).any()
     assert t.loc[cal, "as_of"].max() < t.loc[pol, "as_of"].min()   # 앞부분 보정, 뒷부분 판정
     assert t.loc[pol, "as_of"].dt.normalize().nunique() == 4 or t.loc[pol, "as_of"].dt.normalize().nunique() == 5
+    # 보정 마지막 표본은 목표가 판정 첫날에 실현되므로 빠지고, 나머지는 보정 또는 판정에 든다 (seongmin-claude #54)
+    dropped = va & ~cal & ~pol
+    assert dropped.sum() == 1 and t.loc[dropped, "realized_at"].iloc[0] >= t.loc[pol, "as_of"].min().normalize()
+    assert (t.loc[cal, "realized_at"] < t.loc[pol, "as_of"].min().normalize()).all()
     # 검증 거래일이 하루뿐이면 판정 표본 없음 (표시 안 함으로 이어짐)
     one = pd.Series([False] * 18 + [True, True])
     c1, p1 = _split_valid(t, one, 0.5)

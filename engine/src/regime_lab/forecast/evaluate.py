@@ -62,6 +62,8 @@ def direction_policy(y: pd.Series, model_p_up: pd.Series, baseline_p_up: pd.Seri
     bn, bk = hits(baseline_p_up)
     p = float(binomtest(k, n, 0.5, alternative="greater").pvalue) if n else 1.0
     hit, base_hit = (k / n if n else None), (bk / bn if bn else None)
-    enabled = (n >= pcfg["min_called"] and p < pcfg["alpha"] and base_hit is not None and hit > base_hit)
+    # 기준선이 방향을 한 번도 안 내면(항상 "불확실") 동전과 같다고 보고 0.5 와 비교한다 (seongmin-claude #54)
+    base_cmp = base_hit if base_hit is not None else 0.5
+    enabled = (n >= pcfg["min_called"] and p < pcfg["alpha"] and hit > base_cmp)
     return {"enabled": bool(enabled), "valid_called": n, "valid_hit": hit, "p_value": p,
             "baseline_called": bn, "baseline_hit": base_hit, "min_called": pcfg["min_called"], "alpha": pcfg["alpha"]}
