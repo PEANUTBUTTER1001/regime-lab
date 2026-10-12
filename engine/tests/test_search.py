@@ -55,6 +55,13 @@ def test_default_request(cfg):
     assert cands[0].patterns == ["bb_lower_recover"] and cands[0].exit == {
         "stop_loss_pct": -8, "take_profit_pct": 20, "max_hold_days": 20}
     assert estimate_seconds(57, cfg) == pytest.approx(57 * cfg["search"]["sec_per_candidate"])
+    # 종목을 줄여 실행하면 종목 수에 비례, 하한 min_sec_per_candidate
+    sc = cfg["search"]
+    full = sc["sec_per_candidate_tickers"]
+    assert estimate_seconds(57, cfg, full) == pytest.approx(57 * sc["sec_per_candidate"])
+    assert estimate_seconds(52, cfg, 30) == pytest.approx(52 * sc["min_sec_per_candidate"])  # sample30: 하한
+    half = estimate_seconds(10, cfg, full // 2)
+    assert half == pytest.approx(round(10 * sc["sec_per_candidate"] * (full // 2) / full, 1))
 
 
 def test_candidate_order_ignores_input_order(cfg):
