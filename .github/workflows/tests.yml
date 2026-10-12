@@ -81,3 +81,21 @@ jobs:
           if not cases or missing or core_skipped:
               raise SystemExit(1)
           PY
+
+  portable-workflow:
+    name: Portable workflow / Python 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.11.29"
+          python-version: "3.12"
+          enable-cache: false
+      - name: Test standalone port with synthetic data only
+        run: |
+          mkdir -p cache
+          uv run --no-project --python 3.12 --with-requirements engine/scripts/n8n_python_portable/requirements-dev.txt python -m pytest engine/scripts/n8n_python_portable/portable_checks.py engine/scripts/n8n_python_portable/bridge_checks.py -q --basetemp cache/portable-tests
