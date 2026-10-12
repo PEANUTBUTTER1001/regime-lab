@@ -2,7 +2,7 @@
 // 순위·시점 판정은 모두 엔진(/api/evidence/search)이 하고, 화면은 입력을 넘기고 응답을 표시만 한다 (FR-X6).
 // 검색 조건은 주소(#/evidence?q=…)에 남겨 새로고침·뒤로 가기에도 같은 결과를 다시 연다.
 import { api } from '../api.js';
-import { errorView, fmt, h, loading, pill, stateView, table } from '../components/ui.js';
+import { errorView, fmt, h, helpTip, loading, pill, stateView, table } from '../components/ui.js';
 import { has, t } from '../i18n.js';
 
 const MODES = ['observed', 'historical_assumed'];
@@ -57,7 +57,7 @@ export async function renderEvidence(el, query) {
     h('label', { for: 'ev-q' }, t('ev.q')), qIn, errorSlot('q'),
     h('div', { class: 'field-two' },
       h('div', {}, h('label', { for: 'ev-asof' }, t('ev.asOf')), asOfIn, h('p', { class: 'hint', text: t('ev.asOfHint') }), errorSlot('as_of')),
-      h('div', {}, h('label', { for: 'ev-mode' }, t('ev.mode')), modeSel, h('p', { class: 'hint', text: t('ev.modeHint') }), errorSlot('mode'))),
+      h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'ev-mode' }, t('ev.mode')), helpTip(t('ev.modeHint'), t('ev.mode'))), modeSel, errorSlot('mode'))),
     h('div', { class: 'field-two' },
       h('div', {}, h('label', { for: 'ev-tickers' }, t('ev.tickers')), tickIn, h('p', { class: 'hint', text: t('ev.tickersHint') }), errorSlot('tickers')),
       h('div', {}, h('label', { for: 'ev-k' }, t('ev.k')), kSel, errorSlot('k'))),
