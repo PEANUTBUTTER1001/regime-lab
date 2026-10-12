@@ -49,6 +49,16 @@ function extraExits(ex) {
   return parts.length ? ` · ${parts.join(' · ')}` : '';
 }
 
+// 청산 사유별 건수 (API summary.exit_by_reason). 0건 사유는 숨기고 많은 순으로 — 선택 청산 규칙이 실제로 얼마나
+// 작동했는지 보이기 위함. 기준일 보유 중(end_of_data)은 집계 제외 거래라 따로 표시하지 않는다.
+function exitReasons(by) {
+  const rows = Object.entries(by || {}).filter(([k, n]) => n > 0 && k !== 'end_of_data').sort((a, b) => b[1] - a[1]);
+  if (!rows.length) return null;
+  const label = (k) => (has(`reason.${k}`) ? t(`reason.${k}`) : k);
+  return h('div', { class: 'exit-reasons', role: 'group', 'aria-label': t('r.exitReasons') },
+    h('span', { class: 'label' }, t('r.exitReasons')), ...rows.map(([k, n]) => pill(`${label(k)} ${fmt.int(n)}`, 'neutral')));
+}
+
 export async function renderResults(el, runId, query) {
   state.lastRun = runId;
   el.append(h('h1', { text: t('r.title') }), loading(t('r.loading')));
@@ -108,6 +118,8 @@ export async function renderResults(el, runId, query) {
     metric(t('r.m.sharpe'), fmt.num(m.sharpe, 3), t('r.m.sharpeSub')),
     metric(t('r.m.mdd'), fmt.pct(m.mdd, 1), t('r.m.mddSub'), 'negative'),
     metric(t('r.m.excl'), `${fmt.int(m.excluded_trades)} / ${fmt.int(m.skipped_entries)}`, t('r.m.exclSub'))));
+  const reasons = exitReasons(m.exit_by_reason);
+  if (reasons) el.append(reasons);
 
   // 자산곡선 + 히트맵
   const eqEl = h('div', { class: 'chart zoom' });

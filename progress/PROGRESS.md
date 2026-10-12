@@ -1,5 +1,45 @@
 # PROGRESS
 
+## 2026-10-08 18:37 KST (+09:00) — hongsungmin0315 백테스트 담당(10-08 오후 추가): 병합 반영·P3-13.3 선행조건·NXT-1 정리
+
+- 기준 develop `012ccad`(#44 까지), 열린 제 PR 0. 앞 10-08 항목의 "리뷰" 표기보다 아래 실제 병합 상태가 우선이다.
+
+### 병합 반영 (#36~#44)
+
+| PR | 내용 | 상태 |
+|---|---|---|
+| #36 | P3-13.1·13.2 자료 보관함·자료 상세 | 🟢 병합 |
+| #37 | 수집 범위 이력 coverage_log.parquet 내보내기 | 🟢 병합 |
+| #38 | NXT-1 실험 수치 정정(승률 ≤0.1%p·평균 초과 ≤0.01%p, 전 종목 미검증) | 🟢 병합 |
+| #39 | 보관함 수집 상태 표시(공백·부분을 0건과 구분) | 🟢 병합 |
+| #40 | PROGRESS 10-08 | 🟢 병합 |
+| #41 | 자료 상세 카드 간격·글자 크기 (헤드리스 Chrome 화면 확인) | 🟢 병합 |
+| #42 | 결과 화면 청산 사유별 건수 (app.css 충돌은 양쪽 규칙 유지로 해결) | 🟢 병합 |
+| #43 | 탐색 결과 화면 "null" 글자·선택 버튼 줄바꿈 수정 | 🟢 병합 |
+| #44 | (Seonghwanaa) bars.py — 리뷰 3건(tz-aware as_of·N7 종가·빈 결과 dtype) 반영 확인 GO | 🟢 병합 |
+
+### P3-13.3 영향 분석 차트·가중치 표 — ⏳ P3-12 결과 계약 대기 (구현 안 함)
+
+필요한 입력 (friends 채널 제안, P3-12 담당 확인 전):
+- 가중치 표: model_version, 목표(예: 다음 1거래일 지수 대비 초과수익), as_of_mode, 학습·검증·평가 기간, 기준선과 지표,
+  행마다 group_type(source_type·report_type·topic)·group·weight·direction·n_events·n_eval·eval_metric·ci_low·ci_high·sample_ok
+- 사건 표시: doc_id·ticker·available_at·연결 봉 시작(`bar.start > available_at`)·group·contribution (가격은 기존 /stocks 일봉)
+- 결과가 없을 때: status=no_model 과 "학습 결과 없음" 자리 (빈 화면 대신 이유 표시)
+
+대기 조건: P3-12 결과 형식 합의 → 합성 데이터로 엔진 읽기·API·화면 → 실제 결과로 확인. 10-18 동결 전 P3-12 가 없으면 no_model 자리만 둔다.
+
+### NXT-1 — A 적용 / B 실험만
+
+- A(한계 문서화): #35·#38 병합. README "알아 두실 한계" + 결정 §5.3 NXT-1
+- B(loader 보정): **미적용**. 실험 `exp/NXT-1-price-impact` ffe762f(병합 대상 아님)
+  - 비율: 같은 구간 t-1 일까지 최근 60일 close/close_raw 중앙값, 구간 = 직전 close_raw vs 당일 open_raw(>0) ±30%(정확히 30% 는 같은 구간)
+  - 입력 이용 가능 시점: t 일 일봉·원주가는 장 마감 뒤 확정 → t+1 일부터 사용
+  - `--self-check`(sample30): 절단 불변 True(37,646행), 당일 값 미사용 True. 결과 차이 승률 ≤0.1%p·평균 초과 ≤0.01%p
+  - 전 종목 실행 전 확인 조건: 구간 함수를 P2-4.3 `price_segments` 로 맞춤 · 전 종목 self-check · 원본 읽기 전용·캐시 미사용·집계만 · 실행 위치와 사람 승인
+- 생산 loader 보정·설정·PREP_VERSION 변경은 별도 결정 전 하지 않는다
+
+---
+
 ## 2026-10-08 16:27 KST (+09:00) — hongsungmin0315 백테스트 담당: P3-13 자료 보관함·수집 상태, NXT 가격 기준, P3-8 게시
 
 - 시작 시각: 2026-10-08 오전 (기록 시각 2026-10-08 16:27). Claude Code, Agent Relay friends 채널에서 codex-01a0fb4b·seonghwan-claude·hchee99-codex 와 협업
