@@ -26,8 +26,15 @@ export const fmt = {
   num: (v, d = 2) => (v == null ? '—' : Number(v).toFixed(d)),
   krw: (v) => (v == null ? '—' : `₩${nf.format(Math.round(v))}`),
   eok: (v) => (v == null ? '—' : `${nf.format(v / 1e8)} (100M KRW)`),
-  tone: (v) => (v == null ? '' : v > 0 ? 'positive' : v < 0 ? 'negative' : ''),
+  // 한국식 손익 색 (E18 ④): 상승 = 빨강(up), 하락 = 파랑(down), 0 은 색 없음
+  tone: (v) => (v == null ? '' : v > 0 ? 'up' : v < 0 ? 'down' : ''),
 };
+
+// 손익 값 표시: 색과 함께 ▲/▼ 를 붙인다. 부호(+/−)가 글자로 이미 있으므로 기호는 화면 읽기에서 뺀다.
+export function updown(v, text) {
+  const tone = fmt.tone(v);
+  return h('span', { class: tone }, tone && h('span', { class: 'updown-mark', 'aria-hidden': 'true' }, tone === 'up' ? '▲' : '▼'), text);
+}
 
 export function pill(text, kind = '') { return h('span', { class: `pill ${kind}` }, text); }
 
@@ -42,6 +49,56 @@ export function stateView({ kind = 'info', title, message, detail, actions = [] 
     message && h('p', { text: message }),
     detail && h('p', { class: 'muted', text: detail }),
     actions.length ? h('div', { class: 'actions' }, actions) : null);
+}
+
+// 한 실행의 세 화면(요약·종목별 거래·AI 보고서)을 오가는 탭 줄. 사이드바에는 '실행 결과' 하나만 둔다 (E18).
+export function runTabs(runId, active) {
+  const tabs = [['results', t('run.tab.summary')], ['stock', t('nav.stock')], ['report', t('nav.report')]];
+  return h('nav', { class: 'run-tabs', 'aria-label': t('run.tabs') },
+    tabs.map(([key, label]) => h('a', { class: `run-tab${key === active ? ' active' : ''}`, href: `#/runs/${runId}/${key}`,
+      'aria-current': key === active ? 'page' : null }, label)));
+}
+
+// ? 도움말 토글팁 (E18). 마우스 올리기·키보드 초점·클릭으로 열고, Esc·바깥 클릭·초점 이동으로 닫는다.
+// 설명은 aria-describedby 로 연결해 화면 읽기 프로그램이 초점에서 읽는다. 한 번에 하나만 연다.
+let tipSeq = 0;
+let closeOpenTip = null;
+function onDocKey(e) { if (e.key === 'Escape' && closeOpenTip) closeOpenTip(); }
+function onDocClick() { if (closeOpenTip) closeOpenTip(); }
+
+// 화면 밖으로 나가지 않게 가로 위치만 당긴다 (좁은 화면에서 가로 스크롤 방지)
+function keepInView(bubble) {
+  bubble.style.left = '';
+  const r = bubble.getBoundingClientRect();
+  const edge = document.documentElement.clientWidth - 8;
+  if (r.right > edge) bubble.style.left = `${-(r.right - edge)}px`;
+  else if (r.left < 8) bubble.style.left = `${8 - r.left}px`;
+}
+
+// up: 화면 아래쪽에 붙은 영역(실행 막대)처럼 아래로 열면 가려지는 곳에서 위로 연다
+export function helpTip(text, term, { up = false } = {}) {
+  if (!tipSeq) { document.addEventListener('keydown', onDocKey); document.addEventListener('click', onDocClick); }
+  const id = `help-tip-${++tipSeq}`;
+  const bubble = h('span', { class: 'tip-bubble', id, role: 'tooltip', hidden: true }, text);
+  const btn = h('button', { type: 'button', class: 'tip-btn', 'aria-label': t('help.aria', { x: term }), 'aria-expanded': 'false', 'aria-describedby': id }, '?');
+  let pinned = false;
+  function close() {
+    bubble.hidden = true; pinned = false; btn.setAttribute('aria-expanded', 'false');
+    if (closeOpenTip === close) closeOpenTip = null;
+  }
+  function open() {
+    if (closeOpenTip && closeOpenTip !== close) closeOpenTip();
+    bubble.hidden = false; btn.setAttribute('aria-expanded', 'true'); closeOpenTip = close;
+    keepInView(bubble);
+  }
+  btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (pinned) close(); else { open(); pinned = true; } });
+  btn.addEventListener('focus', open);
+  btn.addEventListener('blur', close);
+  const wrap = h('span', { class: up ? 'tip up' : 'tip' }, btn, bubble);
+  wrap.addEventListener('mouseenter', open);
+  wrap.addEventListener('mouseleave', () => { if (!pinned && document.activeElement !== btn) close(); });
+  bubble.addEventListener('click', (e) => e.stopPropagation());
+  return wrap;
 }
 
 export function linkButton(text, href, primary = false) {

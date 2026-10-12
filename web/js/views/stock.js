@@ -1,7 +1,7 @@
 // Stock Detail (FR-U4, design.md §6.4). 같은 run_id 의 거래에서만 파생한다. 유사 패턴 차트는 E7 보류로 제외.
 import { api } from '../api.js';
 import { lines, price } from '../charts.js';
-import { errorView, fmt, h, loading, pill, table } from '../components/ui.js';
+import { errorView, fmt, h, loading, pill, table, updown } from '../components/ui.js';
 import { has, t } from '../i18n.js';
 import { state } from '../state.js';
 
@@ -60,10 +60,10 @@ export async function renderStock(el, runId, ticker, query) {
         h('div', { style: { textAlign: 'right' } }, h('div', { style: { fontSize: '24px', fontWeight: 800 } }, fmt.krw(lastClose)), h('small', { class: 'muted' }, t('s.lastClose')))),
       priceEl,
       h('div', { class: 'legend' },
-        h('span', {}, h('i', { class: 'dot' }), t('s.legendEntry')), h('span', {}, h('i', { class: 'dot red' }), t('s.legendExit')),
+        h('span', {}, h('i', { class: 'dot up' }), t('s.legendEntry')), h('span', {}, h('i', { class: 'dot down' }), t('s.legendExit')),
         h('span', {}, t('s.legendLines')),
-        h('span', {}, h('i', { class: 'dot', style: { background: 'rgba(136,230,188,.35)' } }), t('s.legendBull')),
-        h('span', {}, h('i', { class: 'dot', style: { background: 'rgba(239,143,143,.4)' } }), t('s.legendBear')))),
+        h('span', {}, h('i', { class: 'dot', style: { background: 'rgba(239,143,143,.4)' } }), t('s.legendBull')),
+        h('span', {}, h('i', { class: 'dot', style: { background: 'rgba(138,196,232,.4)' } }), t('s.legendBear')))),
     h('aside', { class: 'card', 'aria-label': t('s.summaryAria') },
       h('h2', {}, t('s.summary')),
       h('p', { class: 'card-sub', text: t('s.summarySub') }),
@@ -89,7 +89,7 @@ export async function renderStock(el, runId, ticker, query) {
         { label: t('s.col.exit'), key: 'exit_date' }, { label: t('s.col.exitPx'), num: true, render: (x) => fmt.int(Math.round(x.exit_price)) },
         { label: t('s.col.reason'), render: (x) => reason(x.exit_reason) },
         { label: t('s.col.days'), num: true, render: (x) => fmt.int(x.hold_days) },
-        { label: t('s.col.net'), num: true, render: (x) => h('span', { class: fmt.tone(x.net_ret) }, fmt.pct(x.net_ret)) },
+        { label: t('s.col.net'), num: true, render: (x) => updown(x.net_ret, fmt.pct(x.net_ret)) },
         { label: t('s.col.excess'), num: true, render: (x) => fmt.pctp(x.excess_ret) },
         { label: t('s.col.mreg'), render: (x) => regime(x.market_regime) },
         { label: t('s.col.sreg'), render: (x) => regime(x.stock_regime) },

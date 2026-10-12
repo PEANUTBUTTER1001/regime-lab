@@ -202,3 +202,21 @@ forecast:                           # P2 봉 예측 (D-2 확정 2026-10-07, docs
     holdout_share: 0.5              # 검증 구간 뒷부분 비율 — 여기로 판정하고 앞부분으로 모델 확률을 보정 (같은 표본으로 둘 다 하면 낙관 편향)
   api:                              # P2-9 예측 API (계약 2026-10-12 Seonghwanaa 승인)
     history_bars: 35                # 종목 예측 응답에 함께 주는 직전 확정 봉 종가 수 (차트용, 1시간봉 약 5거래일)
+
+# X3.1: 인증 수치. 분석 준비 캐시(PREP_SECTIONS)와 무관. 키는 환경변수로만 받는다.
+auth:
+  session_ttl_seconds: 28800
+  idle_ttl_seconds: 1800
+  recovery_ttl_seconds: 600
+  csrf_ttl_seconds: 3600
+  http_timeout_seconds: 10
+  password_min_length: 8
+  password_max_length: 1024
+  demo_password_min_length: 4
+  email_max_length: 254
+  token_max_length: 2048
+  rate_window_seconds: 300
+  rate_max_attempts: 5
+  max_sessions: 5000
+  nonce_bytes: 32
+  list_limit: 200

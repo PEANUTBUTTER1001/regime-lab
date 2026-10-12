@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from regime_ingest.dedup import classify, link_amendments
 from regime_ingest.normalize import SOURCE, normalize
@@ -70,7 +70,7 @@ def _fetch_window(client: ListClient, store: DocStore, cfg: dict, bgn: date, end
 
 
 def _commit_window(store: DocStore, cfg: dict, docs: dict[str, dict], bgn: date, end: date, *, complete: bool,
-                   advance_cursor: bool, stats: RunStats, forward: bool, observed_at: str):
+                   advance_cursor: bool, stats: RunStats, forward: bool, observed_at: str, today: date):
     """중복·버전 → 정정 후보 → 문서(tmp)·상태 → commit → 문서 확정. commit 전 실패면 tmp 를 지우고 되돌린다."""
     seen = store.seen(list(docs))
     keep = []
@@ -88,10 +88,17 @@ def _commit_window(store: DocStore, cfg: dict, docs: dict[str, dict], bgn: date,
         # 잘못된 행이 있던 창은 완료로 치지 않는다. 순방향은 그날이 끝나기 전 일부만 본 것이라 'forward' 로 남겨
         # 소급이 그 날을 건너뛰지 않게 한다 (collected 는 소급으로 그 날 전체를 받은 경우만)
         state = "partial" if not complete else ("forward" if forward else "collected")
+        # 소급이라도 오늘(KST)부터는 그날이 끝나기 전 일부만 본 것이다 → forward 로 남겨 다음 소급이 다시 받게 한다
+        # (collected 로 두면 그 뒤에 접수된 같은 날 공시를 소급도 순방향도 다시 받지 않는다)
+        by_state: dict[str, list[str]] = {}
+        for x in days(bgn, end):
+            by_state.setdefault("forward" if state == "collected" and x >= today else state, []).append(x.isoformat())
         for cls in cfg["corp_cls"]:
-            store.set_coverage(SOURCE, [x.isoformat() for x in days(bgn, end)], cls, state, stats.run_id, observed_at)
-        if advance_cursor:
-            store.set_cursor(SOURCE, "backfill", end.isoformat())
+            for st, ds in by_state.items():
+                store.set_coverage(SOURCE, ds, cls, st, stats.run_id, observed_at)
+        last_done = min(end, today - timedelta(days=1))  # 이 창에서 하루가 끝난 마지막 날
+        if advance_cursor and last_done >= bgn:  # 끝난 날이 없는 창(오늘·미래만)은 커서를 그대로 둔다
+            store.set_cursor(SOURCE, "backfill", last_done.isoformat())
         store.commit()
     except BaseException:
         store.rollback()
@@ -116,7 +123,8 @@ def collect(store: DocStore, client: ListClient, cfg: dict, start: date, end: da
     if mode not in ("backfill", "forward"):
         raise ValueError(mode)
     stats = RunStats(run_id, mode, start.isoformat(), end.isoformat(), now().isoformat())
-    req_day = now().astimezone(KST).date().isoformat()
+    today = now().astimezone(KST).date()
+    req_day = today.isoformat()
     client.requests = store.requests_on(SOURCE, req_day)
     base_requests = client.requests
     try:
@@ -151,7 +159,7 @@ def collect(store: DocStore, client: ListClient, cfg: dict, start: date, end: da
             stats.errors += bad
             contiguous = contiguous and bad == 0
             _commit_window(store, cfg, docs, bgn, wend, complete=(bad == 0), advance_cursor=contiguous, stats=stats,
-                           forward=(mode == "forward"), observed_at=now().isoformat())
+                           forward=(mode == "forward"), observed_at=now().isoformat(), today=today)
         if stats.errors and stats.status == "ok":
             stats.status = "partial"
             stats.message = "잘못된 행이 있는 창은 partial 로 남김 (커서 미전진): " + "; ".join(stats.error_samples)

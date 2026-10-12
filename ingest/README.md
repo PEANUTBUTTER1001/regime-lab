@@ -47,7 +47,8 @@ Register-ScheduledTask -TaskName "regime-ingest-opendart" -Action $act -Trigger 
 
 - 휴장일에도 돌지만 공시가 없으면 `013`(데이터 없음) 한 번씩만 요청한다. 휴장일 목록 출처는 D-5
 - 상태 확인: `regime-ingest status` — 최근 실행의 `status`(ok/partial/failed/skipped)·요청 수, 날짜별 collected/partial/gap 수
-- 순방향 실행은 오늘 날짜를 `forward`(일부만 봄)로 남긴다. 소급(`backfill`)은 `collected` 만 건너뛰므로 나중에 그 날 전체를 다시 받아 빠진 공시를 채운다. 순방향으로 이미 본 공시는 중복으로 걸러져 `available_at`(처음 본 시각)이 그대로다
+- 순방향 실행은 오늘 날짜를 `forward`(일부만 봄)로 남긴다. **소급도 오늘(KST)부터의 날은 `forward`로 남긴다**(하루가 끝나기 전이라 그 뒤 접수분이 있다). 소급(`backfill`)은 `collected` 만 건너뛰므로 **다음 날 이후** 소급이 그 날 전체를 다시 받아 빠진 공시를 채우고 `collected` 로 닫는다. 순방향으로 이미 본 공시는 중복으로 걸러져 `available_at`(처음 본 시각)이 그대로다
+- 이 규칙 전에 오늘까지 소급해 오늘이 `collected` 로 남은 저장소는, 다음 날 그 날만 `backfill --from <그날> --to <그날> --refetch` 로 한 번 다시 받는다
 
 ## 저장 (`<ext_store>/`)
 

@@ -15,6 +15,7 @@ from regime_lab.data.loader import ForecastStore
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "engine" / "tests"))
 from synth import make_market  # noqa: E402
+from test_auth_contract import auth_app, signin  # noqa: E402,F401 — 로그인 켠 앱 (X3)
 
 RUN = "1h-20261012T090000-abcdef12"
 NOTICE = "과거 데이터로 계산한 통계적 예상 범위이며 실제 가격 전망이나 매매 신호가 아닙니다."
@@ -105,3 +106,17 @@ def test_scores(client):
     b = client.get(f"/api/forecasts/runs/{RUN}/scores").json()
     assert b["run_id"] == RUN and b["horizon"] == 2 and b["scores"]["2"]["direction_policy"]["enabled"]
     assert client.get("/api/forecasts/runs/x/scores").status_code == 404
+
+
+def test_login_required_and_shared_read(auth_app, tmp_path):
+    # X3 로그인을 켜면 /api/ 전역 로그인 확인을 받고, 예측 실행은 사용자별 소유가 아닌 공용 읽기다
+    _write_run(tmp_path / "runs")
+    with TestClient(auth_app) as anon:
+        r = anon.get("/api/forecasts/runs")
+        assert r.status_code == 401 and r.json()["code"] == "authentication_required"
+    with TestClient(auth_app) as a, TestClient(auth_app) as b:
+        signin(a, "a")
+        signin(b, "b")
+        for c in (a, b):
+            assert [x["run_id"] for x in c.get("/api/forecasts/runs").json()["runs"]] == [RUN]
+            assert c.get(f"/api/forecasts/runs/{RUN}/stocks/005930").json()["status"] == "ok"

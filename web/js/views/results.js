@@ -1,7 +1,7 @@
 // Results (FR-U3, FR-A1~A5, NFR-9, design.md §6.4). 모든 수치는 같은 run_id 의 /result 응답에서만 가져온다.
 import { api } from '../api.js';
 import { histogram, lines } from '../charts.js';
-import { errorView, fmt, h, loading, metricDefs, passPill, pill, table } from '../components/ui.js';
+import { errorView, fmt, h, helpTip, loading, metricDefs, passPill, pill, table, updown } from '../components/ui.js';
 import { has, t } from '../i18n.js';
 import { state } from '../state.js';
 
@@ -10,14 +10,17 @@ const REGIMES = ['bull', 'sideways', 'bear', 'unavailable'];
 const CAPS = ['large', 'mid', 'small'];
 const judge = (j) => [has(`j.${j}`) ? t(`j.${j}`) : j, has(`jd.${j}`) ? t(`jd.${j}`) : '', JUDGE_KIND[j] ?? 'neutral'];
 
-function metric(label, value, sub, tone = '') {
-  return h('div', { class: 'metric' }, h('span', { class: 'label' }, label), h('strong', { class: tone }, value), h('small', {}, sub));
+// help: 어려운 지표 이름 옆 ? 도움말 문구 (E18)
+function metric(label, value, sub, tone = '', help = null) {
+  return h('div', { class: 'metric' }, h('span', { class: 'label' }, label, help && helpTip(help, label)), h('strong', { class: tone }, value), h('small', {}, sub));
 }
 
 function heatCell(c) {
   if (!c) return h('td', { class: 'num heat-cell' }, h('span', { class: 'muted' }, '—'), h('br'), h('small', {}, t('r.zeroTrades')));
-  const cls = c.sample_insufficient ? 'insufficient' : c.mean_excess > 0 ? 'pos' : 'neg';
-  return h('td', { class: `num heat-cell ${cls}` }, h('b', {}, fmt.pctp(c.mean_excess)), h('br'),
+  // 한국식 색: 시장보다 더 벌면 빨강 ▲, 덜 벌면 파랑 ▼ (E18 ④). 표본 부족 칸은 빗금만
+  const cls = c.sample_insufficient ? 'insufficient' : c.mean_excess > 0 ? 'pos' : c.mean_excess < 0 ? 'neg' : '';
+  const mark = cls === 'pos' ? '▲' : cls === 'neg' ? '▼' : '';
+  return h('td', { class: `num heat-cell ${cls}` }, h('b', {}, mark && h('span', { class: 'updown-mark', 'aria-hidden': 'true' }, mark), fmt.pctp(c.mean_excess)), h('br'),
     h('small', {}, `${t('common.trades', { n: fmt.int(c.trades) })}${c.sample_insufficient ? t('r.insufficientTag') : ''}`));
 }
 
@@ -87,37 +90,56 @@ export async function renderResults(el, runId, query) {
         name: cur, pats: inp.patterns.map((p) => (has(`pat.${p}`) ? t(`pat.${p}`) : p)).join(` ${inp.combine.toUpperCase()} `),
         mk: inp.markets.join(' + '), s: inp.period.start, e: inp.period.end,
         sl: inp.exit.stop_loss_pct ?? t('r.off'), tp: inp.exit.take_profit_pct ?? t('r.off'), h: inp.exit.max_hold_days })
-        + extraExits(inp.exit) })),
-    h('div', {}, v.analysis_target ? pill(t('r.target')) : pill(t('r.notTarget'), 'warn'))));
+        + extraExits(inp.exit) }))));
 
   if (names.length > 1) {
     el.append(h('div', { class: 'tabs', role: 'group', 'aria-label': t('common.strategyTabs') },
       names.map((n) => h('a', { class: 'tab', href: `#/runs/${runId}/results${q(n)}`, 'aria-pressed': String(n === cur) }, n))));
   }
 
-  // 3중 검증 (FR-A3~A5)
+  // 판정 블록 (E18 2차): 결론(서버 판정 analysis_target)을 먼저, 그 근거인 검증 3종을 질문으로 보여 준다 (FR-A3~A5).
+  // 상세 수치(p·q·m·백분위·분할일)는 그대로 둔다 — 쉬운 말로 바꿔도 3중 검증 표시는 약화하지 않는다.
   const [jl, jd, jk] = judge(v.split_judgement);
-  el.append(h('section', { class: 'gates', 'aria-label': t('r.gates') },
-    h('div', { class: 'gate' }, h('h3', {}, t('r.split'), v.split_pass ? passPill(true) : pill(jl, jk || 'bad')),
-      h('p', {}, t('r.splitText', { j: jd, d: s.split.split_date, n1: fmt.int(v.h1_trades), e1: fmt.pctp(v.h1_mean_excess), n2: fmt.int(v.h2_trades), e2: fmt.pctp(v.h2_mean_excess) }))),
-    h('div', { class: 'gate' }, h('h3', {}, t('r.fdr'), passPill(v.fdr_pass)),
-      h('p', {}, t('r.fdrText', { p: fmt.num(v.p_value, 4), q: fmt.num(state.meta?.validation?.fdr_q ?? 0.1, 2), m: res.fdr_family_size }))),
-    h('div', { class: 'gate' }, h('h3', {}, t('r.random'), passPill(v.random_pass)),
-      h('p', {}, t('r.randomText', { p: pct, n: fmt.int(state.meta?.validation?.random_iterations ?? 1000) })))));
+  const check = (question, name, help, result, detail) => h('li', { class: 'verdict-row' },
+    h('div', { class: 'verdict-q' }, h('span', { class: 'with-tip' }, h('b', {}, question), helpTip(help, name)), h('small', { class: 'muted' }, name)),
+    h('div', { class: 'verdict-res' }, result),
+    h('p', { class: 'verdict-detail' }, detail));
+  const target = !!v.analysis_target;
+  el.append(h('section', { class: `verdict ${target ? 'ok' : 'no'}`, 'aria-label': t('r.gates') },
+    h('div', { class: 'verdict-head' }, h('span', { class: 'verdict-mark', 'aria-hidden': 'true' }, target ? '✓' : '!'),
+      h('div', {}, h('h2', {}, t(target ? 'r.vTarget' : 'r.vNotTarget')), h('p', {}, t(target ? 'r.vTargetMsg' : 'r.vNotTargetMsg')))),
+    h('ol', { class: 'verdict-list' },
+      check(t('r.qSplit'), t('r.split'), t('help.split'), v.split_pass ? passPill(true) : pill(jl, jk || 'bad'),
+        t('r.splitText', { j: jd, d: s.split.split_date, n1: fmt.int(v.h1_trades), e1: fmt.pctp(v.h1_mean_excess), n2: fmt.int(v.h2_trades), e2: fmt.pctp(v.h2_mean_excess) })),
+      check(t('r.qFdr'), t('r.fdr'), t('help.fdr'), passPill(v.fdr_pass),
+        t('r.fdrText', { p: fmt.num(v.p_value, 4), q: fmt.num(state.meta?.validation?.fdr_q ?? 0.1, 2), m: res.fdr_family_size })),
+      check(t('r.qRandom'), t('r.random'), t('help.random'), passPill(v.random_pass),
+        t('r.randomText', { p: pct, n: fmt.int(state.meta?.validation?.random_iterations ?? 1000) })))));
 
-  // 요약 카드 (거래 수 병기, NFR-9)
-  el.append(h('div', { class: 'metrics' },
+  // 핵심 지표 4개 (거래 수 병기, NFR-9)
+  el.append(h('div', { class: 'metrics key' },
     metric(t('r.m.trades'), fmt.int(m.trades), `${m.period_start ?? '—'} ~ ${m.period_end ?? '—'}`),
     metric(t('r.m.win'), fmt.pct(m.win_rate, 1, false), t('r.m.winSub', { n: fmt.int(m.trades) })),
-    metric(t('r.m.avg'), fmt.pct(m.mean_ret), t('r.m.avgSub'), fmt.tone(m.mean_ret)),
-    metric(t('r.m.excess'), fmt.pctp(m.mean_excess), t('r.m.excessSub'), fmt.tone(m.mean_excess)),
-    metric(t('r.m.random'), t('r.m.randomVal', { p: pct }), t('r.m.randomSub', { p: pct, k: fmt.int(state.meta?.validation?.random_iterations ?? 1000), n: fmt.int(v.random_n_trades) }), v.random_pass ? 'positive' : 'warning')),
-  h('div', { class: 'metrics' },
-    metric(t('r.m.median'), fmt.pct(m.median_ret), t('r.m.perTrade'), fmt.tone(m.median_ret)),
-    metric(t('r.m.payoff'), fmt.num(m.payoff_ratio), t('r.m.payoffSub')),
-    metric(t('r.m.sharpe'), fmt.num(m.sharpe, 3), t('r.m.sharpeSub')),
-    metric(t('r.m.mdd'), fmt.pct(m.mdd, 1), t('r.m.mddSub'), 'negative'),
-    metric(t('r.m.excl'), `${fmt.int(m.excluded_trades)} / ${fmt.int(m.skipped_entries)}`, t('r.m.exclSub'))));
+    metric(t('r.m.avg'), updown(m.mean_ret, fmt.pct(m.mean_ret)), t('r.m.avgSub')),
+    metric(t('r.m.excess'), updown(m.mean_excess, fmt.pctp(m.mean_excess)), t('r.m.excessSub'), '', t('help.excess'))));
+
+  // 자세한 지표: 나머지 6개는 표로 (항목 · 값 · 설명). 도움말이 잘리지 않게 가로 스크롤 감싸개 없이 둔다
+  const detail = [
+    [t('r.m.random'), h('span', { class: v.random_pass ? 'positive' : 'warning' }, t('r.m.randomVal', { p: pct })),
+      t('r.m.randomSub', { p: pct, k: fmt.int(state.meta?.validation?.random_iterations ?? 1000), n: fmt.int(v.random_n_trades) }), t('help.randomPct')],
+    [t('r.m.median'), updown(m.median_ret, fmt.pct(m.median_ret)), t('r.m.perTrade')],
+    [t('r.m.payoff'), fmt.num(m.payoff_ratio), t('r.m.payoffSub'), t('help.payoff')],
+    [t('r.m.sharpe'), fmt.num(m.sharpe, 3), t('r.m.sharpeSub'), t('help.sharpe')],
+    [t('r.m.mdd'), updown(m.mdd, fmt.pct(m.mdd, 1)), t('r.m.mddSub'), t('help.mdd')],
+    [t('r.m.excl'), `${fmt.int(m.excluded_trades)} / ${fmt.int(m.skipped_entries)}`, t('r.m.exclSub')],
+  ];
+  el.append(h('section', { class: 'detail-metrics', 'aria-labelledby': 'detail-metrics-title' },
+    h('h2', { id: 'detail-metrics-title' }, t('r.detail')),
+    h('table', { class: 'detail-table' },
+      h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, t('common.item')), h('th', { scope: 'col', class: 'num' }, t('common.value')), h('th', { scope: 'col' }, t('r.detailDesc')))),
+      h('tbody', {}, detail.map(([name, value, desc, help]) => h('tr', {},
+        h('th', { scope: 'row' }, h('span', { class: 'with-tip' }, name, help && helpTip(help, name))),
+        h('td', { class: 'num' }, value), h('td', { class: 'muted' }, desc)))))));
   const reasons = exitReasons(m.exit_by_reason);
   if (reasons) el.append(reasons);
 
@@ -129,20 +151,21 @@ export async function renderResults(el, runId, query) {
   const drawHeat = () => heatBox.replaceChildren(heatmap(s[basis], market, minN));
   const toggles = h('div', { class: 'tabs' },
     toggleGroup(t('r.basis'), [['cells_market', t('r.basisMarket')], ['cells_stock', t('r.basisStock')]], basis, (k) => { basis = k; drawHeat(); }),
+    helpTip(t('help.regime'), t('r.basis')),
     toggleGroup(t('b.market'), inp.markets.map((mk) => [mk, mk]), market, (k) => { market = k; drawHeat(); }));
   el.append(h('div', { class: 'result-grid' },
-    h('article', { class: 'card' }, h('h2', {}, t('r.equity')), h('p', { class: 'card-sub', text: t('r.equitySub', { n: fmt.int(m.trades) }) }), eqEl),
-    h('article', { class: 'card' }, h('h2', {}, t('r.heat')), h('p', { class: 'card-sub', text: t('r.heatSub') }), toggles, heatBox)));
+    h('article', { class: 'card' }, h('h2', {}, t('r.equity')), h('p', { class: 'how', text: t('r.equityHow') }), h('p', { class: 'card-sub', text: t('r.equitySub', { n: fmt.int(m.trades) }) }), eqEl),
+    h('article', { class: 'card' }, h('h2', {}, t('r.heat')), h('p', { class: 'how', text: t('r.heatHow') }), h('p', { class: 'card-sub', text: t('r.heatSub') }), toggles, heatBox)));
   drawHeat();
 
-  // 손익 분포 + 기간 분할
+  // 손익 분포 + 기간 분할 (차트마다 '보는 법' 한 줄, E18 2차)
   const histEl = h('div', { class: 'chart' });
   const half = (x) => [fmt.int(x.trades), fmt.pct(x.win_rate, 1, false), fmt.pct(x.mean_ret), fmt.pctp(x.mean_excess)];
   const h1 = half(s.split.first_half);
   const h2 = half(s.split.second_half);
   el.append(h('div', { class: 'grid-two', style: { marginBottom: '18px' } },
-    h('article', { class: 'card' }, h('h2', {}, t('r.dist')), h('p', { class: 'card-sub', text: t('r.distSub', { n: fmt.int(m.trades) }) }), histEl),
-    h('article', { class: 'card' }, h('h2', {}, t('r.splitCard')), h('p', { class: 'card-sub', text: t('r.splitSub', { d: s.split.split_date }) }),
+    h('article', { class: 'card' }, h('h2', {}, t('r.dist')), h('p', { class: 'how', text: t('r.distHow') }), h('p', { class: 'card-sub', text: t('r.distSub', { n: fmt.int(m.trades) }) }), histEl),
+    h('article', { class: 'card' }, h('h2', {}, t('r.splitCard')), h('p', { class: 'how', text: t('r.splitHow') }), h('p', { class: 'card-sub', text: t('r.splitSub', { d: s.split.split_date }) }),
       table({ columns: [{ label: t('r.metric'), key: 'k' }, { label: t('r.first'), key: 'a', num: true }, { label: t('r.second'), key: 'b', num: true }],
         rows: [t('r.m.trades'), t('r.m.win'), t('r.m.avg'), t('r.m.excess')].map((k, i) => ({ k, a: h1[i], b: h2[i] })) }),
       h('div', { class: 'callout', style: { marginTop: '14px' } }, t('r.judgement', { a: jl, b: jd })))));

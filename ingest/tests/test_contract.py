@@ -227,6 +227,7 @@ def test_manifest_mismatch_fails_not_skipped(tmp_path, cfg):
 def test_coverage_history_is_append_only(tmp_path, cfg):
     items = make_items(date(2026, 10, 7), date(2026, 10, 7), per_day=1)
     _run(tmp_path, FakeDart(items), cfg, date(2026, 10, 7), date(2026, 10, 7), mode="forward")
-    _run(tmp_path, FakeDart(items), cfg, date(2026, 10, 7), date(2026, 10, 7), t=T0 + timedelta(hours=12), run_id="r2")
+    # 다음 날 소급이 그 날을 닫는다 (같은 날 소급은 아직 하루가 안 끝나 forward 그대로)
+    _run(tmp_path, FakeDart(items), cfg, date(2026, 10, 7), date(2026, 10, 7), t=T0 + timedelta(hours=24), run_id="r2")
     log = Store(tmp_path).db.execute("SELECT state, observed_at FROM coverage_log WHERE corp_cls='Y' ORDER BY rowid").fetchall()
     assert [s for s, _ in log] == ["forward", "collected"] and log[0][1] < log[1][1]

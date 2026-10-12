@@ -1,8 +1,9 @@
-// Login (FR-X1, design.md §6.1): UI 흐름만 제공한다. 실제 인증·계정 저장은 하지 않는다.
+// 이메일 인증·로그인·복구 화면. 인증 상태와 세션은 서버에서 확인한다.
 import { h } from '../components/ui.js';
 import { BRAND } from '../config.js';
 import { t } from '../i18n.js';
 import { state } from '../state.js';
+import { api } from '../api.js';
 
 function decoChart() {
   const ns = 'http://www.w3.org/2000/svg';
@@ -23,63 +24,70 @@ function decoChart() {
   return svg;
 }
 
-export function renderLogin(el) {
-  let mode = 'signin';
-  const err = h('p', { class: 'field-error hidden', id: 'login-error', role: 'alert' });
-  const email = h('input', { id: 'email', type: 'email', autocomplete: 'username', required: true, 'aria-describedby': 'login-error' });
-  const pw = h('input', { id: 'password', type: 'password', autocomplete: 'current-password', required: true, minlength: '4' });
-  const pw2wrap = h('div', { class: 'hidden' }, h('label', { for: 'password2' }, t('login.password2')),
-    h('input', { id: 'password2', type: 'password', autocomplete: 'new-password' }));
-  const title = h('h2', { id: 'form-title', text: t('login.signIn') });
-  const submit = h('button', { class: 'primary', type: 'submit' }, t('login.signIn'));
-  const toggle = h('button', { class: 'link-btn', type: 'button' }, t('login.signUp'));
-  // 계정 가입 없이 바로 진행 (2026-09-22 사용자 요청)
-  const guestBtn = h('button', { class: 'secondary', type: 'button', 'aria-describedby': 'guest-hint' }, t('login.guest'));
-  guestBtn.addEventListener('click', () => {
-    state.guest = true;
-    state.signedIn = true;
-    location.hash = '#/builder';
-  });
-
-  toggle.addEventListener('click', () => {
-    mode = mode === 'signin' ? 'signup' : 'signin';
-    title.textContent = mode === 'signin' ? t('login.signIn') : t('login.signUp');
-    submit.textContent = mode === 'signin' ? t('login.signIn') : t('login.create');
-    toggle.textContent = mode === 'signin' ? t('login.signUp') : t('login.back');
-    pw2wrap.classList.toggle('hidden', mode === 'signin');
-    err.classList.add('hidden');
-  });
-
-  const form = h('form', { 'aria-labelledby': 'form-title', novalidate: true },
-    title,
-    h('p', { class: 'card-sub', text: t('login.demo') }),
-    h('label', { for: 'email' }, t('login.email')), email,
-    h('label', { for: 'password' }, t('login.password')), pw,
-    pw2wrap, err, submit,
-    h('div', { class: 'login-alt' }, toggle, guestBtn),
-    h('p', { class: 'hint', id: 'guest-hint', style: { textAlign: 'center' }, text: t('login.guestHint') }));
-
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const problems = [];
-    const badEmail = !email.value || !email.checkValidity();
-    if (badEmail) problems.push(t('login.errEmail'));
-    if (pw.value.length < 4) problems.push(t('login.errPw'));
-    if (mode === 'signup' && document.getElementById('password2').value !== pw.value) problems.push(t('login.errMatch'));
-    email.setAttribute('aria-invalid', badEmail ? 'true' : 'false');
-    if (problems.length) { err.textContent = problems.join(' '); err.classList.remove('hidden'); return; }
-    state.guest = false;
-    state.signedIn = true;
-    location.hash = '#/builder';
-  });
-
-  el.append(h('div', { class: 'login' },
-    h('section', { class: 'login-intro' },
-      h('div', { class: 'brand' }, h('span', { class: 'brand-mark', 'aria-hidden': 'true' }), BRAND),
-      h('h1', { text: t('login.title') }),
-      h('p', { class: 'lead', text: t('login.lead') }),
-      h('p', { class: 'notice', text: t('login.notice') }),
-      decoChart()),
-    h('section', { class: 'login-form' }, form)));
+export function renderLogin(el, query = new URLSearchParams()) {
+  const config = state.authConfig || { enabled: true, available: false };
+  let mode = query.get('recover') === '1' ? 'recover' : 'signin';
+  const min = config.password_min_length;
+  const email = h('input', { id: 'email', type: 'email', autocomplete: 'username', required: true });
+  const pw = h('input', { id: 'password', type: 'password', autocomplete: 'current-password', required: true });
+  const pw2 = h('input', { id: 'password2', type: 'password', autocomplete: 'new-password' });
+  const pwWrap = h('div', {}, h('label', {for:'password'}, t('login.password')), pw);
+  const pw2Wrap = h('div', {}, h('label', {for:'password2'}, t('login.password2')), pw2);
+  const title = h('h2', {id:'form-title'});
+  const submit = h('button', {class:'primary', type:'submit'});
+  const toggle = h('button', {class:'link-btn', type:'button'});
+  const recover = h('button', {class:'link-btn', type:'button'}, t('login.forgot'));
+  const message = h('p', {class:'field-error hidden', role:'alert', id:'login-error'});
+  email.setAttribute('aria-describedby', 'login-error'); pw.setAttribute('aria-describedby', 'login-error');
+  function show(text) { message.textContent = text; message.classList.remove('hidden'); }
+  function update() {
+    title.textContent = t(mode === 'signup' ? 'login.signUp' : mode === 'recover' ? 'login.reset' : 'login.signIn');
+    submit.textContent = t(mode === 'signup' ? 'login.create' : mode === 'recover' ? 'login.sendReset' : 'login.signIn');
+    toggle.textContent = t(mode === 'signin' ? 'login.signUp' : 'login.back');
+    pwWrap.classList.toggle('hidden', mode === 'recover'); pw2Wrap.classList.toggle('hidden', mode !== 'signup');
+    recover.classList.toggle('hidden', mode !== 'signin' || !config.enabled);
+    pw.autocomplete = mode === 'signup' ? 'new-password' : 'current-password';
+  }
+  toggle.onclick = () => { mode = mode === 'signin' ? 'signup' : 'signin'; message.classList.add('hidden'); pw.value = ''; pw2.value = ''; update(); };
+  recover.onclick = () => { mode = 'recover'; message.classList.add('hidden'); pw.value = ''; update(); };
+  const guest = h('button', {class:'secondary', type:'button'}, t('login.guest'));
+  guest.onclick = () => { state.guest = true; state.signedIn = true; location.hash = '#/builder'; };
+  guest.classList.toggle('hidden', !config.guest_allowed);
+  const form = h('form', {'aria-labelledby':'form-title', novalidate:true}, title,
+    h('p', {class:'card-sub'}, t(config.enabled ? 'login.authHint' : 'login.demo')),
+    h('label', {for:'email'}, t('login.email')), email, pwWrap, pw2Wrap, message, submit,
+    h('div', {class:'login-alt'}, toggle, guest), recover);
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    if (!email.value || !email.checkValidity()) { show(t('login.errEmail')); return; }
+    if (mode !== 'recover' && (!pw.value || ((mode === 'signup' || !config.enabled) && pw.value.length < min))) { show(t('login.errPasswordLength', {min})); return; }
+    if (mode === 'signup' && pw.value !== pw2.value) { show(t('login.errMatch')); return; }
+    if (!config.enabled) { state.guest = false; state.signedIn = true; location.hash = '#/builder'; return; }
+    submit.disabled = true;
+    try {
+      if (mode === 'recover') { await api.recover(email.value); show(t('login.checkEmail')); }
+      else if (mode === 'signup') {
+        await api.signup(email.value, pw.value); mode = 'signin'; update(); show(t('login.checkEmail'));
+      } else {
+        const result = await api.login(email.value, pw.value);
+        state.setUser(result.user); state.guest = false;
+        try { state.meta = await api.meta(); } catch { state.meta = null; }
+        location.hash = '#/builder';
+      }
+    } catch (error) { const key = {auth_rate_limited:'login.limited',auth_unconfirmed:'login.unconfirmed',auth_password:'login.errPasswordLength',auth_email:'login.errEmail',auth_unavailable:'login.unavailable',network_error:'login.unavailable'}[error.code] || 'login.errAuth'; show(t(key, {min})); }
+    finally { submit.disabled = false; pw.value = ''; pw2.value = ''; }
+  };
+  update();
+  if (query.has('verified')) show(t('login.verified'));
+  if (query.has('auth_error')) show(t('login.linkExpired'));
+  if (config.available === false) {
+    submit.disabled = true; toggle.disabled = true; recover.disabled = true;
+    show(t('login.unavailable'));
+    form.append(h('button', {type:'button', class:'secondary', onclick:()=>location.reload()}, t('common.retry')));
+  }
+  el.append(h('div', {class:'login'}, h('section', {class:'login-intro'},
+    h('div', {class:'brand'}, h('span', {class:'brand-mark', 'aria-hidden':'true'}), BRAND),
+    h('h1', {}, t('login.title')), h('p', {class:'lead'}, t('login.lead')), h('p', {class:'notice'}, t('login.notice')), decoChart()),
+    h('section', {class:'login-form'}, form)));
   email.focus();
 }
