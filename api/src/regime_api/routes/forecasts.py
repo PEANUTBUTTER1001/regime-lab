@@ -22,7 +22,7 @@ router = APIRouter(tags=["forecasts"])
 
 
 def _raise(e: forecast_runs.ForecastError):
-    raise ApiError(404 if e.code == "run_not_found" else 422, e.code, e.message, e.detail) from None
+    raise ApiError(404 if e.code == "forecast_run_not_found" else 422, e.code, e.message, e.detail) from None
 
 
 @router.get("/forecasts/runs")

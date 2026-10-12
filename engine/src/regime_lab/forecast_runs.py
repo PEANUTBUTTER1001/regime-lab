@@ -164,7 +164,7 @@ def list_runs(store) -> list[dict]:
 
 def _require_run(store, run_id: str) -> dict:
     if not store.has_run(run_id):
-        raise ForecastError("run_not_found", f"예측 실행이 없습니다: {run_id}", {"run_id": run_id})
+        raise ForecastError("forecast_run_not_found", f"예측 실행이 없습니다: {run_id}", {"run_id": run_id})
     return store.read_meta(run_id)
 
 
