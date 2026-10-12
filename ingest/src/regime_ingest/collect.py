@@ -96,8 +96,9 @@ def _commit_window(store: DocStore, cfg: dict, docs: dict[str, dict], bgn: date,
         for cls in cfg["corp_cls"]:
             for st, ds in by_state.items():
                 store.set_coverage(SOURCE, ds, cls, st, stats.run_id, observed_at)
-        if advance_cursor:
-            store.set_cursor(SOURCE, "backfill", min(end, today - timedelta(days=1)).isoformat())
+        last_done = min(end, today - timedelta(days=1))  # 이 창에서 하루가 끝난 마지막 날
+        if advance_cursor and last_done >= bgn:  # 끝난 날이 없는 창(오늘·미래만)은 커서를 그대로 둔다
+            store.set_cursor(SOURCE, "backfill", last_done.isoformat())
         store.commit()
     except BaseException:
         store.rollback()

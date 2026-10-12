@@ -338,6 +338,16 @@ def test_backfill_through_today_leaves_today_open(tmp_path, cfg):
     assert Store(tmp_path).cursor("opendart", "backfill") == "2026-10-07"
 
 
+def test_backfill_of_only_today_or_future_keeps_cursor(tmp_path, cfg):
+    """끝난 날이 없는 창(오늘만·미래만)을 소급해도 요청하지 않은 날을 완료 커서로 적지 않는다 (PR #58 리뷰)."""
+    items = make_items(date(2026, 10, 7), date(2026, 10, 9), per_day=2)
+    _run(Store(tmp_path), FakeDart(items), cfg, date(2026, 10, 7), date(2026, 10, 7))  # 시계 = 10-07
+    assert Store(tmp_path).cursor("opendart", "backfill") is None
+    _run(Store(tmp_path), FakeDart(items), cfg, date(2026, 10, 8), date(2026, 10, 9), run_id="r2")
+    assert Store(tmp_path).cursor("opendart", "backfill") is None
+    assert set(Store(tmp_path).coverage("opendart").values()) == {"forward"}
+
+
 def test_recover_is_scoped_to_locked_source(tmp_path):
     """잠금은 출처 단위 → 정리도 출처 단위. opendart 잠금을 잡아도 다른 출처의 진행 중 tmp 는 남는다."""
     other = tmp_path / "docs" / "source=news" / "date=2026-10"
