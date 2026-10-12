@@ -58,7 +58,7 @@ def _cfg(cfg):
     f = {**cfg["forecast"], "split": {"train_end": "2026-01-16", "valid_end": "2026-02-06"},
          "baseline": {**cfg["forecast"]["baseline"], "window": 10, "min_samples": 5},
          "model": {**cfg["forecast"]["model"], "max_iter": 20, "min_samples_leaf": 20},
-         "runs": {"batch_codes": 2, "store_splits": ["valid", "test"]}}
+         "runs": {"batch_codes": 2, "store_splits": ["test"]}}
     return {**cfg, "forecast": f}
 
 
@@ -80,11 +80,12 @@ def test_run_writes_contract_and_is_reproducible(cfg):
     assert "매매 신호가 아닙니다" in m["notice"]
     assert list(pred.columns) == ["code", "as_of", "h", "split", "scored", "base_close", "q0.1", "q0.5", "q0.9",
                                   "p_up", "direction", "direction_shown", "reason", "y", "cross_day"]
-    assert set(pred["split"]) <= {"valid", "test"} and set(pred["h"]) == {1, 2}
+    assert set(pred["split"]) == {"test"} and set(pred["h"]) == {1, 2}
     assert (pred["q0.1"] <= pred["q0.9"]).all() and pred["direction"].isin(["up", "down", "uncertain"]).all()
     # 마지막 표본은 목표가 아직 없는(실현 전) 예측 — 저장은 되고 채점 대상은 아님
     last = pred[pred["as_of"] == pred["as_of"].max()]
     assert last["y"].isna().all() and not last["scored"].any()
+    assert last["cross_day"].all()  # 마지막(15:31 확정) 시점의 다음 봉은 실현 전이어도 다음 거래일로 표시
     assert set(scores) == {"1", "2"} and {"model", "baseline", "conformal_widen", "direction_policy", "model_by_slot",
                                          "model_by_cross_day"} <= set(scores["1"])
     for h in ("1", "2"):  # 판정을 통과하지 못한 h 는 화면 방향이 모두 "불확실"
@@ -95,6 +96,14 @@ def test_run_writes_contract_and_is_reproducible(cfg):
     store2 = MemoryStore(_raw())
     run_forecast(store2, c, "3h", NOW)
     pd.testing.assert_frame_equal(pred, store2.runs[run_id][1])
+
+
+def test_only_test_period_predictions_can_be_stored(cfg):
+    """검증 구간 예측은 보정에 그 시점 뒤 값까지 써서 저장하지 않는다 (codex-01a0fb4b #52 시점 검사)."""
+    c = _cfg(cfg)
+    bad = {**c, "forecast": {**c["forecast"], "runs": {"batch_codes": 2, "store_splits": ["valid", "test"]}}}
+    with pytest.raises(ValueError, match="test 만"):
+        run_forecast(MemoryStore(_raw()), bad, "3h", NOW)
 
 
 def test_unknown_timeframe_and_empty_data(cfg):

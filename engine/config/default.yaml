@@ -193,7 +193,7 @@ forecast:                           # P2 봉 예측 (D-2 확정 2026-10-07, docs
     conformal: true                 # 검증 구간에서 회색 구간을 목표 적중률(80%)에 맞게 넓힘
   runs:                             # P2-7 과거 as_of 예측 일괄 생성 → runs/forecasts/<run_id>/ (형식 2026-10-12 Seonghwanaa 승인)
     batch_codes: 200                # 1분봉을 이 종목 수씩 나눠 읽어 집계 (메모리 상한)
-    store_splits: [valid, test]     # 예측을 저장할 구간 (학습 구간 예측은 표본 안 값이라 저장 안 함)
+    store_splits: [test]            # 예측을 저장할 구간 — 최종 평가 구간만. 학습·검증 구간 예측은 모델 학습·보정에 그 뒤 값까지 쓰여 그 시점 예측이 아님
   direction_policy:                 # P2-8 화면 방향 표시 조건 (검증 구간). 아니면 "불확실"
     min_called: 200                 # 모델이 방향을 낸 검증 표본 수 하한
     alpha: 0.05                     # 적중률 > 0.5 단측 이항검정 유의수준 (그리고 기준선 적중률보다 높아야 함)

@@ -19,7 +19,7 @@ from pathlib import Path
 
 from regime_lab.config import ENGINE_DIR, load_config, load_paths
 from regime_lab.context import RecordingContext
-from regime_lab import forecast_runs, retrieval
+from regime_lab import retrieval
 from regime_lab.data.loader import DocsStore, ForecastStore, load_sample_tickers
 from regime_lab.pipeline import prepare
 from regime_lab.runs import Strategy, StrategyError, run_and_save
@@ -60,6 +60,8 @@ def _rag(args, cfg, paths) -> int:
 def _forecast(args, cfg, paths) -> int:
     """P2-7 과거 as_of 예측 일괄 생성 → runs/forecasts/<run_id>/."""
     from datetime import datetime
+
+    from regime_lab import forecast_runs  # scikit-learn 을 끌어오므로 예측 명령에서만 불러온다 (다른 명령 시작 시간)
 
     store = ForecastStore(paths.store, args.minutes or paths.store.parent / "minutes", paths.runs)
     codes = sorted(set(load_sample_tickers(paths.store)) & set(store.common_codes())) if args.sample else None
