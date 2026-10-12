@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from regime_lab.bars import (MINUTE_PREP_VERSION, add_segments, aggregate_bars, apply_price_basis, judge_price_basis,
-                             normalize_minutes)
+                             normalize_minutes, slot_edges)
 from regime_lab.forecast import model as M
 from regime_lab.forecast.baseline import historical
 from regime_lab.forecast.evaluate import direction, direction_policy, score
@@ -74,6 +74,9 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
     if timeframe not in fcfg["timeframes"]:
         raise ValueError(f"지원하지 않는 봉: {timeframe} (가능: {fcfg['timeframes']})")
     rcfg = fcfg["runs"]
+    if not set(rcfg["store_splits"]) <= {"test"}:
+        # 학습·검증 구간 예측은 모델 학습·보정에 그 시점 뒤 값까지 쓰여 '그 시점 예측'이 아니다 (FR-F4)
+        raise ValueError(f"forecast.runs.store_splits 는 test 만 가능합니다: {rcfg['store_splits']}")
     codes = sorted(codes) if codes else store.common_codes()
     bars, prep = build_bars(store, cfg, codes, timeframe, rcfg["batch_codes"])
     if bars.empty:
@@ -83,6 +86,7 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
     date_split = _date_split(bars["available_at"], cfg)
     keep = np.isin(date_split, rcfg["store_splits"])
     H = fcfg["horizon"][timeframe][0]
+    n_slots = len(slot_edges(timeframe, cfg)) - 1
     preds, scores = [], {}
     for h in range(1, H + 1):
         t = make_targets(bars, h)
@@ -111,7 +115,9 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
         out["direction_shown"] = out["direction"] if policy["enabled"] else out["direction"].where(
             out["direction"].isna(), "uncertain")
         out["reason"] = pm["reason"]
-        out["y"], out["cross_day"] = t["y"], t["cross_day"]
+        # 날 넘김: 실현된 표본은 실제 목표 봉 날짜로, 아직 실현 전이면 slot 으로 (하루 마지막 slot 을 넘으면 다음 거래일)
+        out["y"] = t["y"]
+        out["cross_day"] = t["cross_day"].where(t["realized_at"].notna(), (t["slot"] + h) > n_slots)
         preds.append(out[keep])
     predictions = pd.concat(preds, ignore_index=True)
     chash = _hash({k: cfg[k] for k in ("minutes", "forecast")})
