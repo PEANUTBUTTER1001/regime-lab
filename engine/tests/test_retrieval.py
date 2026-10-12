@@ -36,6 +36,15 @@ def test_cache_key_stable_and_changes_with_inputs(tmp_path, cfg):
     assert retrieval.open_index(store, cfg, fields=["title"]).key != a.key
 
 
+def test_cached_index_matches_built(tmp_path, cfg):
+    """캐시에서 연 색인(정수 배열 postings)이 새로 만든 색인과 같고, 검색 결과도 같다."""
+    store = _store(tmp_path)
+    a, b = retrieval.open_index(store, cfg), retrieval.open_index(store, cfg)
+    assert b.from_cache and a.index == b.index
+    q, t = "한빛반도체 자기주식", (T0 + timedelta(days=1)).isoformat()
+    assert retrieval.search(a, cfg, q, t) == retrieval.search(b, cfg, q, t)
+
+
 def test_search_response_fields_and_validation(tmp_path, cfg):
     ei = retrieval.open_index(_store(tmp_path), cfg)
     res = retrieval.search(ei, cfg, "한빛반도체 자기주식", (T0 + timedelta(days=1)).isoformat())
