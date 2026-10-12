@@ -18,6 +18,20 @@ export function setLang(lang) {
 document.documentElement.lang = current;
 
 const D = {
+  'login.authHint': ['이메일 인증 후 로그인하여 내 분석 결과와 전략을 관리하세요.', 'Verify your email, then sign in to manage your results and strategies.'],
+  'login.forgot': ['비밀번호를 잊으셨나요?', 'Forgot password?'],
+  'login.reset': ['비밀번호 재설정', 'Reset password'],
+  'login.sendReset': ['재설정 메일 보내기', 'Send reset email'],
+  'login.changePassword': ['새 비밀번호 저장', 'Save new password'],
+  'login.checkEmail': ['안내 메일을 요청했습니다. 이메일을 확인하세요. 발송 제한으로 도착이 지연될 수 있습니다.', 'If applicable, instructions have been sent. Check your email; delivery may be delayed by sending limits.'],
+  'login.verified': ['확인이 완료되었습니다. 비밀번호로 로그인하세요.', 'Confirmation completed. Sign in with your password.'],
+  'login.linkExpired': ['인증 링크가 올바르지 않거나 만료되었습니다. 안내 메일을 다시 요청하세요.', 'The link is invalid or expired. Request another email.'],
+  'login.errAuth': ['이메일과 비밀번호 또는 인증 상태를 확인하세요.', 'Check your email, password, and verification status.'],
+  'login.errPasswordLength': ['비밀번호는 {min}자 이상이어야 합니다.', 'Password must contain at least {min} characters.'],
+  'login.unavailable': ['인증 서버에 연결할 수 없습니다. 잠시 후 다시 시도하세요.', 'Authentication is unavailable. Try again shortly.'],
+  'login.unconfirmed': ['이메일 인증을 완료한 뒤 로그인하세요.', 'Verify your email before signing in.'],
+  'login.limited': ['요청이 너무 많습니다. 잠시 후 다시 시도하세요.', 'Too many requests. Please try again later.'],
+
   // 공통 프레임
   'nav.workspace': ['작업 공간', 'Workspace'],
   'nav.builder': ['전략 만들기', 'Build a strategy'],

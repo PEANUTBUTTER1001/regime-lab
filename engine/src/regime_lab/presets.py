@@ -69,8 +69,8 @@ def snapshot_strategy(strategy: dict, preset_id: str, cfg: dict) -> dict:
 class PresetStore:
     """runs/presets/ 파일 저장소. 같은 프로세스 안의 동시 요청은 잠금으로 직렬화한다."""
 
-    def __init__(self, root: Path, cfg: dict, clock=None):
-        self.root, self.cfg = root, cfg
+    def __init__(self, root: Path, cfg: dict, clock=None, namespace: str | None = None):
+        self.root, self.cfg, self.namespace = root, cfg, namespace
         self._now = clock or (lambda: datetime.now().isoformat(timespec="seconds"))
         self._lock = threading.Lock()
 
@@ -121,7 +121,10 @@ class PresetStore:
         now = self._now()
         with self._lock:
             self._check_name_free(name)
-            pid = "p_" + config_hash({"name": name, "at": now, "n": len(self._all())})[:12]
+            identity = {"name": name, "at": now, "n": len(self._all())}
+            if self.namespace is not None:
+                identity["namespace"] = self.namespace
+            pid = "p_" + config_hash(identity)[:12]
             p = {"format": FORMAT, "id": pid, "name": name,
                  "strategy": snapshot_strategy(strategy, pid, self.cfg),
                  "source": source or {"kind": "manual"},

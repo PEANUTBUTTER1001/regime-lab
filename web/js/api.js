@@ -6,12 +6,14 @@ export class ApiError extends Error {
   }
 }
 
-async function request(method, path, body) {
+let authConfig = null;
+async function request(method, path, body, retried = false) {
   let res;
   try {
     res = await fetch(`/api${path}`, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : {},
+      credentials: 'same-origin',
+      headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(authConfig?.enabled && !['GET', 'HEAD'].includes(method) ? { 'X-CSRF-Token': authConfig.csrf_token } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
@@ -21,6 +23,11 @@ async function request(method, path, body) {
   try { data = await res.json(); } catch { /* 본문 없음 */ }
   if (!res.ok) {
     const d = data || {};
+    if (res.status === 403 && d.code === 'auth_csrf' && !retried) {
+      await api.authConfig();
+      return request(method, path, body, true);
+    }
+    if (res.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event('rl:unauthorized'));
     throw new ApiError(res.status, d.code || 'server_error', d.message || `Server error (${res.status})`, d.detail ?? null,
       d.retryable ?? res.status >= 500);
   }
@@ -28,6 +35,13 @@ async function request(method, path, body) {
 }
 
 export const api = {
+  authConfig: async () => { authConfig = await request('GET', '/auth/config'); return authConfig; },
+  me: () => request('GET', '/auth/me'),
+  login: (email, password) => request('POST', '/auth/login', {email, password}),
+  signup: (email, password) => request('POST', '/auth/signup', {email, password}),
+  logout: () => request('POST', '/auth/logout'),
+  recover: (email) => request('POST', '/auth/recover', {email}),
+  password: (password) => request('POST', '/auth/password', {password}),
   meta: () => request('GET', '/meta'),
   preview: (filters) => request('POST', '/universe/preview', filters),
   submit: (strategies) => request('POST', '/runs', { strategies }),

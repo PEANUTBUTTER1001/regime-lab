@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import os
+import ipaddress
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,6 +40,39 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8000
 
+    auth_mode: str = "demo"
+    supabase_url: str | None = None
+    supabase_publishable_key: str | None = field(default=None, repr=False)
+    auth_site_url: str = "http://127.0.0.1:8000"
+    auth_state_dir: Path | None = None
+    auth_admin_ids: list[str] = field(default_factory=list)
+
+    def validate_auth(self):
+        if self.auth_mode not in {"demo", "supabase"}:
+            raise ValueError("REGIME_AUTH_MODE must be demo or supabase")
+        if self.auth_mode == "demo":
+            try:
+                local = ipaddress.ip_address(self.host).is_loopback
+            except ValueError:
+                local = self.host == "localhost"
+            if not local:
+                raise ValueError("Demo authentication is only allowed on loopback")
+            return
+        url = urlsplit(self.supabase_url or "")
+        site = urlsplit(self.auth_site_url)
+        if url.scheme != "https" or not (url.hostname or "").endswith(".supabase.co") or url.username or url.password or url.query or url.fragment or url.path not in {"", "/"} or url.port not in {None, 443}:
+            raise ValueError("Set a valid HTTPS REGIME_SUPABASE_URL")
+        if not self.supabase_publishable_key or not self.supabase_publishable_key.startswith("sb_publishable_") or any(c.isspace() for c in self.supabase_publishable_key):
+            raise ValueError("Set REGIME_SUPABASE_PUBLISHABLE_KEY")
+        if self.auth_state_dir is None:
+            raise ValueError("Set REGIME_AUTH_STATE_DIR")
+        try:
+            local_site = ipaddress.ip_address(site.hostname or "").is_loopback
+        except ValueError:
+            local_site = site.hostname == "localhost"
+        if not site.netloc or site.username or site.password or site.path not in {"", "/"} or site.query or site.fragment or not (site.scheme == "https" or (site.scheme == "http" and local_site)):
+            raise ValueError("REGIME_AUTH_SITE_URL requires HTTPS or a loopback development URL")
+
     @classmethod
     def from_env(cls) -> "Settings":
         paths = load_paths()
@@ -56,4 +91,10 @@ class Settings:
             cors_origins=[o.strip() for o in os.environ.get("REGIME_CORS_ORIGINS", "").split(",") if o.strip()],
             host=os.environ.get("REGIME_HOST", "127.0.0.1"),
             port=int(os.environ.get("REGIME_PORT", "8000")),
+            auth_mode=os.environ.get("REGIME_AUTH_MODE") or ("supabase" if os.environ.get("REGIME_SUPABASE_URL") or os.environ.get("REGIME_SUPABASE_PUBLISHABLE_KEY") else "demo"),
+            supabase_url=os.environ.get("REGIME_SUPABASE_URL"),
+            supabase_publishable_key=os.environ.get("REGIME_SUPABASE_PUBLISHABLE_KEY"),
+            auth_site_url=os.environ.get("REGIME_AUTH_SITE_URL", "http://127.0.0.1:" + os.environ.get("REGIME_PORT", "8000")),
+            auth_state_dir=Path(os.environ["REGIME_AUTH_STATE_DIR"]) if os.environ.get("REGIME_AUTH_STATE_DIR") else None,
+            auth_admin_ids=[v.strip() for v in os.environ.get("REGIME_AUTH_ADMIN_IDS", "").split(",") if v.strip()],
         )

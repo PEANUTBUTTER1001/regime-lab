@@ -47,7 +47,7 @@ def submit(req: RunRequest, request: Request):
 
 @router.get("/runs")
 def list_runs(request: Request, limit: int = 50):
-    return {"runs": request.app.state.rl.jobs.list(limit)}
+    return {"runs": request.app.state.rl.jobs.list(None if request.app.state.rl.auth.enabled else limit)}
 
 
 @router.get("/runs/{run_id}")
