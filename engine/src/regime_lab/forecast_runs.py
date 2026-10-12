@@ -62,6 +62,9 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
     if timeframe not in fcfg["timeframes"]:
         raise ValueError(f"지원하지 않는 봉: {timeframe} (가능: {fcfg['timeframes']})")
     rcfg = fcfg["runs"]
+    if not set(rcfg["store_splits"]) <= {"test"}:
+        # 학습·검증 구간 예측은 모델 학습·보정에 그 시점 뒤 값까지 쓰여 '그 시점 예측'이 아니다 (FR-F4)
+        raise ValueError(f"forecast.runs.store_splits 는 test 만 가능합니다: {rcfg['store_splits']}")
     codes = sorted(codes) if codes else store.common_codes()
     bars, prep = build_bars(store, cfg, codes, timeframe, rcfg["batch_codes"])
     if bars.empty:
