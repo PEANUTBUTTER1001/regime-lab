@@ -94,7 +94,7 @@ def test_stock_no_prediction_and_errors(client):
     assert early.status_code == 200 and early.json()["status"] == "no_prediction"
     assert client.get(f"/api/forecasts/runs/{RUN}/stocks/000660").json()["status"] == "no_prediction"
     nf = client.get("/api/forecasts/runs/1h-none/stocks/005930")
-    assert nf.status_code == 404 and set(nf.json()) == ERROR_KEYS and nf.json()["code"] == "run_not_found"
+    assert nf.status_code == 404 and set(nf.json()) == ERROR_KEYS and nf.json()["code"] == "forecast_run_not_found"
     bad = client.get(f"/api/forecasts/runs/{RUN}/stocks/5930")
     assert bad.status_code == 422 and bad.json()["code"] == "invalid_code"
     bad_t = client.get(f"/api/forecasts/runs/{RUN}/stocks/005930", params={"as_of": "어제"})
