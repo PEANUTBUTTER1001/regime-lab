@@ -78,6 +78,16 @@ def test_preview_counts_and_limit(client):
     assert r.json()["detail"] == {"candidates": 228, "max_candidates": 200}
 
 
+def test_preview_estimate_scales_with_sample_tickers(client):
+    """sample 모드(종목 30개)면 예상 시간이 종목 수에 비례해 줄어든다 — 전 종목 실측을 그대로 쓰면 시연 때 40배 넘게 어긋남."""
+    s = load_config()["search"]
+    client.app.state.rl.tickers = [f"{i:06d}" for i in range(30)]
+    r = client.post("/api/searches/preview", json=BODY).json()
+    assert r["estimated_sec"] == round(8 * s["min_sec_per_candidate"], 1)
+    client.app.state.rl.tickers = None
+    assert client.post("/api/searches/preview", json=BODY).json()["estimated_sec"] == round(8 * s["sec_per_candidate"], 1)
+
+
 @pytest.mark.parametrize("body,field", [
     ({**BODY, "target_win_rate": 1.5}, "target_win_rate"),
     ({**BODY, "target_win_rate": "0.5"}, "target_win_rate"),
