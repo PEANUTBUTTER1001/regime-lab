@@ -15,6 +15,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import sklearn
 
 from regime_lab.bars import (MINUTE_PREP_VERSION, add_segments, aggregate_bars, apply_price_basis, judge_price_basis,
                              normalize_minutes, slot_edges)
@@ -122,8 +123,11 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
     predictions = pd.concat(preds, ignore_index=True)
     chash = _hash({k: cfg[k] for k in ("minutes", "forecast")})
     run_id = f"{timeframe}-{now:%Y%m%dT%H%M%S}-{chash[:8]}"
+    created = pd.Timestamp(now)
+    created = created.tz_localize("+09:00") if created.tzinfo is None else created.tz_convert("+09:00")  # 시각은 KST
     meta = {
-        "run_id": run_id, "created_at": now.isoformat(), "format_version": FORECAST_RUN_VERSION,
+        "run_id": run_id, "created_at": created.isoformat(), "format_version": FORECAST_RUN_VERSION,
+        "versions": {"scikit-learn": sklearn.__version__, "numpy": np.__version__, "pandas": pd.__version__},  # NFR-10
         "timeframe": timeframe, "horizon": H, "quantiles": fcfg["quantiles"], "direction": fcfg["direction"],
         "split": fcfg["split"], "stored_splits": rcfg["store_splits"], "model": {"kind": "sklearn.HistGradientBoosting",
         **fcfg["model"]}, "features": FEATURES, "minute_prep_version": MINUTE_PREP_VERSION, "config_hash": chash,
