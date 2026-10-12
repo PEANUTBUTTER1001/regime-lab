@@ -20,12 +20,12 @@ from regime_lab.bars import (MINUTE_PREP_VERSION, add_segments, aggregate_bars, 
                              normalize_minutes)
 from regime_lab.forecast import model as M
 from regime_lab.forecast.baseline import historical
-from regime_lab.forecast.evaluate import direction, score
+from regime_lab.forecast.evaluate import direction, direction_policy, score
 from regime_lab.forecast.features import FEATURES, make_features
 from regime_lab.forecast.split import SPLITS, assign_split
 from regime_lab.forecast.targets import make_targets
 
-FORECAST_RUN_VERSION = 1  # 결과 파일 형식 버전 (열을 바꾸면 올린다)
+FORECAST_RUN_VERSION = 2  # 결과 파일 형식 버전 (열을 바꾸면 올린다). 2: direction_shown·방향 표시 판정·slot/날 넘김 채점
 
 
 def build_bars(store, cfg: dict, codes: list[str], timeframe: str, batch: int) -> tuple[pd.DataFrame, dict]:
@@ -49,6 +49,18 @@ def _hash(obj) -> str:
 
 def _records(df: pd.DataFrame) -> list[dict]:
     return json.loads(df.to_json(orient="records", force_ascii=False))  # numpy 값 → JSON 기본형
+
+
+def _split_valid(t: pd.DataFrame, va: pd.Series, holdout_share: float) -> tuple[pd.Series, pd.Series]:
+    """검증 구간을 거래일 순서로 나눈다: 앞부분 = 모델 보정, 뒷부분(holdout_share) = 방향 표시 판정.
+    같은 표본으로 보정과 판정을 하면 판정이 낙관적으로 된다."""
+    days = np.sort(t.loc[va, "as_of"].dt.normalize().unique())
+    n_pol = int(round(len(days) * holdout_share))
+    if len(days) < 2 or n_pol < 1:
+        return va, va & False
+    first_pol = days[len(days) - n_pol]
+    pol = va & (t["as_of"].dt.normalize() >= first_pol)
+    return va & ~pol, pol
 
 
 def _date_split(as_of: pd.Series, cfg: dict) -> np.ndarray:
@@ -76,13 +88,18 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
         t = make_targets(bars, h)
         t["split"] = assign_split(t, cfg)
         tr, va = t["split"].eq("train"), t["split"].eq("valid")
-        fm = M.fit(X[tr], t.loc[tr, "y"], X[va], t.loc[va, "y"], cfg)
+        cal, pol = _split_valid(t, va, fcfg["direction_policy"]["holdout_share"])
+        fm = M.fit(X[tr], t.loc[tr, "y"], X[cal], t.loc[cal, "y"], cfg)  # 보정은 검증 앞부분만
         pm, pb = M.predict(fm, X), historical(t, cfg)
+        policy = direction_policy(t.loc[pol, "y"], pm.loc[pol, "p_up"], pb.loc[pol, "p_up"], cfg)  # 판정은 뒷부분
         ev = t[t["split"].isin(["valid", "test"])].assign(nxt=lambda d: d["nxt_period"])
         scores[str(h)] = {
             "conformal_widen": float(fm.widen),
+            "direction_policy": policy,
             "model": _records(score(ev, pm.loc[ev.index], cfg, ["split", "nxt"])),
             "baseline": _records(score(ev, pb.loc[ev.index], cfg, ["split", "nxt"])),
+            "model_by_slot": _records(score(ev, pm.loc[ev.index], cfg, ["split", "slot"])),
+            "model_by_cross_day": _records(score(ev, pm.loc[ev.index], cfg, ["split", "cross_day"])),
         }
         qcols = [c for c in pm.columns if c.startswith("q")]
         out = pd.DataFrame({"code": t["code"], "as_of": t["as_of"], "h": h, "split": date_split,
@@ -90,6 +107,9 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
         out[qcols] = pm[qcols]
         out["p_up"] = pm["p_up"]
         out["direction"] = direction(pm["p_up"], cfg)
+        # 화면 표시용: 방향 표시 조건(P2-8)을 통과한 봉·h 만 방향, 아니면 "불확실"
+        out["direction_shown"] = out["direction"] if policy["enabled"] else out["direction"].where(
+            out["direction"].isna(), "uncertain")
         out["reason"] = pm["reason"]
         out["y"], out["cross_day"] = t["y"], t["cross_day"]
         preds.append(out[keep])
