@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from regime_lab.data.loader import input_file_hashes, load_daily, load_master
 from regime_lab.data.minutes import load_minutes, minutes_fingerprint
 
 FILES = ("meta.json", "predictions.parquet", "scores.json")
@@ -29,6 +28,8 @@ class ForecastStore:
     # 읽기 (입력)
     def common_codes(self) -> list[str]:
         """N8: 종목 마스터의 보통주 코드."""
+        from regime_lab.data.loader import load_master  # loader 가 이 모듈을 다시 내보내므로 함수 안에서 import
+
         m = load_master(self.store)
         return sorted(m.loc[m["kind"].astype(str) == "보통주", "ticker"].astype(str))
 
@@ -37,10 +38,14 @@ class ForecastStore:
 
     def load_daily_raw(self, codes: list[str]) -> pd.DataFrame:
         """(code, date, close_raw) — KRX 원주가 종가 (N2 판정용)."""
+        from regime_lab.data.loader import load_daily
+
         d = load_daily(self.store, tickers=codes)
         return d.assign(code=d["ticker"].astype(str))[["code", "date", "close_raw"]]
 
     def fingerprint(self) -> dict[str, str]:
+        from regime_lab.data.loader import input_file_hashes
+
         krx = input_file_hashes(self.store)
         return {"minutes": minutes_fingerprint(self.minutes_dir), "raw/krx_daily": krx["raw/krx_daily"],
                 "master.parquet": krx["master.parquet"]}
@@ -67,6 +72,19 @@ class ForecastStore:
             return []
         return sorted(p.name for p in self.root.iterdir() if p.is_dir() and not p.name.startswith(".")
                       and all((p / f).exists() for f in FILES))
+
+    def has_run(self, run_id: str) -> bool:
+        return run_id in self.list_runs()
+
+    def read_meta(self, run_id: str) -> dict:
+        return json.loads((self.root / run_id / "meta.json").read_text(encoding="utf-8"))
+
+    def read_scores(self, run_id: str) -> dict:
+        return json.loads((self.root / run_id / "scores.json").read_text(encoding="utf-8"))
+
+    def read_predictions(self, run_id: str, code: str) -> pd.DataFrame:
+        """한 종목의 예측 행만 (Parquet 필터로 읽음)."""
+        return pd.read_parquet(self.root / run_id / "predictions.parquet", filters=[("code", "==", code)])
 
     def read_run(self, run_id: str) -> tuple[dict, pd.DataFrame, dict]:
         d = self.root / run_id
