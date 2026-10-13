@@ -11,14 +11,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
 import sklearn
 
-from regime_lab.bars import (MINUTE_PREP_VERSION, add_segments, aggregate_bars, apply_price_basis, judge_price_basis,
-                             normalize_minutes, slot_edges)
+from regime_lab.bars import (KST, MINUTE_PREP_VERSION, add_segments, aggregate_bars, apply_price_basis,
+                             judge_price_basis, normalize_minutes, slot_edges, to_kst_naive)
 from regime_lab.forecast import model as M
 from regime_lab.forecast.baseline import historical
 from regime_lab.forecast.evaluate import direction, direction_policy, score
@@ -26,6 +27,7 @@ from regime_lab.forecast.features import FEATURES, make_features
 from regime_lab.forecast.split import SPLITS, assign_split
 from regime_lab.forecast.targets import make_targets
 
+CODE_RE = re.compile(r"^[0-9A-Za-z]{6}$")
 FORECAST_RUN_VERSION = 2  # 결과 파일 형식 버전 (열을 바꾸면 올린다). 2: direction_shown·방향 표시 판정·slot/날 넘김 채점
 
 
@@ -139,3 +141,72 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
     }
     store.write_run(run_id, meta, predictions, scores)
     return run_id, meta
+
+
+# ── 읽기 (P2-9 API·화면용). 계산(구간 → 가격, 시점 고르기)은 엔진에 두고 API 는 전달만 한다 ──
+
+class ForecastError(Exception):
+    def __init__(self, code: str, message: str, detail: dict | None = None):
+        super().__init__(message)
+        self.code, self.message, self.detail = code, message, detail or {}
+
+
+def _iso_kst(t) -> str:
+    return pd.Timestamp(t).tz_localize(KST).isoformat()
+
+
+def list_runs(store) -> list[dict]:
+    """예측 실행 목록 (최근 것 먼저)."""
+    out = []
+    for run_id in store.list_runs():
+        m = store.read_meta(run_id)
+        out.append({k: m.get(k) for k in ("run_id", "timeframe", "created_at", "horizon", "codes", "format_version")})
+    return sorted(out, key=lambda r: r["created_at"] or "", reverse=True)
+
+
+def _require_run(store, run_id: str) -> dict:
+    if not store.has_run(run_id):
+        raise ForecastError("forecast_run_not_found", f"예측 실행이 없습니다: {run_id}", {"run_id": run_id})
+    return store.read_meta(run_id)
+
+
+def stock_forecast(store, cfg: dict, run_id: str, code: str, as_of: str | None = None) -> dict:
+    """한 종목의 한 시점 예측. as_of 가 없으면 가장 최근 시점, 있으면 그 시각 이전(포함)의 마지막 확정 시점.
+
+    steps: h=1..H 마다 회색 구간(가격 = 기준 종가 × exp(분위)), 통계적 방향(표시 판정 통과 h 만), 상승 확률, 실제 종가(있으면).
+    history: 그 시점까지의 직전 기준 종가들 (차트용, 확정 봉만).
+    """
+    if not CODE_RE.match(code or ""):
+        raise ForecastError("invalid_code", "종목코드는 6자리 영숫자입니다", {"code": code})
+    meta = _require_run(store, run_id)
+    try:
+        t = to_kst_naive(as_of) if as_of else None
+    except (ValueError, TypeError):
+        raise ForecastError("invalid_as_of", "as_of 는 ISO 시각이어야 합니다", {"as_of": as_of}) from None
+    p = store.read_predictions(run_id, code)
+    if t is not None:
+        p = p[p["as_of"] <= t]
+    base = {"status": "no_prediction", "run_id": run_id, "timeframe": meta["timeframe"], "code": code,
+            "horizon": meta["horizon"], "notice": meta.get("notice")}
+    if p.empty:
+        return base
+    at = p["as_of"].max()
+    rows = p[p["as_of"] == at].sort_values("h")
+    qs = meta["quantiles"]
+    lo, mid, hi = (f"q{qs[0]:g}", f"q{qs[len(qs) // 2]:g}", f"q{qs[-1]:g}")
+    shown = rows["direction_shown"] if "direction_shown" in rows else pd.Series("uncertain", index=rows.index)
+    bc = float(rows["base_close"].iloc[0])
+    steps = [{"h": int(r["h"]), "low": bc * float(np.exp(r[lo])), "mid": bc * float(np.exp(r[mid])),
+              "high": bc * float(np.exp(r[hi])), "p_up": float(r["p_up"]), "direction": d,
+              "actual": None if pd.isna(r["y"]) else bc * float(np.exp(r["y"])), "cross_day": bool(r["cross_day"])}
+             for r, d in zip(rows.to_dict("records"), shown)]
+    hist = p[(p["h"] == 1) & (p["as_of"] <= at)].sort_values("as_of").tail(cfg["forecast"]["api"]["history_bars"])
+    return {**base, "status": "ok", "as_of": _iso_kst(at), "base_close": bc, "steps": steps,
+            "history": [{"as_of": _iso_kst(a), "close": float(c)} for a, c in zip(hist["as_of"], hist["base_close"])]}
+
+
+def run_scores(store, run_id: str) -> dict:
+    """봉·h 별 모델 vs 기준선 채점과 방향 표시 판정."""
+    meta = _require_run(store, run_id)
+    return {"run_id": run_id, "timeframe": meta["timeframe"], "horizon": meta["horizon"], "split": meta["split"],
+            "scores": store.read_scores(run_id), "notice": meta.get("notice")}

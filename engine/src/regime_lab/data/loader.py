@@ -13,6 +13,7 @@ import duckdb
 import pandas as pd
 
 from regime_lab.data.docs import DocsStore  # noqa: F401 — 근거 검색 문서 저장소. API·CLI 는 공개 모듈(R5)인 이 파일로 가져간다
+from regime_lab.data.forecast_store import ForecastStore  # noqa: F401 — 예측 실행 저장소 (P2-7·P2-9), DocsStore 와 같은 방식
 
 PRICE_COLS = ["open", "high", "low", "close"]
 
@@ -144,3 +145,4 @@ def warmup_file_hashes(cache: Path) -> dict[str, str]:
         st = f.stat()
         out[f"cache/warmup/{f.name}"] = f"size={st.st_size};mtime={int(st.st_mtime)}"
     return out
+
