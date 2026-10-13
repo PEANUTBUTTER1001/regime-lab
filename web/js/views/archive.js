@@ -12,7 +12,14 @@ const STATUSES = ['all', 'amendment', 'revised', 'unlinked'];
 const KST = '+09:00';
 const nowKst = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16);
 const toIso = (local) => (local ? `${local}:00${KST}` : '');
-const toLocal = (iso) => (iso ? iso.slice(0, 16) : '');
+// 주소의 as_of 는 어느 시간대로 와도 같은 순간의 KST 로 바꿔 입력칸에 넣는다 (문자열을 자르면 +00:00 이 9시간 어긋남)
+const KST_LOCAL = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const HAS_TZ = /([zZ]|[+-]\d{2}:?\d{2})$/;
+const toLocal = (iso) => {
+  if (!iso) return '';
+  const d = new Date(HAS_TZ.test(iso) ? iso : `${iso}${KST}`);
+  return Number.isNaN(d.getTime()) ? '' : KST_LOCAL.format(d).replace(' ', 'T');
+};
 const KST_FMT = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 const when = (iso) => (!iso ? '—' : iso.length === 10 ? iso : KST_FMT.format(new Date(iso)));
 const srcLabel = (s) => (has(`ev.src.${s}`) ? t(`ev.src.${s}`) : s);
