@@ -23,7 +23,7 @@ from regime_lab.rag.rank import search as rank_search
 from regime_lab.rag.select import AS_OF_MODES, aware, select_as_of, with_tickers
 from regime_lab.rag.text import doc_text, tokenize
 
-INDEX_VERSION = 2  # 토큰화·순위·시점 선택 규칙이나 캐시 형식을 바꾸면 올린다 (AGENTS.md §4). 2: 캐시 postings = [행 목록, 빈도 목록]
+INDEX_VERSION = 3  # 3: 게시 시각 최신순 선택 추가. 관련도 기본값과 as_of 규칙은 유지.
 SPLITS = ("dev", "test")
 _DOC_FIELDS = ("doc_id", "version", "source", "title", "corp_name", "url", "published_at", "time_precision",
                "first_seen_at", "available_at")
@@ -119,17 +119,37 @@ def _validate(cfg: dict, q, as_of, mode, tickers, k) -> tuple[str, datetime, str
     return q, t, mode, tickers, k
 
 
-def search(ei: EvidenceIndex, cfg: dict, q: str, as_of, mode: str = "observed", tickers=None, k: int | None = None) -> dict:
+def _published_time(d: dict) -> datetime:
+    """시간대 정규화. 날짜만 알면 KST 자정, 누락·잘못된 시각은 최신순의 맨 뒤."""
+    value = d.get("published_at")
+    try:
+        if isinstance(value, str) and len(value) == 10:
+            return datetime.combine(date.fromisoformat(value), datetime.min.time(), _KST).astimezone(timezone.utc)
+        return aware(value).astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def search(ei: EvidenceIndex, cfg: dict, q: str, as_of, mode: str = "observed", tickers=None, k: int | None = None,
+           sort: str = "relevance") -> dict:
     """as_of 에 이용 가능했던 문서 중 관련 근거. 근거가 없으면 status=no_evidence 와 빈 목록.
 
     묶기를 켜면(rag.group_threshold) 결과는 묶음 대표이고, 제목이 비슷한 다른 기사는 similar 에 담는다.
     """
     q, t, mode, tickers, k = _validate(cfg, q, as_of, mode, tickers, k)
+    if sort not in ("relevance", "published_desc"):
+        raise RetrievalError("validation_failed", "Check the input values.",
+                             {"fields": {"sort": "relevance 또는 published_desc"}})
     r = cfg["rag"]
     rows = with_tickers(ei.docs, select_as_of(ei.docs, t, mode), tickers)
+    order_keys = None
+    if sort == "published_desc":
+        ordered = sorted(rows, key=lambda i: (_published_time(ei.docs[i]), ei.keys[i]), reverse=True)
+        order_keys = {row: position for position, row in enumerate(ordered)}
     hits = rank_search(ei.index, ei.keys, tokenize(q), set(rows), k1=r["k1"], b=r["b"], top_k=k,
                        candidate_k=r["candidate_k"], mmr_lambda=r["mmr_lambda"], min_score=r["min_score"],
-                       group_threshold=r["group_threshold"], group_candidate_k=r["group_candidate_k"])
+                       group_threshold=r["group_threshold"], group_candidate_k=r["group_candidate_k"],
+                       order_keys=order_keys)
     items = []
     for h in hits:
         d = ei.docs[h.row]
@@ -140,7 +160,7 @@ def search(ei: EvidenceIndex, cfg: dict, q: str, as_of, mode: str = "observed", 
     return {"status": "ok" if items else "no_evidence", "items": items,
             "index": {"index_version": INDEX_VERSION, "docs_fingerprint": ei.docs_fingerprint, "fields": list(ei.fields),
                       "total_docs": len(ei.docs), "visible_docs": len(rows), "mode": mode, "as_of": t.isoformat(),
-                      "grouping": r["group_threshold"]}}
+                      "grouping": r["group_threshold"], "sort": sort}}
 
 
 def _mean(xs: list[float]) -> float | None:
@@ -319,7 +339,7 @@ def browse(ei: EvidenceIndex, cfg: dict, as_of, mode: str = "observed", source_t
         rows = [i for i in rows if ei.docs[i].get("source_type") == source_type]
     if status != "all":
         rows = [i for i in rows if status in sts[i]]
-    rows.sort(key=lambda i: (_pub_date(ei.docs[i]), ei.docs[i]["available_at"], ei.docs[i]["doc_id"]), reverse=True)
+    rows.sort(key=lambda i: (_published_time(ei.docs[i]), ei.docs[i]["doc_id"]), reverse=True)
     lo = (page - 1) * page_size
     shown = rows[lo:lo + page_size]
     ids = {ei.docs[i]["doc_id"] for i in shown}  # 보이는 버전 수는 이 페이지 문서만 센다 (수십만 건이면 요청마다 전체 판정이 느림)
