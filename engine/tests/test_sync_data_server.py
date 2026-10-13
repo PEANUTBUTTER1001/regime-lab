@@ -19,12 +19,13 @@ _spec = importlib.util.spec_from_file_location(
 S = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(S)
 
-TICKERS = ["000001", "000002", "000003"]
-
 
 @pytest.fixture(autouse=True)
 def _no_retry_wait(monkeypatch):
     monkeypatch.setattr(S, "RETRY_WAIT_SEC", 0)   # 일시 오류 재시도 대기 없이
+
+TICKERS = ["000001", "000002", "000003"]
+
 DATES = pd.bdate_range("2026-09-01", periods=12)
 
 
@@ -305,7 +306,7 @@ def test_minutes_row_count_must_match_existing_copy(world, tmp_path):
                       "high_p": 1, "low_p": 1, "close_p": 1, "volume": 1, "value": 1})
     client = FakeClient(frames)
     client.tables["stock_minutes"] = m.astype(object)
-    with pytest.raises(S.SyncError, match="기존 1분봉 사본과 행 수가 다릅니다"):
+    with pytest.raises(S.SyncError, match="기존 1분봉 사본 범위의 행 수가 다릅니다"):
         S.run(client, tmp_path / "new", compare_store=old, minutes=True, log=lambda *_: None)
     assert not (tmp_path / "new").exists()
 
@@ -334,3 +335,22 @@ def test_transient_errors_are_retried_then_reported():
     with pytest.raises(S.SyncError) as e:
         bad.table("store_master")
     assert bad._opener.calls == S.RETRIES and "10.9.8.7" not in str(e.value)
+
+
+def test_minutes_rows_added_after_existing_copy_are_allowed(world, tmp_path):
+    """재리뷰 P2: 기존 사본 이후 같은 달에 새로 적재된 행은 허용, 기존 범위 안 행 수만 대조."""
+    frames, old = world
+    md = old.parent / "minutes"
+    md.mkdir()
+    man = {"months": {"202609": {"rows": 2, "min_dt": "2026-09-01 09:00:00", "max_dt": "2026-09-01 09:01:00"}}}
+    (md / "minutes_manifest.json").write_text(json.dumps(man), encoding="utf-8")
+    m = pd.DataFrame({"code": ["000001"] * 4, "dt": ["2026-09-01 09:00:00", "2026-09-01 09:01:00",
+                                                     "2026-09-02 09:00:00", "2026-09-02 09:01:00"],
+                      "open_p": 1, "high_p": 1, "low_p": 1, "close_p": 1, "volume": 1, "value": 1})
+    client = FakeClient(frames)
+    client.tables["stock_minutes"] = m.astype(object)
+    S.run(client, tmp_path / "new", compare_store=old, minutes=True, log=lambda *_: None)
+    assert check_manifest(tmp_path / "new" / "minutes")["months"]["202609"]["rows"] == 4
+    client.tables["stock_minutes"] = m.iloc[1:].astype(object)       # 기존 범위 안 행이 하나 빠지면 멈춤
+    with pytest.raises(S.SyncError, match="기존 1분봉 사본 범위의 행 수가 다릅니다"):
+        S.run(client, tmp_path / "new2", compare_store=old, minutes=True, log=lambda *_: None)

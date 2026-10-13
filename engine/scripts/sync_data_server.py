@@ -199,7 +199,7 @@ def fetch_by_dates(client: Client, name: str, dates: list[pd.Timestamp], step: i
                 break
             except TooManyRows:
                 if n == 1:
-                    raise SyncError(f"{name}: 하루치도 서버 한도를 넘습니다 ({a.date()})") from None
+                    raise SyncError(f"{name}: 하루치도 서버 한도(20만 행·쿼리 30초)를 넘어 더 나눌 수 없습니다 ({a.date()})") from None
                 n = max(1, n // 2)
         i += n
     log(f"  {name}: {sum(len(p) for p in parts):,}행 ({len(parts)}번 요청)")
@@ -292,8 +292,8 @@ def sync_store(client: Client, dest: Path, old: dict | None, sample_tickers: lis
 def sync_minutes(client: Client, dest: Path, codes: list[str], months: list[str], log,
                  old_months: dict | None = None) -> dict:
     """1분봉 사본 (export_minutes.py 와 같은 파일·매니페스트 형식). months: YYYY-MM 목록.
-    old_months(기존 1분봉 매니페스트의 months)가 있으면 겹치는 달의 행 수가 같아야 한다 — 종목 목록(master)에 없는
-    코드가 빠지는 경우도 여기서 드러난다."""
+    old_months(기존 1분봉 매니페스트의 months)가 있으면 겹치는 달에서 기존 사본의 시각 범위(min_dt~max_dt) 안 행 수가
+    같아야 한다 — 그 뒤 같은 달에 새로 적재된 행은 허용. 종목 목록(master)에 없는 코드가 빠지는 경우도 여기서 드러난다."""
     started, t0 = datetime.now(), time.time()
     dest.mkdir(parents=True)
     stats, total = {}, 0
@@ -310,16 +310,21 @@ def sync_minutes(client: Client, dest: Path, codes: list[str], months: list[str]
                     break
                 except TooManyRows:
                     if n == 1:
-                        raise SyncError(f"stock_minutes: 한 종목 한 달도 한도를 넘습니다 ({codes[i]} {ym})") from None
+                        raise SyncError(f"stock_minutes: 한 종목 한 달도 서버 한도(20만 행·쿼리 30초)를 넘습니다 ({codes[i]} {ym})") from None
                     n = max(1, n // 2)
             i += n
         df = convert(pd.concat(parts, ignore_index=True), MINUTE_SCHEMA, f"stock_minutes {ym}")
         if df.duplicated(["code", "dt"]).any():
             raise SyncError(f"stock_minutes {ym}: (code, dt) 중복")
         key = start.strftime("%Y%m")
-        if old_months and key in old_months and old_months[key]["rows"] != len(df):
-            raise SyncError(f"stock_minutes {ym}: 기존 1분봉 사본과 행 수가 다릅니다 (서버 {len(df):,} / 기존 "
-                            f"{old_months[key]['rows']:,}) — 저장하지 않습니다")
+        if old_months and key in old_months:
+            om = old_months[key]
+            same = df
+            if om.get("min_dt") and om.get("max_dt"):  # 기존 사본이 덮던 시각 범위만 대조
+                same = df[(df["dt"] >= pd.Timestamp(om["min_dt"])) & (df["dt"] <= pd.Timestamp(om["max_dt"]))]
+            if om["rows"] != len(same):
+                raise SyncError(f"stock_minutes {ym}: 기존 1분봉 사본 범위의 행 수가 다릅니다 (서버 {len(same):,} / 기존 "
+                                f"{om['rows']:,}) — 저장하지 않습니다")
         if len(df):
             _sorted(df, ["code", "dt"]).to_parquet(dest / f"stock_minutes_{key}.parquet", index=False,
                                                     compression="zstd")
