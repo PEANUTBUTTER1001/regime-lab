@@ -79,10 +79,15 @@ class SupabaseProvider:
     def oauth_url(self, provider, challenge, callback):
         if provider not in {"google", "kakao"}:
             raise ApiError(422, "auth_oauth_provider", "Unsupported sign-in provider.")
-        return self.url + "/auth/v1/authorize?" + urlencode({
+        params = {
             "provider": provider, "redirect_to": callback,
             "code_challenge": challenge, "code_challenge_method": "s256",
-        })
+        }
+        if provider == "kakao":
+            # Supabase forwards scope to Kakao. Authentication needs the stable
+            # account ID only; do not request unconfigured email/profile scopes.
+            params["scope"] = ""
+        return self.url + "/auth/v1/authorize?" + urlencode(params)
 
     def exchange(self, code, verifier):
         return self._tokens(self._request("POST", "token?grant_type=pkce",

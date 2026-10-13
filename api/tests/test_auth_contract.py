@@ -379,8 +379,9 @@ def test_supabase_oauth_rest_and_metadata_privacy():
         p = SupabaseProvider('https://project.supabase.co','PRIVATE_KEY',10,'http://localhost',client)
         assert p.social_providers() == {'google':True,'kakao':False}
         url = p.oauth_url('kakao','challenge','http://localhost/api/auth/oauth/callback')
-        params = parse_qs(urlsplit(url).query)
-        assert params == {'provider':['kakao'],'code_challenge':['challenge'],'code_challenge_method':['s256'],'redirect_to':['http://localhost/api/auth/oauth/callback']}
+        params = parse_qs(urlsplit(url).query, keep_blank_values=True)
+        assert params == {'provider':['kakao'],'code_challenge':['challenge'],'code_challenge_method':['s256'],'redirect_to':['http://localhost/api/auth/oauth/callback'],'scope':['']}
+        assert 'scope' not in parse_qs(urlsplit(p.oauth_url('google','challenge','http://localhost/api/auth/oauth/callback')).query, keep_blank_values=True)
         tokens = p.exchange('private-code','private-verifier')
         assert tokens.user.email is None and tokens.user.providers == ('kakao',)
         assert calls[-1].url.query == b'grant_type=pkce'
