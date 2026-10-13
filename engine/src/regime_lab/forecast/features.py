@@ -52,3 +52,30 @@ def make_features(bars: pd.DataFrame) -> pd.DataFrame:
     for k in (1, 7):
         out[f"mkt_r{k}"] = out.groupby("as_of")[f"r{k}"].transform("mean")
     return out
+
+
+DOC_KEYS = ["code", "as_of", "docs_missing"]
+
+
+def attach_doc_features(feats: pd.DataFrame, doc_features: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """P4-3: 가격 특징 표(make_features 결과)에 외부 자료 특징을 (code, as_of) 로 붙일 열을 만든다.
+
+    doc_features 계약 (P4-3a ②, P4-2 가 만든다): code·as_of(봉 확정 시각, KST 시간대 없는 값)·f_*(숫자)·docs_missing.
+    자료가 없는 봉은 docs_missing=1 이고 f_* 는 0 이 아니라 결측이다 — 결합 행이 없는 봉도 같게 둔다.
+    돌려주는 표는 feats 와 같은 index 이며 열은 f_* 와 docs_missing(0/1 실수).
+    """
+    missing = [c for c in DOC_KEYS if c not in doc_features]
+    fcols = sorted(c for c in doc_features.columns if c.startswith("f_"))
+    if missing or not fcols:
+        raise ValueError(f"doc_features 열이 계약과 다릅니다: 없는 열 {missing}, f_* {fcols}")
+    if doc_features.duplicated(["code", "as_of"]).any():
+        raise ValueError("doc_features 에 같은 (code, as_of) 가 여러 행 있습니다")
+    bad = [c for c in fcols if not pd.api.types.is_numeric_dtype(doc_features[c])]
+    if bad:
+        raise ValueError(f"f_* 특징은 숫자여야 합니다: {bad}")
+    d = doc_features[["code", "as_of", *fcols]].assign(docs_missing=doc_features["docs_missing"].astype(bool))
+    j = feats[["code", "as_of"]].merge(d, on=["code", "as_of"], how="left")
+    j.index = feats.index
+    gone = j["docs_missing"].astype(object).fillna(True).astype(bool)  # 결합 행 없음 = 자료 없음
+    j.loc[gone, fcols] = np.nan  # 자료 없음 = 결측 (0 으로 채우면 '0건'과 섞인다)
+    return j[fcols].assign(docs_missing=gone.astype(float)), [*fcols, "docs_missing"]
