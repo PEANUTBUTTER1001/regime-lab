@@ -45,6 +45,22 @@ $day.Repetition = (New-ScheduledTaskTrigger -Once -At 07:00 -RepetitionInterval 
 Register-ScheduledTask -TaskName "regime-ingest-opendart" -Action $act -Trigger $day
 ```
 
+**날짜 닫기 (매일 1회 소급):** 순방향 `run` 은 그날을 `forward`(일부만 봄)로만 남기므로, 매일 이른 아침 소급을 한 번 돌려 지난날을
+`collected` 로 닫는다. 소급은 모든 날 × 시장이 `collected` 인 월 창을 건너뛰므로 실제로는 아직 안 닫힌 이번 달(월초에는 지난달 포함)
+창만 다시 받는다(하루 수십~100요청). 순방향이 그날 본 공시는 중복으로 걸러져 `available_at` 이 바뀌지 않고, 늦게 접수된 공시만 늘어난다.
+`--from` 은 처음 소급 시작일 그대로 둔다(날짜 계산이 필요 없어 OS 와 무관).
+
+```cron
+30 6 * * *  cd /path/to/regime-lab && uv run --project ingest regime-ingest backfill --from 2020-09-01 >> ~/regime-ingest.log 2>&1
+```
+
+```powershell
+$close = New-ScheduledTaskAction -Execute "uv" -Argument "run --project ingest regime-ingest backfill --from 2020-09-01" -WorkingDirectory "C:\path\to\regime-lab"
+Register-ScheduledTask -TaskName "regime-ingest-opendart-close" -Action $close -Trigger (New-ScheduledTaskTrigger -Daily -At 06:30)
+```
+
+06:30 은 순방향이 1시간 간격인 시간대라 겹칠 일이 적다. 겹치면 나중 실행이 `skipped` 로 끝나고 다음 날 다시 닫는다.
+
 - 휴장일에도 돌지만 공시가 없으면 `013`(데이터 없음) 한 번씩만 요청한다. 휴장일 목록 출처는 D-5
 - 상태 확인: `regime-ingest status` — 최근 실행의 `status`(ok/partial/failed/skipped)·요청 수, 날짜별 collected/partial/gap 수
 - 순방향 실행은 오늘 날짜를 `forward`(일부만 봄)로 남긴다. **소급도 오늘(KST)부터의 날은 `forward`로 남긴다**(하루가 끝나기 전이라 그 뒤 접수분이 있다). 소급(`backfill`)은 `collected` 만 건너뛰므로 **다음 날 이후** 소급이 그 날 전체를 다시 받아 빠진 공시를 채우고 `collected` 로 닫는다. 순방향으로 이미 본 공시는 중복으로 걸러져 `available_at`(처음 본 시각)이 그대로다
