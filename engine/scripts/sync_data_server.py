@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import shutil
@@ -50,6 +51,7 @@ TIMEOUT_SEC = 120
 MAX_RESPONSE_BYTES = 512 * 2**20       # 20만 행 JSON 이 넉넉히 들어가는 크기
 TRADING_DAYS_PER_CALL = 60             # 일봉 표를 처음 나눠 받는 거래일 수 (한도에 걸리면 반으로)
 MINUTE_CODES_PER_CALL = 20             # 1분봉을 처음 나눠 받는 종목 수 (한 달·종목당 최대 약 8천 행)
+RETRIES, RETRY_WAIT_SEC = 3, 2         # 연결·읽기 일시 오류 재시도 횟수와 대기(초 × 시도 번호)
 
 # store 파일 형식 (열 순서·자료형). kind: ts=timestamp[ns], str, f64, i64, bool
 PRICE_COLS = [("date", "ts"), ("ticker", "str"), ("open", "f64"), ("high", "f64"), ("low", "f64"),
@@ -83,7 +85,11 @@ class SyncError(Exception):
 
 
 class TooManyRows(SyncError):
-    """서버 결과 한도(20만 행) 초과 — 범위를 나눠 다시 받는다."""
+    """서버 결과 한도(20만 행) 초과 또는 쿼리 시간 초과(504) — 범위를 나눠 다시 받는다."""
+
+
+class Transient(SyncError):
+    """연결 끊김·읽기 중단·응답 시간 초과 — 짧게 다시 시도할 수 있는 오류."""
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -99,6 +105,7 @@ class Client:
             raise SyncError(f"{ENV_URL} 는 http:// 또는 https:// 로 시작해야 합니다")
         self._base, self._token = base.rstrip("/"), token or None
         self._opener = opener or urllib.request.build_opener(_NoRedirect())
+        self._sleep = time.sleep
 
     def _get(self, path: str, params: dict) -> dict:
         q = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
@@ -109,13 +116,15 @@ class Client:
                 body = resp.read(MAX_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as e:
             detail = _detail(e)
-            if e.code == 400 and "200,000" in detail:
-                raise TooManyRows(detail) from None
+            if (e.code == 400 and "200,000" in detail) or e.code == 504:  # 행 한도·쿼리 30초 → 나눠 다시
+                raise TooManyRows(detail or f"HTTP {e.code}") from None
             raise SyncError(f"{path} 요청 실패: HTTP {e.code} {detail}") from None
         except urllib.error.URLError as e:
-            raise SyncError(f"{path} 서버 연결 실패: {type(e.reason).__name__}") from None
+            raise Transient(f"{path} 서버 연결 실패: {type(e.reason).__name__}") from None
         except TimeoutError:
-            raise SyncError(f"{path} 응답 시간 초과({TIMEOUT_SEC}초)") from None
+            raise Transient(f"{path} 응답 시간 초과({TIMEOUT_SEC}초)") from None
+        except (http.client.HTTPException, OSError) as e:  # 응답을 읽는 중 끊김 등
+            raise Transient(f"{path} 응답을 끝까지 받지 못했습니다: {type(e).__name__}") from None
         if len(body) > MAX_RESPONSE_BYTES:
             raise SyncError(f"{path} 응답이 {MAX_RESPONSE_BYTES // 2**20}MB 를 넘어 중단했습니다")
         try:
@@ -127,7 +136,14 @@ class Client:
         return bool(self._get("/health", {}).get("ok"))
 
     def table(self, name: str, **params) -> pd.DataFrame:
-        j = self._get(f"/v1/{name}", params)
+        for attempt in range(1, RETRIES + 1):  # 일시 오류는 짧게 다시 (요청 수천 번인 1분봉에서 한 번의 끊김으로 전부 잃지 않게)
+            try:
+                j = self._get(f"/v1/{name}", params)
+                break
+            except Transient:
+                if attempt == RETRIES:
+                    raise
+                self._sleep(RETRY_WAIT_SEC * attempt)
         if j.get("table") != name or not isinstance(j.get("rows"), list) or j.get("count") != len(j["rows"]):
             raise SyncError(f"{name} 응답의 행 수가 count 와 다릅니다")
         return pd.DataFrame(j["rows"], columns=j["columns"])
@@ -165,15 +181,21 @@ def convert(df: pd.DataFrame, spec: list[tuple[str, str]], what: str) -> pd.Data
     return pd.DataFrame(out)
 
 
+OPEN_START, OPEN_END = "1900-01-01", "2999-12-31"
+
+
 def fetch_by_dates(client: Client, name: str, dates: list[pd.Timestamp], step: int, log) -> pd.DataFrame:
-    """거래일 창으로 나눠 받는다. 한도에 걸리면 그 창만 반으로."""
+    """거래일 창으로 나눠 받는다. 한도에 걸리면 그 창만 반으로. 첫 창은 처음부터, 마지막 창은 끝까지 열어 두어
+    store_index 거래일 밖 날짜(예: 지수가 하루 늦게 적재된 경우)도 빠짐없이 받는다 — 맞는지는 check_dates 가 본다."""
     parts, i = [], 0
     while i < len(dates):
         n = min(step, len(dates) - i)
         while True:
             a, b = dates[i], dates[i + n - 1]
+            start = OPEN_START if i == 0 else a.date().isoformat()
+            end = OPEN_END if i + n == len(dates) else b.date().isoformat()
             try:
-                parts.append(client.table(name, start=a.date().isoformat(), end=b.date().isoformat()))
+                parts.append(client.table(name, start=start, end=end))
                 break
             except TooManyRows:
                 if n == 1:
@@ -184,17 +206,35 @@ def fetch_by_dates(client: Client, name: str, dates: list[pd.Timestamp], step: i
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
+def check_dates(df: pd.DataFrame, index_dates: set, what: str, snapshot: bool = False) -> None:
+    """일봉 표의 날짜가 store_index 거래일과 맞는지. 다르면 서버 적재가 덜 끝난 상태일 수 있어 저장하지 않는다.
+    snapshot(월말 업종)은 거래일의 부분집합이면 된다."""
+    got = set(df["date"].unique()) if len(df) else set()
+    extra = sorted(got - index_dates)
+    if extra:
+        raise SyncError(f"{what}: store_index 에 없는 날짜 {len(extra)}개({pd.Timestamp(extra[0]).date()} 등) — "
+                        "서버 적재가 끝나지 않았을 수 있습니다. 저장하지 않습니다")
+    if not snapshot and (missing := sorted(index_dates - got)):
+        raise SyncError(f"{what}: store_index 거래일 중 {len(missing)}일({pd.Timestamp(missing[0]).date()} 등)이 "
+                        "비어 있습니다 — 저장하지 않습니다")
+
+
 def _sorted(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
     return df.sort_values(keys, kind="stable").reset_index(drop=True)
 
 
 def compare(new: pd.DataFrame, old: pd.DataFrame, keys: list[str], what: str) -> None:
-    """기존 store 와 겹치는 범위(기존 최신일까지·기존 종목)의 값이 모두 같아야 한다. 새 날짜·새 종목 추가는 허용."""
+    """기존 store 와 겹치는 범위의 값이 모두 같아야 한다. 날짜 표는 기존 최신일까지 전부 같아야 하고(그 뒤 새 날짜는 허용),
+    마스터류(master·delisted)는 기존 종목만 대조한다(새 종목 추가 허용). 기존 파일 자료형이 달라도 값으로 비교한다."""
     if "date" in old and len(old):
         new = new[new["date"] <= old["date"].max()]
-    if "date" not in old:  # 마스터류: 기존 종목만 대조
+    try:  # 기존 파일의 자료형(예: timestamp 단위·문자열 자료형)이 달라도 값으로 비교한다
+        old = old[list(new.columns)].astype(new.dtypes.to_dict())
+    except (ValueError, TypeError) as e:
+        raise SyncError(f"{what}: 기존 store 의 열 자료형을 맞출 수 없습니다 ({type(e).__name__})") from None
+    if "date" not in old:  # 마스터류: 기존 종목만 대조 (자료형을 맞춘 뒤)
         new = new[new[keys[0]].isin(old[keys[0]])]
-    a, b = _sorted(new, keys), _sorted(old[list(new.columns)], keys)
+    a, b = _sorted(new, keys), _sorted(old, keys)
     if len(a) != len(b) or not a[keys].equals(b[keys]):
         raise SyncError(f"{what}: 기존 store 와 겹치는 행이 다릅니다 (서버 {len(a):,}행 / 기존 {len(b):,}행)")
     for c in new.columns:
@@ -227,6 +267,7 @@ def sync_store(client: Client, dest: Path, old: dict | None, sample_tickers: lis
         name, spec = STORE[key]
         got[key] = convert(fetch_by_dates(client, name, [pd.Timestamp(x) for x in dates], TRADING_DAYS_PER_CALL, log),
                            spec, name)
+        check_dates(got[key], set(dates), name, snapshot=(key == "sector"))
     tickers = sorted(old["sample30"]["ticker"].unique()) if old is not None and "sample30" in old else sample_tickers
     if not tickers:
         raise SyncError("sample30 종목을 알 수 없습니다 — --compare 로 기존 store 를 주거나 --sample-tickers 로 지정하세요")
@@ -248,8 +289,11 @@ def sync_store(client: Client, dest: Path, old: dict | None, sample_tickers: lis
     return {k: len(v) for k, v in got.items()}
 
 
-def sync_minutes(client: Client, dest: Path, codes: list[str], months: list[str], log) -> dict:
-    """1분봉 사본 (export_minutes.py 와 같은 파일·매니페스트 형식). months: YYYY-MM 목록."""
+def sync_minutes(client: Client, dest: Path, codes: list[str], months: list[str], log,
+                 old_months: dict | None = None) -> dict:
+    """1분봉 사본 (export_minutes.py 와 같은 파일·매니페스트 형식). months: YYYY-MM 목록.
+    old_months(기존 1분봉 매니페스트의 months)가 있으면 겹치는 달의 행 수가 같아야 한다 — 종목 목록(master)에 없는
+    코드가 빠지는 경우도 여기서 드러난다."""
     started, t0 = datetime.now(), time.time()
     dest.mkdir(parents=True)
     stats, total = {}, 0
@@ -272,8 +316,11 @@ def sync_minutes(client: Client, dest: Path, codes: list[str], months: list[str]
         df = convert(pd.concat(parts, ignore_index=True), MINUTE_SCHEMA, f"stock_minutes {ym}")
         if df.duplicated(["code", "dt"]).any():
             raise SyncError(f"stock_minutes {ym}: (code, dt) 중복")
+        key = start.strftime("%Y%m")
+        if old_months and key in old_months and old_months[key]["rows"] != len(df):
+            raise SyncError(f"stock_minutes {ym}: 기존 1분봉 사본과 행 수가 다릅니다 (서버 {len(df):,} / 기존 "
+                            f"{old_months[key]['rows']:,}) — 저장하지 않습니다")
         if len(df):
-            key = start.strftime("%Y%m")
             _sorted(df, ["code", "dt"]).to_parquet(dest / f"stock_minutes_{key}.parquet", index=False,
                                                     compression="zstd")
             stats[key] = {"rows": len(df), "min_dt": str(df["dt"].min()), "max_dt": str(df["dt"].max())}
@@ -309,12 +356,17 @@ def run(client: Client, out: Path, compare_store: Path | None = None, sample_tic
             months = _minute_months(compare_store, minutes_start, counts, tmp / "store")
             codes = sorted(pd.read_parquet(tmp / "store" / "master.parquet")["ticker"])
             log(f"[minutes] 1분봉 받는 중 ({months[0]} ~ {months[-1]}, {len(codes)}종목)")
-            counts |= sync_minutes(client, tmp / "minutes", codes, months, log)
+            counts |= sync_minutes(client, tmp / "minutes", codes, months, log, _old_minute_months(compare_store))
         tmp.rename(out)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)  # 이번 실행이 만든 임시 폴더만 지운다
         raise
     return counts
+
+
+def _old_minute_months(compare_store: Path | None) -> dict | None:
+    m = compare_store.parent / "minutes" / "minutes_manifest.json" if compare_store is not None else None
+    return json.loads(m.read_text(encoding="utf-8"))["months"] if m is not None and m.exists() else None
 
 
 def _minute_months(compare_store: Path | None, minutes_start: str | None, counts: dict, store: Path) -> list[str]:

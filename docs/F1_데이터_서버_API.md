@@ -8,7 +8,7 @@
 | 위치 | 역할 |
 |---|---|
 | 데이터 서버 PC | MariaDB `regime_lab`(표 12개 + 뷰 `v_store_daily`)와 조회 전용 API. 코드는 저장소 밖 |
-| 수집 PC | 수집 결과를 서버 DB 에 추가(INSERT 만, 2026-10-13 권한 축소) — 공동 지시서 C2 합의 뒤 |
+| 수집 PC | 수집 결과를 서버 DB 에 추가 — 공동 지시서 C2 합의 뒤 |
 | 팀원 PC | `engine/scripts/sync_data_server.py` 로 API 에서 받아 **기존 store 형식 Parquet** 로 저장. 엔진은 지금처럼 Parquet 만 읽는다(loader 변경 없음) |
 
 ## 2. 엔드포인트 (모두 GET, 쓰기 없음)
@@ -69,8 +69,9 @@ date,ticker,open,high,low,close,volume,value
 
 ## 3. 접근 조건·인증
 
-- **허용 IP 만** 접속된다(서버 `.env` 의 허용 대역). 다른 대역의 PC 는 서버 담당(Seonghwanaa)이 /32 로 추가한다.
-- **인증은 현재 꺼져 있다.** 켜면 `X-API-Key` 헤더가 필요하다. 동기화 스크립트는 `REGIME_DATA_API_TOKEN` 이 있을 때만 이 헤더를 보낸다.
+- 서버가 허용한 PC 에서만 접속된다. 접속이 거부(403)되면 서버 담당(Seonghwanaa)에게 요청한다.
+- 서버가 키 인증을 쓰면 `X-API-Key` 헤더가 필요하다. 동기화 스크립트는 `REGIME_DATA_API_TOKEN` 이 있을 때만 이 헤더를 보낸다. 키가 필요한지는 서버 담당에게 확인한다.
+- 서버 접근 제어·운영 상태(허용 범위, 인증, 네트워크 설정)는 공개 저장소에 적지 않고 서버 담당의 비공개 운영 기록에 둔다.
 - 주소·키는 사람끼리 직접 전달한다. 채널·저장소·PR·로그에 쓰지 않는다.
 - 응답 `Content-Type` 에 charset 이 없다(본문은 UTF-8). Windows PowerShell 5.1 `Invoke-WebRequest` 는 한글을 깨뜨려 보인다 — 동기화 스크립트는 UTF-8 로 읽는다.
 
@@ -89,11 +90,21 @@ uv run --project engine python engine/scripts/sync_data_server.py --out ..\regim
 - 1분봉(`--minutes`)은 수천 번 요청·수 GB 라 봉 예측에만 필요할 때 받는다. 시작 달은 기존 1분봉 매니페스트에서, 없으면 `--minutes-start YYYY-MM`.
 - 받은 뒤 `engine/config/paths.local.yaml` 의 `store` 를 `<out>/store` 로 바꾸고 `uv run --project engine regime-lab prepare`. 파일 수정 시각이 달라 준비 캐시는 한 번 새로 만들어진다(`input_file_hashes`).
 
+### 받은 뒤 확인 (F1.2)
+
+```bash
+uv run --project engine python -c "from regime_lab.data.loader import input_file_hashes as f, load_master as m; from pathlib import Path; p=Path('../regime-data-sync/store'); print(f(p)); print(m(p)[['ticker','name']].head())"
+```
+
+- `input_file_hashes`: Parquet 5개는 크기·수정 시각, `raw/krx_daily`·`raw/sector` 는 파일 수와 해시. 수정 시각이 PC 마다 달라 준비 캐시 키는 PC 마다 다르다 — 같은 자료인지는 아래 행 수와 동기화가 끝에 출력하는 표별 행 수로 본다.
+- 2026-09-18 기준 기대값(원본 PC): prices·marketcap·krx_daily 3,865,943행, index 2,966행, master 3,095종목(`ticker`·`name` 열 있음), delisted 333, sector 193,249행, `raw/krx_daily` 1,483개 파일.
+- 기존 원본이 있는 PC 는 동기화가 겹치는 기간을 이미 전부 대조했다(다르면 저장 안 함).
+
 ## 5. 남은 결정·과제
 
 | 항목 | 상태 |
 |---|---|
 | 데이터 버전 식별값 | API 에 없음 — 동기화한 자료가 같은 것인지 판단 불가. 적재 기록을 API 로 읽는 경로 등은 별도 결정(서버 API 변경·재시작 동반) |
-| 서버 운영 | 재부팅 시 API 자동 시작 안 됨, DB 포트 전체 개방(같은 망으로 좁히기), 서버 IP DHCP, 인증 꺼짐 — 서버 담당 과제 |
+| 서버 운영·보안 | 서버 담당 비공개 운영 기록에서 관리 |
 | 1분봉 파티션 | 2026-11 까지 있음. 12월 데이터 전에 추가 필요(서버 관리자) |
 | 최신 데이터 | 일봉·지수 2026-09-18, 1분봉·지표 2026-09-17 (X4 수집·적재 뒤 갱신) |

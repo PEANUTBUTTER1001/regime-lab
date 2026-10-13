@@ -20,6 +20,11 @@ S = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(S)
 
 TICKERS = ["000001", "000002", "000003"]
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_wait(monkeypatch):
+    monkeypatch.setattr(S, "RETRY_WAIT_SEC", 0)   # 일시 오류 재시도 대기 없이
 DATES = pd.bdate_range("2026-09-01", periods=12)
 
 
@@ -222,3 +227,110 @@ def test_minutes_sync_writes_month_files_and_manifest(world, tmp_path):
     assert man["total_rows"] == 7 and set(man["months"]) == {"202608", "202609"}
     got = load_minutes(md, ["000001"])
     assert len(got) == 7 and str(got["dt"].dtype).startswith("datetime64")
+
+
+# --- PR #77 리뷰(seongmin-claude) 회귀 ---
+
+def test_compare_tolerates_other_timestamp_unit_in_existing_store(world, tmp_path):
+    """P2-2: 기존 store 의 날짜가 ns 가 아니어도(예: pandas 3 로 쓴 us) 값이 같으면 통과."""
+    frames, _ = world
+    us = {k: v.copy() for k, v in frames.items()}
+    for df in us.values():
+        for c in df.columns:
+            if pd.api.types.is_datetime64_any_dtype(df[c]):
+                df[c] = df[c].astype("datetime64[us]")
+    old = _write_store(tmp_path / "old_us", us)
+    assert str(pd.read_parquet(old / "prices.parquet")["date"].dtype) == "datetime64[us]"
+    S.run(FakeClient(frames), tmp_path / "new", compare_store=old, log=lambda *_: None)
+    assert str(pd.read_parquet(tmp_path / "new" / "store" / "prices.parquet")["date"].dtype) == "datetime64[ns]"
+
+
+def test_dates_outside_index_stop_instead_of_dropping(world, tmp_path):
+    """P2-3: 지수보다 하루 늦게 적재된 일봉(지수에 없는 날짜)을 조용히 빼지 않고 멈춘다 (--no-compare 에서도)."""
+    frames, _ = world
+    late = DATES[-1] + pd.offsets.BDay(1)
+    extra = frames["prices"][frames["prices"]["date"] == DATES[-1]].assign(date=late)
+    f = {**frames, "prices": pd.concat([frames["prices"], extra], ignore_index=True)}
+    with pytest.raises(S.SyncError, match="store_index 에 없는 날짜"):
+        S.run(FakeClient(f, limit=10**6), tmp_path / "new", sample_tickers=["000001"], log=lambda *_: None)
+    assert not (tmp_path / "new").exists()
+    gap = {**frames, "prices": frames["prices"][frames["prices"]["date"] != DATES[3]]}
+    with pytest.raises(S.SyncError, match="비어 있습니다"):
+        S.run(FakeClient(gap, limit=10**6), tmp_path / "new2", sample_tickers=["000001"], log=lambda *_: None)
+
+
+class _Resp:
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self, n=-1):
+        raise self.exc
+
+
+class _ReadFailOpener:
+    def __init__(self, exc):
+        self.exc = exc
+
+    def open(self, req, timeout=None):
+        return _Resp(self.exc)
+
+
+def test_gateway_timeout_splits_and_broken_read_is_sync_error():
+    """P3: 504(쿼리 30초 초과)는 나눠 받기 대상, 응답을 읽다 끊기면 traceback 대신 SyncError."""
+    import http.client
+    url = "http://10.9.8.7:8100/v1/store_prices"
+    to = urllib.error.HTTPError(url, 504, "Gateway Timeout", {}, io.BytesIO(
+        json.dumps({"detail": "조회가 30초를 넘어 중단됐습니다."}).encode()))
+    with pytest.raises(S.TooManyRows):
+        S.Client("http://10.9.8.7:8100", opener=_ErrorOpener(to)).table("store_prices", start="2026-09-01", end="2026-09-30")
+    for exc in (http.client.IncompleteRead(b"partial"), ConnectionResetError("reset by 10.9.8.7")):
+        with pytest.raises(S.SyncError) as e:
+            S.Client("http://10.9.8.7:8100", opener=_ReadFailOpener(exc)).table("store_prices", ticker="000001")
+        assert "10.9.8.7" not in str(e.value) and not isinstance(e.value, S.TooManyRows)
+
+
+def test_minutes_row_count_must_match_existing_copy(world, tmp_path):
+    """P3: 기존 1분봉 사본(매니페스트)과 겹치는 달의 행 수가 다르면 저장하지 않는다."""
+    frames, old = world
+    md = old.parent / "minutes"
+    md.mkdir()
+    (md / "minutes_manifest.json").write_text(json.dumps({"months": {"202609": {"rows": 999}}}), encoding="utf-8")
+    m = pd.DataFrame({"code": ["000001"] * 2, "dt": ["2026-09-01 09:00:00", "2026-09-01 09:01:00"], "open_p": 1,
+                      "high_p": 1, "low_p": 1, "close_p": 1, "volume": 1, "value": 1})
+    client = FakeClient(frames)
+    client.tables["stock_minutes"] = m.astype(object)
+    with pytest.raises(S.SyncError, match="기존 1분봉 사본과 행 수가 다릅니다"):
+        S.run(client, tmp_path / "new", compare_store=old, minutes=True, log=lambda *_: None)
+    assert not (tmp_path / "new").exists()
+
+
+class _FlakyOpener:
+    """처음 n 번은 연결 실패, 그 뒤 정상 응답."""
+
+    def __init__(self, fails: int, body: dict):
+        self.fails, self.body, self.calls = fails, body, 0
+
+    def open(self, req, timeout=None):
+        self.calls += 1
+        if self.calls <= self.fails:
+            raise urllib.error.URLError(ConnectionResetError("reset"))
+        return io.BytesIO(json.dumps(self.body).encode())
+
+
+def test_transient_errors_are_retried_then_reported():
+    """P3: 연결·읽기 일시 오류는 짧게 다시 시도하고, 계속되면 SyncError (주소 없음)."""
+    body = {"table": "store_master", "count": 1, "columns": ["ticker"], "rows": [["000001"]]}
+    ok = S.Client("http://10.9.8.7:8100", opener=_FlakyOpener(2, body))
+    ok._sleep = lambda *_: None
+    assert ok.table("store_master")["ticker"].tolist() == ["000001"] and ok._opener.calls == 3
+    bad = S.Client("http://10.9.8.7:8100", opener=_FlakyOpener(9, body))
+    bad._sleep = lambda *_: None
+    with pytest.raises(S.SyncError) as e:
+        bad.table("store_master")
+    assert bad._opener.calls == S.RETRIES and "10.9.8.7" not in str(e.value)
