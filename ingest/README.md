@@ -26,28 +26,41 @@ uv run --project ingest python -m pytest ingest                                 
 ## 순방향 스케줄 (P3-7.5, plan §6.1·§7.1)
 
 OS 스케줄러로 `run` 을 주기 실행한다(API 서버와 독립). 같은 출처가 이미 돌고 있으면 새 실행은 `skipped` 로 기록하고 끝난다(잠금).
-주기는 거래일 07:00~20:00 KST 5분, 그 밖은 1시간 (요청 수 추정: 하루 공시 약 400건 → 1회 약 8요청 × 약 170회 ≈ 1,400요청/일, 상한 10,000 안).
+주기는 평일 07:00~19:55 KST 5분(156회), 그 밖은 매시 정각(평일 20:00~06:00 11회, 주말은 하루 종일) — 모든 시간대를 빈틈·겹침 없이 덮는다.
+요청 수 추정(보장값 아님): 하루 공시 약 400건 → 1회 약 8요청 × 약 170회 ≈ 1,400요청/일, 상한 10,000 안.
 **등록은 수집 PC 담당자가 직접** 한다 — 아래는 예시이며 저장소 스크립트가 자동 등록하지 않는다. 키는 OS 의 사용자 환경변수로 둔다.
 
 macOS·Linux (`crontab -e`, 시스템 시간대가 KST 라고 가정):
 
 ```cron
-*/5 7-19 * * 1-5  cd /path/to/regime-lab && uv run --project ingest regime-ingest run >> ~/regime-ingest.log 2>&1
-0 0-6,20-23 * * *  cd /path/to/regime-lab && uv run --project ingest regime-ingest run >> ~/regime-ingest.log 2>&1
+*/5 7-19 * * 1-5     cd /path/to/regime-lab && uv run --project ingest regime-ingest run >> ~/regime-ingest.log 2>&1
+0 0-6,20-23 * * 1-5  cd /path/to/regime-lab && uv run --project ingest regime-ingest run >> ~/regime-ingest.log 2>&1
+0 * * * 0,6          cd /path/to/regime-lab && uv run --project ingest regime-ingest run >> ~/regime-ingest.log 2>&1
 ```
 
 Windows (작업 스케줄러, PowerShell — `DART_API_KEY` 는 사용자 환경변수로 미리 설정):
 
 ```powershell
 $act = New-ScheduledTaskAction -Execute "uv" -Argument "run --project ingest regime-ingest run" -WorkingDirectory "C:\path\to\regime-lab"
+# 평일 낮: 07:00 부터 5분마다 19:55 까지 (반복 끝을 정확히 20:00 에 두면 그 시각에도 실행돼 아래 시간별 작업과 겹친다)
 $day = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 07:00
-$day.Repetition = (New-ScheduledTaskTrigger -Once -At 07:00 -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Hours 13)).Repetition
+$day.Repetition = (New-ScheduledTaskTrigger -Once -At 07:00 -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Hours 12 -Minutes 56)).Repetition
 Register-ScheduledTask -TaskName "regime-ingest-opendart" -Action $act -Trigger $day
+# 그 밖: 매일 20:00~06:00 매시, 토·일은 07:00~19:00 도 매시
+$night = New-ScheduledTaskTrigger -Daily -At 20:00
+$night.Repetition = (New-ScheduledTaskTrigger -Once -At 20:00 -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Hours 10 -Minutes 1)).Repetition
+$weekend = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday,Sunday -At 07:00
+$weekend.Repetition = (New-ScheduledTaskTrigger -Once -At 07:00 -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Hours 12 -Minutes 1)).Repetition
+Register-ScheduledTask -TaskName "regime-ingest-opendart-hourly" -Action $act -Trigger $night, $weekend
 ```
 
+시간대별로 맡는 작업: 평일 07:00~19:55 = `regime-ingest-opendart`(5분), 매일 20:00~06:00 = `-hourly`(밤 트리거),
+토·일 07:00~19:00 = `-hourly`(주말 트리거), 매일 06:30 = 아래 날짜 닫기. 등록 뒤 작업 목록에서 세 작업과 트리거별 다음 실행 시각을 확인한다.
+
 **날짜 닫기 (매일 1회 소급):** 순방향 `run` 은 그날을 `forward`(일부만 봄)로만 남기므로, 매일 이른 아침 소급을 한 번 돌려 지난날을
-`collected` 로 닫는다. 소급은 모든 날 × 시장이 `collected` 인 월 창을 건너뛰므로 실제로는 아직 안 닫힌 이번 달(월초에는 지난달 포함)
-창만 다시 받는다(하루 수십~100요청). 순방향이 그날 본 공시는 중복으로 걸러져 `available_at` 이 바뀌지 않고, 늦게 접수된 공시만 늘어난다.
+`collected` 로 닫는다. 소급은 모든 날 × 시장이 `collected` 인 월 창을 건너뛰므로, 지난 달 창이 모두 `collected` 인 저장소라면
+아직 안 닫힌 이번 달(월초에는 지난달 포함) 창만 다시 받는다(그 경우 하루 수십~100요청 정도로 추정, 보장값 아님). 지난 창에 `partial`·`gap`·기록 없음이
+있으면 그 창도 다시 받으므로 요청이 더 늘어난다. 순방향이 그날 본 공시는 중복으로 걸러져 `available_at` 이 바뀌지 않고, 늦게 접수된 공시만 늘어난다.
 `--from` 은 처음 소급 시작일 그대로 둔다(날짜 계산이 필요 없어 OS 와 무관).
 
 ```cron
@@ -63,6 +76,8 @@ Register-ScheduledTask -TaskName "regime-ingest-opendart-close" -Action $close -
 
 - 휴장일에도 돌지만 공시가 없으면 `013`(데이터 없음) 한 번씩만 요청한다. 휴장일 목록 출처는 D-5
 - 상태 확인: `regime-ingest status` — 최근 실행의 `status`(ok/partial/failed/skipped)·요청 수, 날짜별 collected/partial/gap 수
+- 운영 확인은 두 가지를 따로 본다: ① **예약 등록 성공**(작업·트리거가 목록에 있고 다음 실행 시각이 맞음) ② **실제 무인 성공**(`status` 의 최근 실행이
+  `ok` 로 쌓이고 날짜 상태가 forward → 다음 날 collected 로 바뀜). `skipped`(잠금 충돌)는 성공으로 세지 않는다
 - 순방향 실행은 오늘 날짜를 `forward`(일부만 봄)로 남긴다. **소급도 오늘(KST)부터의 날은 `forward`로 남긴다**(하루가 끝나기 전이라 그 뒤 접수분이 있다). 소급(`backfill`)은 `collected` 만 건너뛰므로 **다음 날 이후** 소급이 그 날 전체를 다시 받아 빠진 공시를 채우고 `collected` 로 닫는다. 순방향으로 이미 본 공시는 중복으로 걸러져 `available_at`(처음 본 시각)이 그대로다
 - 이 규칙 전에 오늘까지 소급해 오늘이 `collected` 로 남은 저장소는, 다음 날 그 날만 `backfill --from <그날> --to <그날> --refetch` 로 한 번 다시 받는다
 
