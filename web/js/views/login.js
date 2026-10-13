@@ -90,7 +90,7 @@ export function renderLogin(el, query = new URLSearchParams()) {
         try { state.meta = await api.meta(); } catch { state.meta = null; }
         location.hash = '#/builder';
       }
-    } catch (error) { const key = {auth_rate_limited:'login.limited',auth_unconfirmed:'login.unconfirmed',auth_password:'login.errPasswordLength',auth_email:'login.errEmail',auth_unavailable:'login.unavailable',network_error:'login.unavailable'}[error.code] || 'login.errAuth'; show(t(key, {min})); }
+    } catch (error) { const key = error.code === 'auth_unavailable' && mode !== 'signin' ? 'login.mailUnavailable' : {auth_rate_limited:'login.limited',auth_unconfirmed:'login.unconfirmed',auth_password:'login.errPasswordLength',auth_email:'login.errEmail',auth_unavailable:'login.unavailable',network_error:'login.unavailable'}[error.code] || 'login.errAuth'; show(t(key, {min})); }
     finally { submit.disabled = false; pw.value = ''; pw2.value = ''; }
   };
   update();

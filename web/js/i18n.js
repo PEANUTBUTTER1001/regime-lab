@@ -28,6 +28,7 @@ const D = {
   'login.reset': ['비밀번호 재설정', 'Reset password'],
   'login.sendReset': ['재설정 메일 보내기', 'Send reset email'],
   'login.changePassword': ['새 비밀번호 저장', 'Save new password'],
+  'login.mailUnavailable': ['인증 메일 요청을 처리하지 못했습니다. 잠시 후 다시 시도하거나 다른 로그인 방식을 이용하세요.', 'The verification email request could not be processed. Try again later or use another sign-in method.'],
   'login.checkEmail': ['안내 메일을 요청했습니다. 이메일을 확인하세요. 발송 제한으로 도착이 지연될 수 있습니다.', 'If applicable, instructions have been sent. Check your email; delivery may be delayed by sending limits.'],
   'login.verified': ['확인이 완료되었습니다. 비밀번호로 로그인하세요.', 'Confirmation completed. Sign in with your password.'],
   'login.linkExpired': ['인증 링크가 올바르지 않거나 만료되었습니다. 안내 메일을 다시 요청하세요.', 'The link is invalid or expired. Request another email.'],
