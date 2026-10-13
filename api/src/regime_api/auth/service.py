@@ -3,7 +3,7 @@ import base64
 import hashlib
 import hmac
 from urllib.parse import urlsplit
-from regime_api.auth.contracts import Session, OAuthFlow, Provider, Store
+from regime_api.auth.contracts import Session, OAuthFlow, Provider, Store, User, Tokens
 from regime_api.errors import ApiError
 
 class AuthService:
@@ -62,7 +62,7 @@ class AuthService:
     def issue(self, tokens, old_sid=None, purpose="login", provider=None):
         if provider is not None and provider not in tokens.user.providers:
             raise ApiError(401, "auth_oauth_failed", "Social sign-in could not be completed.")
-        if provider is None and not tokens.user.confirmed:
+        if provider is None and not tokens.user.confirmed and not tokens.user.is_guest:
             raise ApiError(401, "auth_unconfirmed", "Verify your email before signing in.")
         now = self.now()
         self.store.prune(now - self.policy["idle_ttl_seconds"])
@@ -74,6 +74,13 @@ class AuthService:
         if old_sid:
             self.store.drop(old_sid)
         return sid, tokens.user.public()
+
+    def guest(self, old_sid, client):
+        if not self.policy["guest_enabled"]:
+            raise ApiError(403, "auth_guest_disabled", "Guest testing is not available.")
+        self.rate("login", client)
+        user = User("guest_" + self.nonce(), None, False, is_guest=True)
+        return self.issue(Tokens(user, "", "", self.policy["session_ttl_seconds"]), old_sid)
 
     def social_providers(self):
         # Discovery failures disable social buttons while preserving email sign-in.
@@ -153,6 +160,12 @@ class AuthService:
             if now - session.created >= ttl or now - session.seen >= self.policy["idle_ttl_seconds"] or session.purpose != purpose:
                 self.store.drop(sid)
                 raise ApiError(401, "authentication_required", "Sign in to continue.")
+            if session.tokens.user.is_guest:
+                if not self.policy["guest_enabled"]:
+                    self.store.drop(sid)
+                    raise ApiError(401, "authentication_required", "Sign in to continue.")
+                session.seen = now
+                return session.tokens.user
             try:
                 if now >= session.access_until:
                     tokens = self.provider.refresh(session.tokens.refresh)
@@ -175,7 +188,7 @@ class AuthService:
         session = self.store.get(sid) if sid else None
         if sid:
             self.store.drop(sid)
-        if session:
+        if session and not session.tokens.user.is_guest:
             try:
                 self.provider.logout(session.tokens.access)
             except ApiError:
@@ -203,6 +216,8 @@ class AuthService:
             raise ApiError(404, "not_found", "Resource not found.")
 
     def authorize(self, path, method, user, payload=None):
+        if user.is_guest and (path.startswith("/api/llm/") or path.endswith("/report") and method == "POST"):
+            raise ApiError(403, "auth_guest_restricted", "Sign in to use AI reports and model settings.")
         if path.startswith("/api/llm/config") and user.id not in self.admins:
             raise ApiError(403, "forbidden", "Only administrators can manage shared model settings.")
         parts = path.strip("/").split("/")

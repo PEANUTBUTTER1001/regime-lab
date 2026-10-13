@@ -8,9 +8,10 @@ class User:
     email: str | None
     confirmed: bool = True
     providers: tuple[str, ...] = ()
+    is_guest: bool = False
 
     def public(self):
-        return {"id": self.id, "email": self.email, "email_confirmed": self.confirmed}
+        return {"id": self.id, "email": self.email, "email_confirmed": self.confirmed, **({"is_guest": True} if self.is_guest else {})}
 
 @dataclass
 class Tokens:

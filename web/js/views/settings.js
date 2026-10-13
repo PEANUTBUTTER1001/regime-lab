@@ -43,6 +43,8 @@ export async function renderSettings(el) {
 // AI 보고서 공급사 설정 (결정 E10 잠정). 키는 서버 메모리에만 두며 서버를 끄면 사라진다.
 // 키 원문은 화면·브라우저 저장소에 남기지 않는다: 적용 즉시 입력 칸을 비우고, 서버는 마지막 4자리만 돌려준다.
 function aiCard() {
+  if (state.authConfig?.enabled && state.guest) return h('article', {class:'card ai-card'},
+    h('h2', {}, t('set.ai.title')), h('p', {class:'card-sub'}, t('errmsg.auth_guest_restricted')));
   const status = h('dl', { class: 'info', 'aria-live': 'polite' });
   const err = {};
   const errSlot = (k) => (err[k] = h('p', { class: 'field-error hidden', id: `err-ai-${k}` }));

@@ -81,3 +81,36 @@ def test_social_login_preserves_uuid_ownership(auth_app):
         signin(other, 'b')
         assert other.get('/api/runs/'+rid).status_code == 404
         assert other.get('/api/runs').json() == {'runs':[]}
+
+
+def test_guests_keep_separate_workspaces_and_cannot_call_paid_models(auth_app):
+    with TestClient(auth_app) as guest, TestClient(auth_app) as other, TestClient(auth_app) as member:
+        hg, ho = csrf(guest), csrf(other)
+        assert guest.post('/api/auth/guest',headers=hg).status_code == 200
+        assert other.post('/api/auth/guest',headers=ho).status_code == 200
+        hm = signin(member)
+        uid = guest.get('/api/auth/me').json()['user']['id']
+        assert uid != other.get('/api/auth/me').json()['user']['id']
+        run = guest.post('/api/runs',json={'strategies':[{'name':'guest-test',**STRATEGY}]},headers=hg)
+        assert run.status_code == 202, run.text
+        rid = run.json()['run_id']
+        assert guest.get('/api/runs/'+rid).status_code == 200
+        assert len(guest.get('/api/runs').json()['runs']) == 1
+        for c, headers in ((other,ho),(member,hm)):
+            assert c.get('/api/runs/'+rid).status_code == 404
+            assert c.get('/api/runs').json()['runs'] == []
+            assert c.post('/api/runs/'+rid+'/cancel',headers=headers).status_code == 404
+        preset = guest.post('/api/presets',json={'name':'guest-test','strategy':STRATEGY},headers=hg)
+        assert preset.status_code == 201, preset.text
+        pid = preset.json()['id']
+        assert other.get('/api/presets/'+pid).status_code == 404
+        assert member.get('/api/presets/'+pid).status_code == 404
+        assert guest.post('/api/runs/'+rid+'/report',headers=hg).status_code == 403
+        assert guest.get('/api/llm/config').status_code == 403
+        assert guest.put('/api/llm/config',json={},headers=hg).status_code == 403
+        assert guest.post('/api/auth/logout',headers=hg).status_code == 204
+        assert guest.post('/api/auth/guest',headers=csrf(guest)).status_code == 200
+        assert guest.get('/api/runs/'+rid).status_code == 404
+        assert guest.get('/api/presets/'+pid).status_code == 404
+        signin(guest)
+        assert guest.get('/api/runs/'+rid).status_code == 404

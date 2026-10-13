@@ -205,6 +205,7 @@ forecast:                           # P2 봉 예측 (D-2 확정 2026-10-07, docs
 
 # X3.1: 인증 수치. 분석 준비 캐시(PREP_SECTIONS)와 무관. 키는 환경변수로만 받는다.
 auth:
+  guest_enabled: true              # 계정 없이 격리된 세션으로 분석 테스트 (운영 시 false로 끌 수 있음)
   session_ttl_seconds: 28800        # 로그인 세션 최대 수명 (8시간). 세션 쿠키 수명도 같다
   idle_ttl_seconds: 1800            # 요청이 이만큼 없으면 세션 만료 (30분)
   recovery_ttl_seconds: 600         # 비밀번호 재설정 링크로 연 세션 수명 (10분)

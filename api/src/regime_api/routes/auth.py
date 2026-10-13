@@ -51,7 +51,17 @@ def config(request: Request, response: Response):
     csrf = auth.csrf()
     cookie(response, auth, CSRF_COOKIE, csrf, auth.policy["csrf_ttl_seconds"])
     social = auth.social_providers()
-    return {"enabled":True, "guest_allowed":False, "providers":["email", *[name for name, enabled in social.items() if enabled]], "social_providers":social, "password_min_length":auth.policy["password_min_length"], "csrf_token":csrf}
+    return {"enabled":True, "guest_allowed":auth.policy["guest_enabled"], "providers":["email", *[name for name, enabled in social.items() if enabled]], "social_providers":social, "password_min_length":auth.policy["password_min_length"], "csrf_token":csrf}
+
+@router.post("/auth/guest")
+def guest(request: Request, response: Response):
+    auth = service(request)
+    sid, user = auth.guest(request.cookies.get(SESSION_COOKIE), client(request))
+    if request.cookies.get(OAUTH_COOKIE):
+        auth.store.take_flow(request.cookies[OAUTH_COOKIE])
+    response.delete_cookie(OAUTH_COOKIE, path="/", httponly=True, secure=auth.site_url.startswith("https://"), samesite="lax")
+    cookie(response, auth, SESSION_COOKIE, sid, auth.policy["session_ttl_seconds"])
+    return {"user": user}
 
 @router.post("/auth/oauth")
 def oauth(data: SocialLogin, request: Request, response: Response):

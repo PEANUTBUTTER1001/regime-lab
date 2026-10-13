@@ -403,3 +403,65 @@ def test_https_oauth_cookies_and_query_log_filter(auth_app):
     record = logging.LogRecord('uvicorn.access',20,'',1,'%s %s %s %s %s',('client','GET','/api/auth/oauth/callback?code=PRIVATE_CODE','1.1',303),None)
     AuthAccessLogFilter().filter(record)
     assert 'PRIVATE_CODE' not in record.getMessage()
+
+
+def test_guest_session_refresh_logout_and_no_provider_calls(auth_app, monkeypatch):
+    def unexpected(*args):
+        raise AssertionError("Guest sessions must not call Supabase")
+    for name in ('user', 'refresh', 'logout'):
+        monkeypatch.setattr(auth_app.state.test_provider, name, unexpected)
+    with TestClient(auth_app) as c:
+        assert c.get('/api/auth/config').json()['guest_allowed'] is True
+        headers = csrf(c)
+        response = c.post('/api/auth/guest', headers=headers)
+        assert response.status_code == 200
+        user = response.json()['user']
+        assert user['is_guest'] and user['email'] is None and not user['email_confirmed']
+        assert user['id'].startswith('guest_')
+        assert 'HttpOnly' in response.headers['set-cookie']
+        assert 'SameSite=lax' in response.headers['set-cookie']
+        sid = c.cookies.get('rl_session')
+        auth_app.state.test_clock[0] += 301
+        assert c.get('/api/auth/me').json()['user'] == user
+        assert c.get('/api/echo').json()['id'] == user['id']
+        assert c.post('/api/auth/password', json={'password':'new-password'}, headers=csrf(c)).status_code == 401
+        # Recovery access is rejected without turning a guest into a password account.
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 200
+        sid = c.cookies.get('rl_session')
+        assert c.post('/api/auth/logout', headers=csrf(c)).status_code == 204
+        c.cookies.set('rl_session', sid)
+        assert c.get('/api/auth/me').status_code == 401
+
+
+def test_guest_creation_requires_csrf_and_can_be_disabled(auth_app):
+    with TestClient(auth_app) as c:
+        assert c.post('/api/auth/guest').status_code == 403
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 200
+        auth_app.state.rl.auth.policy['guest_enabled'] = False
+        assert c.get('/api/auth/config').json()['guest_allowed'] is False
+        assert c.get('/api/auth/me').status_code == 401
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 403
+
+
+def test_guest_rotation_expiry_and_pending_oauth_invalidation(auth_app):
+    with TestClient(auth_app) as c:
+        signin(c)
+        old_sid = c.cookies.get('rl_session')
+        start_social(c)
+        flow = c.cookies.get('rl_oauth')
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 200
+        assert auth_app.state.rl.auth.store.get(old_sid) is None
+        assert auth_app.state.rl.auth.store.take_flow(flow) is None
+        assert c.cookies.get('rl_oauth') is None
+        auth_app.state.test_clock[0] += auth_app.state.rl.auth.policy['idle_ttl_seconds']
+        assert c.get('/api/auth/me').status_code == 401
+
+
+def test_guest_creation_uses_login_rate_and_session_capacity(auth_app):
+    with TestClient(auth_app) as c:
+        for _ in range(auth_app.state.rl.auth.policy['rate_max_attempts']):
+            assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 200
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 429
+        auth_app.state.test_clock[0] += auth_app.state.rl.auth.policy['rate_window_seconds']
+        auth_app.state.rl.auth.store.max_sessions = 0
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 503

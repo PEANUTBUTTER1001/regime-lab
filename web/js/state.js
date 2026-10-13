@@ -5,7 +5,7 @@ const set = (k, v) => { try { v == null ? sessionStorage.removeItem(k) : session
 export const state = {
   get signedIn() { return this.authConfig?.enabled ? !!this.user : get('rl.signedIn') === '1'; },
   set signedIn(v) { set('rl.signedIn', v ? '1' : null); },
-  // 게스트 모드: 가입·로그인 없이 진행 (UI 흐름만, 실제 인증은 원래 없음)
+  // 인증 모드의 게스트 여부는 서버 응답으로 갱신하며, 데모 모드는 UI 상태만 저장한다.
   get guest() { return get('rl.guest') === '1'; },
   set guest(v) { set('rl.guest', v ? '1' : null); },
   get lastRun() { return get('rl.lastRun'); },
@@ -20,6 +20,7 @@ export const state = {
   setUser(user) {
     if (get('rl.userId') !== user?.id) this.clearWorkspace();
     this.user = user;
+    this.guest = !!user?.is_guest;
     set('rl.userId', user?.id || null);
   },
   clearWorkspace() {

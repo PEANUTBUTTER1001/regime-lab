@@ -194,6 +194,9 @@ footer.disclaimer { position:fixed; left:260px; right:0; bottom:0; background:rg
 .social-login.kakao { background:#FEE500; color:#191919; border:1px solid #FEE500; }
 .social-login.google { background:#fff; color:#1f1f1f; border:1px solid #747775; }
 .social-login:disabled { opacity:.55; cursor:not-allowed; }
+.login-guest { border-top:1px solid var(--line); padding-top:20px; margin-top:24px; }
+.login-guest .secondary { width:100%; min-height:48px; }
+.login-guest .card-sub { margin-top:12px; }
 .login-form .primary { width:100%; margin-top:22px; }
 
 @media(max-width:1050px) {
