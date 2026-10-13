@@ -38,17 +38,17 @@ const NAV = [
 ];
 const NAV_BY_ID = Object.fromEntries(NAV.map((n) => [n.id, n]));
 
-// kind: ws(조건·결과·근거 3열) · focus(결과·근거, 조건은 서랍) · two(2열) · alignr(2열, 오른쪽 = col3) · page(1열) · bare(틀 없음)
+// kind: ws(조건·결과·근거 3열 — 전략 만들기·실행 결과, 조건 열은 늘 보임, E21) · two(2열) · alignr(2열, 오른쪽 = col3) · page(1열) · bare(틀 없음)
 const ROUTES = [
   [/^#\/password$/, () => ({ kind: 'bare', view: renderPassword })],
   [/^#\/login$/, () => ({ kind: 'bare', view: renderLogin })],
   [/^#\/builder$/, () => ({ nav: 'builder', kind: 'ws', view: (el, q) => renderRunWorkspace(el, { mode: 'ws', query: q }) })],
   [/^#\/runs$/, () => ({ nav: 'runs', kind: 'page', view: renderRuns })],
   [/^#\/runs\/([^/]+)\/progress$/, (m) => ({ nav: 'builder', kind: 'ws', view: (el, q) => renderRunWorkspace(el, { mode: 'ws', runId: m[1], progress: true, query: q }) })],
-  [/^#\/runs\/([^/]+)\/results$/, (m) => ({ nav: 'results', kind: 'focus', view: (el, q) => renderRunWorkspace(el, { mode: 'focus', runId: m[1], ins: 'stocks', query: q }) })],
-  [/^#\/runs\/([^/]+)\/stock(?:\/([^/]+))?$/, (m) => ({ nav: 'results', kind: 'focus', view: (el, q) => renderRunWorkspace(el, { mode: 'focus', runId: m[1], ins: 'stocks', ticker: m[2], query: q }) })],
-  [/^#\/runs\/([^/]+)\/report$/, (m) => ({ nav: 'results', kind: 'focus', view: (el, q) => renderRunWorkspace(el, { mode: 'focus', runId: m[1], ins: 'report', query: q }) })],
-  [/^#\/(results|stock|report)$/, (m) => ({ nav: 'results', kind: 'focus', view: (el, q) => renderRunWorkspace(el, { mode: 'focus', ins: m[1] === 'report' ? 'report' : 'stocks', query: q }) })],
+  [/^#\/runs\/([^/]+)\/results$/, (m) => ({ nav: 'results', kind: 'ws', view: (el, q) => renderRunWorkspace(el, { mode: 'focus', runId: m[1], ins: 'stocks', query: q }) })],
+  [/^#\/runs\/([^/]+)\/stock(?:\/([^/]+))?$/, (m) => ({ nav: 'results', kind: 'ws', view: (el, q) => renderRunWorkspace(el, { mode: 'focus', runId: m[1], ins: 'stocks', ticker: m[2], query: q }) })],
+  [/^#\/runs\/([^/]+)\/report$/, (m) => ({ nav: 'results', kind: 'ws', view: (el, q) => renderRunWorkspace(el, { mode: 'focus', runId: m[1], ins: 'report', query: q }) })],
+  [/^#\/(results|stock|report)$/, (m) => ({ nav: 'results', kind: 'ws', view: (el, q) => renderRunWorkspace(el, { mode: 'focus', ins: m[1] === 'report' ? 'report' : 'stocks', query: q }) })],
   [/^#\/search$/, () => ({ nav: 'search', kind: 'two', view: (el) => renderSearchPage(el, {}) })],
   [/^#\/searches\/([^/]+)\/progress$/, (m) => ({ nav: 'search', kind: 'two', view: (el) => renderSearchPage(el, { id: m[1], step: 'progress' }) })],
   [/^#\/searches\/([^/]+)\/results$/, (m) => ({ nav: 'search', kind: 'two', view: (el) => renderSearchPage(el, { id: m[1], step: 'results' }) })],
@@ -95,7 +95,6 @@ function toggleDrawer(cls, opener, focusSel) {
   drawerOpener = opener;
   setTimeout(() => document.querySelector(focusSel)?.focus(), 0); // visibility 는 클래스와 함께 바로 바뀐다
 }
-const COND_FOCUS = '#p1 .pane-body input, #p1 .pane-body button';
 
 // ---------------------------------------------------------------- 상단바
 function navLink(n, navId) {
@@ -135,14 +134,8 @@ function headerBar(navId, kind) {
   // 작업면: 가운데 칸(#bar-ctx)은 실행 맥락을 작업면이 채운다
   const ctx = h('div', { class: 'cell ctx' });
   if (kind === 'ws') {
-    ctx.append(h('button', { class: 'ibtn only-mid', type: 'button', 'aria-label': t('ws.openConditions'), title: t('ws.openConditions'),
-      onclick: (e) => toggleDrawer('drawer-open', e.currentTarget, COND_FOCUS) }, h('span', { 'aria-hidden': 'true' }, '☰')), h('div', { id: 'bar-ctx', class: 'run-ctx' }));
+    ctx.append(h('div', { id: 'bar-ctx', class: 'run-ctx' }));
     return h('header', { class: 'bar' }, brand, h('div', { class: 'cell c1title' }, pageTitle), ctx, statusCell());
-  }
-  if (kind === 'focus') {
-    ctx.append(h('button', { class: 'secondary small hide-narrow', type: 'button', onclick: (e) => toggleDrawer('drawer-open', e.currentTarget, COND_FOCUS) }, t('ws.editConditions')),
-      h('div', { id: 'bar-ctx', class: 'run-ctx' }));
-    return h('header', { class: 'bar' }, brand, ctx, statusCell());
   }
   ctx.append(pageTitle);
   return h('header', { class: 'bar' }, brand, ctx, statusCell());
@@ -153,7 +146,7 @@ let cleanup = null;
 function shell(navId, kind) {
   const root = document.getElementById('root');
   root.replaceChildren();
-  const ws = ['ws', 'focus', 'two', 'alignr'].includes(kind);
+  const ws = ['ws', 'two', 'alignr'].includes(kind);
   const main = h('main', { id: 'main', tabindex: '-1', class: ws ? 'ws-main' : '' });
   const account = h('div', { class: 'nav-account' },
     h('span', {}, state.guest ? t('header.guest') : (state.user?.email || '')),
@@ -196,12 +189,12 @@ async function route(fromHistory = false) {
   if (match.kind === 'bare') { root.replaceChildren(); el = h('div', { id: 'main' }); root.append(el); }
   else { el = shell(match.nav, match.kind); }
   const wrap = h('div', { class: 'view' });
-  if (['ws', 'focus', 'two', 'alignr'].includes(match.kind)) wrap.style.display = 'contents';
+  if (['ws', 'two', 'alignr'].includes(match.kind)) wrap.style.display = 'contents';
   el.append(wrap);
   cleanup = (await match.view(wrap, query)) || null;
   applyWidths();
   const title = wrap.querySelector('h1') || document.querySelector('.page-title b');
-  if (title && match.kind !== 'ws' && match.kind !== 'focus') { title.setAttribute('tabindex', '-1'); title.focus({ preventScroll: true }); }
+  if (title && match.kind !== 'ws') { title.setAttribute('tabindex', '-1'); title.focus({ preventScroll: true }); }
   const n = NAV_BY_ID[match.nav];
   document.title = `${(wrap.querySelector('h1') || {}).textContent || (n ? t(n.label) : BRAND)} — ${BRAND}`;
 }

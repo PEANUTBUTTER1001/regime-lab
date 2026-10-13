@@ -313,7 +313,6 @@ export async function renderRunWorkspace(el, { mode, runId = null, progress = fa
   const cleanups = [];
   const frame = paneFrame({
     cols: [{ label: t('ws.col.cond') }, { label: t('ws.col.result') }, { label: t('ws.col.evidence') }],
-    cls: mode === 'focus' ? 'ws-focus' : '',
     splits: [['c1', t('ws.split.c1')], ['c3', t('ws.split.c3')]],
     current: mode === 'ws' && !ctx.runId ? 0 : 1,
   });
@@ -504,9 +503,8 @@ export async function renderRunWorkspace(el, { mode, runId = null, progress = fa
 
   // ---------------------------------------------------------------- 조건 (전략 만들기)
   const disposeBuilder = await renderBuilder(p1, query, {
-    title: t(mode === 'focus' ? 'ws.editConditions' : 'ws.col.cond'),
+    title: t('ws.col.cond'),
     onSubmitted: (id) => {
-      document.body.classList.remove('drawer-open');
       Object.assign(ctx, { runId: id, progress: true, resP: null, res: null, ticker: null, docs: null, tab: 'summary', strategy: null });
       state.lastRun = id;
       history.replaceState(null, '', `#/runs/${id}/progress`);

@@ -5,10 +5,12 @@ import { t } from '../i18n.js';
 import { state } from '../state.js';
 import { h } from './ui.js';
 
-// 메뉴 208 고정. 조건 열 240–520, 오른쪽 열 280–720, 가운데는 400 아래로 줄이지 않는다 (design.md §5.4)
+// 메뉴 208 고정. 조건 열 240–520, 오른쪽 열 280–720, 가운데는 400 아래로 줄이지 않는다 (design.md §5.4).
+// 1024–1279px 은 네 칸(메뉴·조건·결과·근거)이 다 보이도록 조건 220 · 오른쪽 260 · 가운데 300 까지 줄인다 (10-13 결정 E21)
 const RAIL = 208;
-const LIM = { c1: [240, 520], c3: [280, 720] };
-const MIN_CENTER = 400;
+const narrowDesk = () => innerWidth < 1280;
+const limits = () => (narrowDesk() ? { c1: [220, 520], c3: [260, 720] } : { c1: [240, 520], c3: [280, 720] });
+const minCenter = () => (narrowDesk() ? 300 : 400);
 const clamp = (lo, v, hi) => Math.max(lo, Math.min(hi, v));
 const defaults = () => ({ c1: clamp(264, innerWidth * 0.22, 320), c3: clamp(300, innerWidth * 0.26, 400) });
 
@@ -20,8 +22,10 @@ export function widths() {
   const lay = state.layout;
   const d = defaults();
   // 조건 열(또는 탐색 입력 열)과 오른쪽 열이 지금 화면에 보이는가
-  const c1on = (kind === 'ws' && innerWidth >= 1280) || (kind === 'two' && innerWidth >= 1024);
-  const c3on = ['ws', 'focus', 'alignr'].includes(kind) && innerWidth >= 1024;
+  const LIM = limits();
+  const MIN_CENTER = minCenter();
+  const c1on = ['ws', 'two'].includes(kind) && innerWidth >= 1024;
+  const c3on = ['ws', 'alignr'].includes(kind) && innerWidth >= 1024;
   let c1 = clamp(LIM.c1[0], lay.c1 ?? d.c1, LIM.c1[1]);
   let c3 = clamp(LIM.c3[0], lay.c3 ?? d.c3, LIM.c3[1]);
   const avail = innerWidth - (innerWidth >= 1024 ? RAIL : 0);
@@ -32,6 +36,8 @@ export function widths() {
 }
 function maxFor(k) {
   const w = widths();
+  const LIM = limits();
+  const MIN_CENTER = minCenter();
   return k === 'c1' ? Math.min(LIM.c1[1], w.avail - MIN_CENTER - (w.c3on ? w.c3 : 0)) : Math.min(LIM.c3[1], w.avail - MIN_CENTER - (w.c1on ? w.c1 : 0));
 }
 
@@ -45,7 +51,7 @@ export function applyWidths() {
     const k = sp.dataset.split;
     const v = w[k];
     sp.setAttribute('aria-valuenow', String(v));
-    sp.setAttribute('aria-valuemin', String(LIM[k][0]));
+    sp.setAttribute('aria-valuemin', String(limits()[k][0]));
     sp.setAttribute('aria-valuemax', String(Math.max(v, maxFor(k))));
     sp.setAttribute('aria-valuetext', t('ws.px', { n: v }));
     const tip = sp.querySelector('.stip');
@@ -54,7 +60,7 @@ export function applyWidths() {
 }
 
 function setWidth(k, v) {
-  const lo = LIM[k][0];
+  const lo = limits()[k][0];
   state.layout = { ...state.layout, [k]: Math.round(clamp(lo, v, Math.max(lo, maxFor(k)))) };
   applyWidths();
 }

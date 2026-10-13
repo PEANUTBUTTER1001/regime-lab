@@ -122,7 +122,7 @@ footer.disclaimer { position:fixed; left:0; right:0; bottom:0; z-index:25; min-h
    ====================================================================== */
 .wsw { display:grid; grid-template-rows:auto minmax(0,1fr); min-height:0; min-width:0; }
 .ws { --g:var(--col1) minmax(0,1fr) var(--col3); display:grid; grid-template-columns:var(--g); min-height:0; min-width:0; position:relative; }
-.ws.ws-focus, .ws.ws2r { --g:minmax(0,1fr) var(--col3); }
+.ws.ws2r { --g:minmax(0,1fr) var(--col3); }
 .ws.ws2l { --g:var(--col1) minmax(0,1fr); }
 .pane { display:flex; flex-direction:column; min-width:0; min-height:0; background:var(--canvas); border-right:1px solid var(--line); container-type:inline-size; }
 .pane:last-of-type { border-right:0; }
@@ -149,7 +149,7 @@ footer.disclaimer { position:fixed; left:0; right:0; bottom:0; z-index:25; min-h
 .split.s2 .stip { left:auto; right:12px; }
 .split.drag .stip, .split:focus-visible .stip { display:block; }
 body.resizing, body.resizing * { cursor:col-resize!important; user-select:none!important; }
-.ws.ws-focus .split.s1, .ws.ws2r .split.s1, .ws.ws2l .split.s2 { display:none; }
+.ws.ws2r .split.s1, .ws.ws2l .split.s2 { display:none; }
 
 /* 열 안의 기존 부품: 카드 → 구분선 구획 */
 .pane-body > .view { padding:0; }
@@ -168,26 +168,14 @@ body.resizing, body.resizing * { cursor:col-resize!important; user-select:none!i
 .filterbar .push { margin-left:auto; }
 .strat-row { display:flex; flex-wrap:wrap; gap:6px; padding:8px 14px; border-bottom:1px solid var(--line); background:var(--surface); }
 
-@media (min-width:1024px) {
-  .ws.ws-focus > .pane.p1 { position:fixed; z-index:30; top:var(--bar-h); bottom:var(--disclaimer-height); left:var(--rail-w); width:340px; transform:translateX(calc(-100% - var(--rail-w) - 16px)); visibility:hidden; transition:transform .16s ease, visibility 0s linear .16s; box-shadow:var(--shadow); border-right:1px solid var(--line-strong); }
-  body.drawer-open .ws.ws-focus > .pane.p1 { transform:none; visibility:visible; transition:transform .16s ease; }
-  body.drawer-open .scrim { display:block; position:fixed; inset:var(--bar-h) 0 var(--disclaimer-height) 0; z-index:28; background:var(--scrim); }
-}
+/* 1024–1279px: 조건 열은 서랍이 아니라 늘 보이는 열이다 (10-13 결정 E21). 폭이 좁아 칸은 workspace.js 가 최소 폭을 줄여 맞춘다 */
 @media (min-width:1024px) and (max-width:1279px) {
-  .only-mid { display:inline-flex!important; }
   .hide-mid { display:none!important; }
-  .app.k-ws { --gh:var(--rail-w) minmax(0,1fr) var(--col3); }
-  .app.k-ws .bar .c1title { display:none; }
-  .ws:not(.ws2l):not(.ws2r) { --g:minmax(0,1fr) var(--col3); }
-  .ws:not(.ws2l):not(.ws2r) > .pane.p1 { position:fixed; z-index:30; top:var(--bar-h); bottom:var(--disclaimer-height); left:var(--rail-w); width:320px; transform:translateX(calc(-100% - var(--rail-w) - 16px)); visibility:hidden; transition:transform .16s ease, visibility 0s linear .16s; box-shadow:var(--shadow); border-right:1px solid var(--line-strong); }
-  body.drawer-open .ws:not(.ws2l):not(.ws2r) > .pane.p1 { transform:none; visibility:visible; transition:transform .16s ease; }
-  body.drawer-open .scrim { display:block; position:fixed; inset:var(--bar-h) 0 var(--disclaimer-height) 0; z-index:28; background:var(--scrim); }
-  .ws:not(.ws2l) .split.s1 { display:none; }
 }
 @media (max-width:1023px) {
-  .only-narrow { display:inline-flex!important; }
+  .only-narrow { display:inline-grid!important; } /* .ibtn 의 place-items:center 가 그대로 적용되게 grid 유지 */
   .hide-narrow { display:none!important; }
-  .app, .app.k-ws, .app.k-focus, .app.k-alignr { grid-template-columns:minmax(0,1fr); --gh:auto minmax(0,1fr) auto; }
+  .app, .app.k-ws, .app.k-alignr { grid-template-columns:minmax(0,1fr); --gh:auto minmax(0,1fr) auto; }
   .bar > .cell { padding:0 8px; }
   .bar .c1title { display:none; }
   aside.nav-panel { position:fixed; top:var(--bar-h); bottom:var(--disclaimer-height); left:0; width:240px; transform:translateX(-105%); visibility:hidden; transition:transform .16s ease, visibility 0s linear .16s; box-shadow:var(--shadow); z-index:40; }
@@ -198,10 +186,9 @@ body.resizing, body.resizing * { cursor:col-resize!important; user-select:none!i
   .switch button { height:36px; border:0; border-right:1px solid var(--line); background:transparent; color:var(--muted); font-size:var(--fs-body); font-weight:600; }
   .switch button:last-child { border-right:0; }
   .switch button[aria-selected="true"] { color:var(--text); background:var(--canvas); box-shadow:inset 0 -2px 0 var(--accent); }
-  .ws, .ws.ws-focus, .ws.ws2l, .ws.ws2r { --g:minmax(0,1fr); }
+  .ws, .ws.ws2l, .ws.ws2r { --g:minmax(0,1fr); }
   .ws > .pane { display:none; border-right:0; }
   .ws > .pane.on { display:flex; }
-  .ws.ws-focus > .pane.p1 { position:static; transform:none; width:auto; box-shadow:none; }
   .split, .swap-btn { display:none!important; }
 }
 @media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation:none!important; transition:none!important; } }
