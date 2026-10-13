@@ -18,6 +18,8 @@ def test_other_user_cannot_read_cancel_or_generate_report(auth_app):
         assert b.get('/api/runs/'+rid+'/stocks/000001').status_code==404
         assert b.post('/api/runs/'+rid+'/cancel',headers=hb).status_code==404
         assert b.post('/api/runs/'+rid+'/report',headers=hb).status_code==404
+        assert b.delete('/api/runs/'+rid,headers=hb).status_code==404  # 다른 사용자는 지울 수 없다 (10-13 E20)
+        assert a.get('/api/runs/'+rid).status_code==200
         assert b.get('/api/runs').json()=={'runs':[]}
         assert len(a.get('/api/runs').json()['runs'])==1
         busy=b.post('/api/runs',json={'strategies':[{"name":"another",**STRATEGY}]},headers=hb)
