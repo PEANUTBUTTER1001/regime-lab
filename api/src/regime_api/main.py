@@ -22,7 +22,7 @@ from regime_api.llm.service import ReportService
 from regime_api.settings import Settings
 from regime_lab import retrieval
 from regime_lab.config import load_config
-from regime_lab.data.loader import DocsStore, ForecastStore
+from regime_lab.data.loader import DocsStore, ForecastStore, InfluenceStore
 from regime_lab.pipeline import Prepared, prepare
 from regime_lab.presets import PresetStore, presets_dir
 
@@ -63,6 +63,8 @@ class AppState:
         self.docs = DocsStore(self.paths.ext_store, self.paths.cache)  # 근거 검색 색인·보관함 수집 상태가 같이 쓴다 (R3)
         # 봉 예측 실행 결과 (P2-9). 1분봉 사본은 store 옆 minutes 폴더 (forecast-run 명령과 같은 기본값)
         self.forecasts = ForecastStore(self.paths.store, self.paths.store.parent / "minutes", self.paths.runs)
+        # 영향력 가중치 결과 (P3-12 가 쓰고 P3-13.3 이 읽음). runs/influence/<model_version>/
+        self.influence = InfluenceStore(self.paths.runs)
         self.rag_status = "ready" if rag is not None else "warming_up"
         self.rag_error: dict | None = None
 
@@ -150,11 +152,12 @@ def create_app(settings: Settings | None = None, prep: Prepared | None = None, s
         app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"],
                            allow_headers=["*"])
 
-    from regime_api.routes import auth, briefing, evidence, forecasts, llm, meta, presets, report, results, runs, searches
+    from regime_api.routes import (auth, briefing, evidence, forecasts, influence, llm, meta, presets, report, results,
+                                   runs, searches)
 
     auth.install(app)
     for r in (auth.router, meta.router, runs.router, results.router, report.router, briefing.router, llm.router,
-              searches.router, presets.router, evidence.router, forecasts.router):
+              searches.router, presets.router, evidence.router, forecasts.router, influence.router):
         app.include_router(r, prefix="/api")
     if serve_web and settings.web_dir.exists():
         app.mount("/", RevalidatingStaticFiles(directory=settings.web_dir, html=True), name="web")
