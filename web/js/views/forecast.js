@@ -8,7 +8,13 @@ import { t } from '../i18n.js';
 
 const KST = '+09:00';
 const toIso = (local) => (local ? `${local}:00${KST}` : '');
-const toLocal = (iso) => (iso ? iso.slice(0, 16) : '');
+// 시각 문자열을 자르지 않고 파싱해 KST 로 바꾼다 (AGENTS §7 함정). 시간대 없는 값은 KST 로 본다.
+const toLocal = (iso) => {
+  if (!iso) return '';
+  const s = iso.trim().replace(' ', 'T');
+  const d = new Date(/([zZ]|[+-]\d\d:?\d\d)$/.test(s) ? s : `${s}${KST}`);
+  return Number.isNaN(d.getTime()) ? '' : new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 16);
+};
 const won = (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 }));
 // 방향 표시는 한국식 색(E18 ④): 상승 쪽 빨강 ▲, 하락 쪽 파랑 ▼, 불확실은 색 없는 표시
 const DIR_SIGN = { up: 1, down: -1 };
