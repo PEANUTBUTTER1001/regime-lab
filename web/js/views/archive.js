@@ -3,7 +3,7 @@
 // (/api/evidence/documents)이 하고, 화면은 조건을 넘기고 응답을 표시만 한다 (FR-X6).
 // 조건은 주소(#/archive?…, #/archive/doc?id=…)에 남겨 새로고침·뒤로 가기에도 같은 화면을 다시 연다.
 import { api } from '../api.js';
-import { errorView, fmt, h, helpTip, loading, pill, stateView, table } from '../components/ui.js';
+import { errorView, fmt, h, helpTip, loading, pill, sourceLabel, stateView, table } from '../components/ui.js';
 import { paneFrame, paneHead } from '../components/workspace.js';
 import { has, t } from '../i18n.js';
 
@@ -23,7 +23,6 @@ const toLocal = (iso) => {
 };
 const KST_FMT = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 const when = (iso) => (!iso ? '—' : iso.length === 10 ? iso : KST_FMT.format(new Date(iso)));
-const srcLabel = (s) => (has(`ev.src.${s}`) ? t(`ev.src.${s}`) : s);
 const STATUS_KIND = { amendment: 'warn', revised: 'neutral', unlinked: 'neutral' };
 const statusPills = (list) => (list || []).map((s) => pill(t(`ar.status.${s}`), STATUS_KIND[s] || ''));
 const docHref = (id, asOf, mode) => `#/archive/doc?${new URLSearchParams({ id, as_of: asOf, mode })}`;
@@ -41,7 +40,7 @@ function coveragePanel(params) {
           h('summary', {}, t(key, { n: fmt.int(total) })), h('p', { class: 'muted' }, list.join(', '),
             total > list.length ? ` … ${t('ar.cov.more', { n: fmt.int(total - list.length) })}` : '')) : null);
         return h('div', { class: 'ar-cov-row' },
-          h('strong', {}, srcLabel(src)), ' ',
+          h('strong', {}, sourceLabel(src)), ' ',
           h('small', { class: 'muted' }, `${s.first_day} ~ ${s.last_day} · ${s.markets.join('·')}`), ' ',
           pill(`${t('ar.cov.collected')} ${fmt.int(c.collected)}`), ' ',
           c.forward ? pill(`${t('ar.cov.forward')} ${fmt.int(c.forward)}`, 'neutral') : null, ' ',
@@ -186,7 +185,7 @@ async function renderArchiveList(el, query, openDoc) {
     { label: t('ar.col.title'), render: (r) => h('div', {}, h('a', { href: docHref(r.doc_id, ix.as_of, ix.mode),
       onclick: (e) => { e.preventDefault(); e.stopPropagation(); openDoc(r.doc_id, ix.as_of, ix.mode); } }, r.title),
       r.url ? h('a', { class: 'ar-ext', href: r.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': t('ar.openSource') }, ' ↗') : null) },
-    { label: t('ev.col.source'), render: (r) => h('span', {}, srcLabel(r.source), r.corp_name ? h('small', { class: 'muted', style: { display: 'block' } }, r.corp_name) : null) },
+    { label: t('ev.col.source'), render: (r) => h('span', {}, sourceLabel(r.source, r.url), r.corp_name ? h('small', { class: 'muted', style: { display: 'block' } }, r.corp_name) : null) },
     { label: t('ar.col.tickers'), render: (r) => (r.tickers.length ? r.tickers.join(', ') : '—') },
     { label: t('ar.col.status'), render: (r) => h('span', { class: 'ar-pills' }, statusPills(r.statuses)) },
     { label: t('ar.col.versions'), num: true, render: (r) => fmt.int(r.versions_visible) },
@@ -228,7 +227,7 @@ export async function renderArchiveDoc(el, query, opts = {}) {
   const row = (k, v) => h('tr', {}, h('th', { scope: 'row' }, k), h('td', {}, v));
   const meta = h('table', { class: 'ar-meta' }, h('tbody', {},
     row(t('ar.col.title'), d.url ? h('a', { href: d.url, target: '_blank', rel: 'noopener noreferrer' }, `${d.title} ↗`) : d.title),
-    row(t('ev.col.source'), `${srcLabel(d.source)}${d.corp_name ? ` · ${d.corp_name}` : ''}`),
+    row(t('ev.col.source'), `${sourceLabel(d.source, d.url)}${d.corp_name ? ` · ${d.corp_name}` : ''}`),
     row(t('ar.col.tickers'), d.tickers.length ? d.tickers.map((x) => x.code).join(', ') : t('ar.noTicker')),
     row(t('ar.col.status'), h('span', { class: 'ar-pills' }, statusPills(d.statuses).length ? statusPills(d.statuses) : t('ar.status.none'))),
     row(t('ev.col.published'), h('span', {}, when(d.published_at), d.time_precision === 'date_only' ? h('span', {}, ' ', pill(t('ev.dateOnly'), 'neutral')) : null)),

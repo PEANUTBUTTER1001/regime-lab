@@ -1,6 +1,19 @@
 // 화면 요소 도우미와 숫자 형식. 화면은 계산하지 않고 API 값을 표시만 한다 (FR-X6).
 import { has, t } from '../i18n.js';
 
+// 검색·보관함에서 같은 원출처를 표시한다. 수집 파이프라인 이름을 언론사로 표시하지 않는다.
+export function sourceLabel(source, url) {
+  if (url && (source === 'n8n_news' || source === 'n8n_disclosure')) {
+    try {
+      const parsed = new URL(url);
+      if (['https:', 'http:'].includes(parsed.protocol) && parsed.hostname) {
+        return parsed.hostname === 'dart.fss.or.kr' ? t('ev.src.dart') : parsed.hostname.replace(/^www\./, '');
+      }
+    } catch { /* URL을 확인할 수 없으면 기존 출처 표시로 돌아간다. */ }
+  }
+  return has(`ev.src.${source}`) ? t(`ev.src.${source}`) : source;
+}
+
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {

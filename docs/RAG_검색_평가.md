@@ -58,6 +58,11 @@
 | `mode` | 아니오 | `observed`(기본) · `historical_assumed` |
 | `tickers` | 아니오 | 6자리 종목코드 쉼표 구분 |
 | `k` | 아니오 | 1~20, 기본 5 |
+| `sort` | 아니오 | `relevance`(API·CLI 기존 기본값) · `published_desc`(웹 검색 기본값) |
+
+2026-10-13 화면 요청 반영: 웹은 게시일 최신순을 기본으로 하고 관련도순을 선택할 수 있다. 최신순은 `as_of`에 보이며 검색어와 일치하고 `min_score`를 넘는 전체 후보를 게시 시각으로 정렬한 뒤 묶기·결과 수 제한을 적용한다. 관련도 상위 몇 건만 재배열하는 방식은 아니다. 제목 묶기 후보 한도는 그대로 사용하며, 최신순에서는 최신 후보부터 묶어 최신 기사를 대표로 둔다. MMR은 관련도순에만 적용한다. 시각은 UTC로 맞춰 비교하고 날짜만 있으면 KST 자정으로 취급한다. 누락·잘못된 게시 시각은 뒤에 두며, 같은 시각은 문서 키 역순으로 고정한다. 자료 목록도 같은 게시 시각 정렬을 쓴다. `INDEX_VERSION`은 3이다.
+
+검색·목록·상세의 n8n 자료 출처 표시는 원기사 URL의 도메인(`www.` 제외), DART 링크는 `DART`로 표시한다. 원자료에 언론사 이름 필드가 없어 이름을 추측하지 않는다. 저장된 `source` 식별자는 바꾸지 않는다. 검색 응답 `index.sort`에 실제 적용한 정렬을 돌려주며 화면도 이 값으로 결과 표의 정렬을 표시한다. 해당 필드가 없는 구버전 서버는 관련도순으로 표시하고 요청과 다르면 안내한다. 자동 갱신·새 출처 수집은 이 변경 범위에 포함되지 않는다.
 
 응답 200: `{status, items, index, disclaimer}`
 
@@ -65,7 +70,7 @@
 |---|---|
 | `status` | `ok` · `no_evidence` (근거 없음도 200) |
 | `items[]` | `doc_id`, `version`, `source`, `title`, `corp_name`, `url`(원출처), `published_at`, `time_precision`(`date_only` 면 화면에 "날짜만"), `first_seen_at`, `available_at`, `score`, `matched_tokens`(검색 근거), `similar_count`, `similar[]`(`doc_id`·`title`·`source`·`url`·`published_at`·`time_precision`·`available_at`) |
-| `index` | `index_version`, `docs_fingerprint`, `fields`, `total_docs`, `visible_docs`, `mode`, `as_of`, `grouping`(묶기 문턱, 끄면 null) |
+| `index` | `index_version`, `docs_fingerprint`, `fields`, `total_docs`, `visible_docs`, `mode`, `as_of`, `grouping`(묶기 문턱, 끄면 null), `sort`(실제 적용한 정렬) |
 | `disclaimer` | 비권유 고지 |
 
 오류(공통 형식 `{code, message, detail, retryable}`): 422 `validation_failed`(`detail.fields`), 503 `warming_up`(재시도 가능), 503 `data_unavailable`(ext_store 없음·문서 없음·스키마 불일치, 빈 결과로 대신하지 않음).

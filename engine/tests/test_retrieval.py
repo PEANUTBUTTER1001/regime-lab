@@ -8,6 +8,8 @@ from rag_synth import T0, make_docs, write_store
 from regime_lab import retrieval
 from regime_lab.config import load_config
 from regime_lab.data.loader import DocsStore
+from regime_lab.rag.rank import build_index
+from regime_lab.rag.text import tokenize, doc_text
 
 
 @pytest.fixture()
@@ -88,3 +90,52 @@ def test_evaluate_counts_answer_hidden_in_similar_group(tmp_path, cfg):
     gold = [{"id": "g", "query": "삼성전자 자사주 매입", "as_of": as_of, "split": "dev", "relevant": [{"url": hidden}]}]
     out = retrieval.evaluate(ei, cfg, gold, "dev")
     assert out["overall"]["recall"] == 1.0 and out["overall"]["mrr"] == 1.0
+
+
+def _memory_index(docs):
+    fields = ("title", "corp_name")
+    index = build_index((tokenize(doc_text(d, fields)) for d in docs),
+                        (tokenize(d["title"]) for d in docs))
+    return retrieval.EvidenceIndex(docs, [(d["doc_id"], d["version"]) for d in docs],
+                                   index, fields, "test", "test", {}, False)
+
+
+def test_latest_search_selects_before_limit_and_is_cut_invariant(cfg):
+    from rag_synth import make_doc
+    # 관련도 후보 한도보다 많은 오래된 고득점 문서 뒤에 낮은 점수의 최신 문서를 둔다.
+    count = cfg["rag"]["group_candidate_k"] + 1
+    docs = [make_doc(i, "", "반도체", "", T0, published_at="2026-10-01") for i in range(count)]
+    latest = make_doc(count, "", "반도체 설비 투자 신규 공장 확장 소식", "", T0,
+                      published_at="2026-10-07T01:00:00Z", time_precision="datetime")
+    docs.append(latest)
+    before = retrieval.search(_memory_index(docs), cfg, "반도체", T0, k=1, sort="published_desc")
+    assert before["items"][0]["doc_id"] == latest["doc_id"]
+    assert retrieval.search(_memory_index(docs), cfg, "반도체", T0, k=1)["items"][0]["doc_id"] != latest["doc_id"]
+    future = make_doc(count + 1, "", "반도체", "", T0 + timedelta(hours=1),
+                      published_at="2026-10-08T00:00:00Z")
+    after = retrieval.search(_memory_index(list(reversed(docs + [future]))), cfg,
+                              "반도체", T0, k=1, sort="published_desc")
+    assert before["items"] == after["items"]
+
+
+def test_latest_search_timezone_missing_dates_and_browse(cfg):
+    from rag_synth import make_doc
+    values = ["2026-10-07T08:30:00+09:00", "2026-10-07T00:00:00Z", "2026-10-07", None, "bad"]
+    docs = [make_doc(i, "", "반도체", "", T0, published_at=value) for i, value in enumerate(values)]
+    cfg = {**cfg, "rag": {**cfg["rag"], "group_threshold": None}}
+    ei = _memory_index(docs)
+    expected = [docs[i]["doc_id"] for i in (1, 0, 2, 4, 3)]
+    assert [d["doc_id"] for d in retrieval.search(ei, cfg, "반도체", T0, sort="published_desc")["items"]] == expected
+    assert [d["doc_id"] for d in retrieval.browse(ei, cfg, T0)["items"]] == expected
+    with pytest.raises(retrieval.RetrievalError) as e:
+        retrieval.search(ei, cfg, "반도체", T0, sort="unknown")
+    assert "sort" in e.value.detail["fields"]
+
+
+def test_latest_group_representative_is_newest(cfg):
+    from rag_synth import make_doc
+    docs = [make_doc(i, "", "반도체 생산 설비 확장 발표", "", T0,
+                     published_at=f"2026-10-0{i + 1}") for i in range(3)]
+    items = retrieval.search(_memory_index(docs), cfg, "반도체", T0, sort="published_desc")["items"]
+    assert len(items) == 1 and items[0]["doc_id"] == docs[2]["doc_id"]
+    assert [s["doc_id"] for s in items[0]["similar"]] == [docs[1]["doc_id"], docs[0]["doc_id"]]

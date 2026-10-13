@@ -112,11 +112,13 @@ def group_similar(rows: list[int], token_sets: list[frozenset[str]], exclude: se
 
 def search(index: Index, keys: list[tuple], q_tokens: list[str], visible: set[int], *, k1: float, b: float,
            top_k: int, candidate_k: int, mmr_lambda: float | None, min_score: float,
-           group_threshold: float | None = None, group_candidate_k: int = 100) -> list[Hit]:
+           group_threshold: float | None = None, group_candidate_k: int = 100,
+           order_keys: dict[int, int] | None = None) -> list[Hit]:
     """BM25 순위 (+ 선택: 비슷한 제목 묶기, 또는 MMR). 상위 점수가 min_score 이하이면 근거 없음([]).
 
     동점은 keys(doc_id, version) 순. group_threshold 가 있으면 BM25 상위 group_candidate_k 개를 묶어
     묶음 대표 top_k 개를 돌려주고, 이때 MMR 은 쓰지 않는다.
+    order_keys 가 있으면 min_score 를 넘는 문서를 해당 순서로 고르고 묶는다. 이때 MMR 은 쓰지 않는다.
     """
     scored = bm25(index, q_tokens, visible, k1, b)
     if not scored:
@@ -124,10 +126,13 @@ def search(index: Index, keys: list[tuple], q_tokens: list[str], visible: set[in
     order = sorted(scored, key=lambda i: (-scored[i][0], keys[i]))
     if scored[order[0]][0] <= min_score:
         return []
+    if order_keys is not None:
+        # 최신순은 관련도 상위 k개를 재배열하지 않고, 일치하는 전체 후보에서 먼저 정렬한다.
+        order = sorted((i for i in order if scored[i][0] > min_score), key=lambda i: order_keys[i])
     if group_threshold is not None:
         groups = group_similar(order[:max(group_candidate_k, top_k)], index.title_tokens, set(q_tokens), group_threshold)
         return [Hit(g[0], scored[g[0]][0], tuple(scored[g[0]][1]), tuple(g[1:])) for g in groups[:top_k]]
-    if mmr_lambda is not None:
+    if mmr_lambda is not None and order_keys is None:
         cands = order[:max(candidate_k, top_k)]
         top = scored[cands[0]][0]
         order = mmr(cands, {i: scored[i][0] / top for i in cands}, index.title_tokens, mmr_lambda, top_k)

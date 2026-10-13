@@ -1,7 +1,7 @@
 """근거 검색 API (P3-11, SRS FR-N5)와 자료 보관함 API (P3-13, SRS FR-N7).
 계산은 엔진 retrieval 에만 두고, 여기서는 입력 전달과 오류 변환만 한다.
 
-GET /api/evidence/search?q=&as_of=&mode=&tickers=&k=
+GET /api/evidence/search?q=&as_of=&mode=&tickers=&k=&sort=relevance|published_desc
 → {status: ok|no_evidence, items: [...], index: {...}, disclaimer}
 GET /api/evidence/documents?as_of=&mode=&source_type=&start=&end=&tickers=&status=&page=&page_size=
 → {status: ok|no_documents, items: [...], total, page, page_size, pages, facets, index, disclaimer}
@@ -24,11 +24,11 @@ router = APIRouter(tags=["evidence"])
 
 @router.get("/evidence/search")
 def search(request: Request, q: str = "", as_of: str = "", mode: str = "observed", tickers: str = "",
-           k: int | None = None):
+           k: int | None = None, sort: str = "relevance"):
     state = request.app.state.rl
     ei = state.require_rag()
     try:
-        res = retrieval.search(ei, state.cfg, q, as_of, mode, tickers.split(",") if tickers else None, k)
+        res = retrieval.search(ei, state.cfg, q, as_of, mode, tickers.split(",") if tickers else None, k, sort)
     except retrieval.RetrievalError as e:
         raise ApiError(422, e.code, e.message, e.detail) from None
     return {**res, "disclaimer": DISCLAIMER}

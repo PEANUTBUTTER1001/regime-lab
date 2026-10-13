@@ -19,7 +19,7 @@ ERROR_KEYS = {"code", "message", "detail", "retryable"}
 ITEM_KEYS = {"doc_id", "version", "source", "title", "corp_name", "url", "published_at", "time_precision",
              "first_seen_at", "available_at", "score", "matched_tokens", "similar_count", "similar"}
 SIMILAR_KEYS = {"doc_id", "title", "source", "url", "published_at", "time_precision", "available_at"}
-INDEX_KEYS = {"index_version", "docs_fingerprint", "fields", "total_docs", "visible_docs", "mode", "as_of", "grouping"}
+INDEX_KEYS = {"index_version", "docs_fingerprint", "fields", "total_docs", "visible_docs", "mode", "as_of", "grouping", "sort"}
 AS_OF = (T0 + timedelta(days=1)).isoformat()
 
 
@@ -47,6 +47,7 @@ def test_search_ok_contract(client):
     body = r.json()
     assert body["status"] == "ok" and body["disclaimer"]
     assert set(body["index"]) == INDEX_KEYS and body["index"]["mode"] == "observed"
+    assert body["index"]["sort"] == "relevance"
     assert body["items"] and all(set(it) == ITEM_KEYS for it in body["items"])
     assert body["items"][0]["corp_name"] == "한빛반도체" and body["items"][0]["matched_tokens"]
     assert all(it["similar_count"] == len(it["similar"]) and all(set(s) == SIMILAR_KEYS for s in it["similar"])
@@ -71,6 +72,7 @@ def test_no_evidence_is_200_with_empty_items(client):
     ({"q": "한빛", "as_of": AS_OF, "mode": "published"}, "mode"),
     ({"q": "한빛", "as_of": AS_OF, "tickers": "12"}, "tickers"),
     ({"q": "한빛", "as_of": AS_OF, "k": 99}, "k"),
+    ({"q": "한빛", "as_of": AS_OF, "sort": "unknown"}, "sort"),
 ])
 def test_validation_422(client, params, field):
     r = client.get("/api/evidence/search", params=params)
@@ -91,3 +93,18 @@ def test_warming_up_503(tmp_path, market):
     c = TestClient(app)  # with 없이: 시작 이벤트(백그라운드 적재)를 돌리지 않는다
     r = c.get("/api/evidence/search", params={"q": "한빛", "as_of": AS_OF})
     assert r.status_code == 503 and r.json()["code"] == "warming_up" and r.json()["retryable"] is True
+
+
+def test_published_sort_passes_through_api(tmp_path, market):
+    docs = make_docs()
+    docs[0]["published_at"] = "2026-10-07T08:30:00+09:00"
+    docs[1]["published_at"] = "2026-10-07T00:00:00Z"
+    app = _app(tmp_path, market, write_store(tmp_path / "ext", docs))
+    app.state.rl.load_rag()
+    with TestClient(app) as c:
+        r = c.get("/api/evidence/search", params={"q": "한빛반도체", "as_of": AS_OF,
+                                                 "sort": "published_desc", "k": 1})
+    assert r.status_code == 200
+    assert r.json()["items"][0]["doc_id"] == docs[1]["doc_id"]
+    assert r.json()["index"]["sort"] == "published_desc"
+    assert set(r.json()["index"]) == INDEX_KEYS
