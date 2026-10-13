@@ -170,6 +170,18 @@ def test_prices_and_calendar_stop_at_confirmed_close(tmp_path, cfg):
     assert close["last_bar"] == "2024-02-27"
 
 
+def test_only_latest_visible_version_is_an_event(tmp_path, cfg):
+    """같은 자료의 v1·v2 가 모두 사건이어도 T 에 쓰는 최신 버전만 (select_as_of 와 같은 규칙, PR #66 리뷰)."""
+    evs = [ev("opendart:V", "2024-03-04T10:00:00+09:00", version=1), ev("opendart:V", "2024-03-05T10:00:00+09:00", version=2)]
+    docs = [doc("opendart:V", "2024-03-04T10:00:00+09:00", version=1), doc("opendart:V", "2024-03-05T10:00:00+09:00", version=2)]
+    s = store_with(tmp_path, [(meta("m1", "2024-02-23"), evs)])
+    for mode in ("observed", "historical_assumed"):
+        late = IR.events_view(s, docs, Cov([]), frame(), cfg, CODE, None, None, "2024-03-15T16:00:00+09:00", mode=mode)
+        assert [(e["doc_id"], e["version"]) for e in late["events"]] == [("opendart:V", 2)]
+        early = IR.events_view(s, docs, Cov([]), frame(), cfg, CODE, None, None, "2024-03-04T16:00:00+09:00", mode=mode)
+        assert [(e["doc_id"], e["version"]) for e in early["events"]] == [("opendart:V", 1)]
+
+
 def _truncate(t: datetime, mode, docs, rows, fr):
     """T 뒤 정보만 지운다. observed 는 T 뒤에 처음 본 자료·T 뒤 관측 기록까지 지우고, historical_assumed 는
     소급 가정에 따라 T 이전 날짜에 대한 늦은 기록은 남기고 T 뒤 날짜만 지운다 (retrieval.coverage 규칙)."""

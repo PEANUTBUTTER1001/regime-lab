@@ -18,7 +18,7 @@ import pandas as pd
 
 from regime_lab import retrieval
 from regime_lab.bars import KST, to_kst_naive
-from regime_lab.rag.select import AS_OF_MODES, aware
+from regime_lab.rag.select import AS_OF_MODES, aware, select_as_of
 
 NOTICE = "자료 묶음과 수익률의 과거 관련성이며 인과관계나 미래 수익을 뜻하지 않습니다."
 PERIODS = ("train", "valid", "test")
@@ -157,14 +157,8 @@ def link_day(available_at, days: list[pd.Timestamp], open_at: time):
 
 
 def _visible_rows(docs: list[dict], t: datetime, mode: str) -> dict[tuple[str, int], dict]:
-    out = {}
-    for d in docs:
-        if d.get("status") == "deleted" or aware(d["available_at"]) > t:
-            continue
-        if mode == "observed" and aware(d["first_seen_at"]) > t:
-            continue
-        out[(d["doc_id"], int(d["version"]))] = d
-    return out
+    """T 에 쓰는 버전: doc_id 마다 허용 버전 중 최신 1개 (근거 검색·보관함과 같은 select_as_of). 옛 버전 사건은 보이지 않는다."""
+    return {(docs[i]["doc_id"], int(docs[i]["version"])): docs[i] for i in select_as_of(docs, t, mode)}
 
 
 def _parse_days(start, end, errors: dict) -> tuple[date | None, date | None]:
@@ -225,7 +219,7 @@ def events_view(store, docs: list[dict], docs_store, frame: pd.DataFrame, cfg: d
     try:
         for r in ev.to_dict("records"):
             doc = visible.get((r["doc_id"], int(r["version"])))
-            if doc is None:  # T 에 보이지 않는 버전 (또는 docs 에 없는 자료) — 개수도 알리지 않는다
+            if doc is None:  # T 에 쓰는 버전이 아님 (아직 안 보이거나 더 새 버전이 있음, 또는 docs 에 없는 자료) — 개수도 알리지 않는다
                 continue
             day = link_day(r["available_at"], days, open_at)
             # 연결 봉이 아직 없는 사건(마지막 확정 봉 뒤)은 자료를 쓸 수 있게 된 KST 날짜로 기간을 본다
