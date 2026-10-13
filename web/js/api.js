@@ -77,4 +77,7 @@ export const api = {
   documents: (params) => request('GET', `/evidence/documents?${new URLSearchParams(params)}`),
   document: (id, params) => request('GET', `/evidence/documents/${encodeURIComponent(id)}?${new URLSearchParams(params)}`),
   coverage: (params) => request('GET', `/evidence/coverage?${new URLSearchParams(params)}`),
+  // 영향 분석 (P3-13.3)
+  influenceWeights: (params) => request('GET', `/influence/weights?${new URLSearchParams(params)}`),
+  influenceEvents: (params) => request('GET', `/influence/events?${new URLSearchParams(params)}`),
 };
