@@ -1,6 +1,6 @@
 // 봉 예측 (P2-10, SRS FR-F1~F7, E17). 직전 종가와 다음 h 봉의 회색 예상 범위(10~90%), 통계적 방향만 보여 준다.
 // 예상 캔들·가운데 선은 그리지 않고 고정 문구를 항상 함께 둔다. 계산은 모두 엔진(/api/forecasts/*)이 하고 화면은 표시만 한다.
-// 조건(실행·종목·기준 시각)은 주소(#/forecast?run=…&code=…&as_of=…)에 남긴다.
+// 조건은 주소에 남긴다: #/forecast/{run_id}/{code}?as_of=… (로드맵 S4). 예전 #/forecast?run=…&code=… 도 읽는다.
 import { api } from '../api.js';
 import { forecastBand } from '../charts.js';
 import { errorView, fmt, h, helpTip, loading, pill, stateView, table, updown } from '../components/ui.js';
@@ -22,7 +22,15 @@ function testHit(scores, h) {
   return w ? rows.reduce((a, r) => a + r.dir_hit * r.n * r.dir_share, 0) / w : null;
 }
 
-export async function renderForecast(el, query) {
+// 상태별 안내 (P2-9a): 실행 없음은 목록에서, 나머지는 종목 응답에서
+const STATE_VIEW = {
+  no_stock: () => ({ title: t('fc.noStock'), message: t('fc.noStockMsg') }),
+  no_as_of: (d) => ({ title: t('fc.noAsOf'), message: d.test_as_of_range
+    ? t('fc.noAsOfMsg', { a: toLocal(d.test_as_of_range[0]).replace('T', ' '), b: toLocal(d.test_as_of_range[1]).replace('T', ' ') }) : t('fc.noPredMsg') }),
+  insufficient_history: () => ({ title: t('fc.thin'), message: t('fc.thinMsg') }),
+};
+
+export async function renderForecast(el, query, runId, code) {
   el.append(h('h1', { text: t('fc.title') }), loading());
   let runs;
   try { runs = await api.forecastRuns(); } catch (e) { el.replaceChildren(h('h1', { text: t('fc.title') }), errorView(e)); return; }
@@ -33,13 +41,14 @@ export async function renderForecast(el, query) {
     return;
   }
   const f = {
-    run: runs.runs.some((r) => r.run_id === query.get('run')) ? query.get('run') : runs.runs[0].run_id,
-    code: (query.get('code') || '005930').trim(),
+    run: [runId, query.get('run')].find((x) => runs.runs.some((r) => r.run_id === x)) || runs.runs[0].run_id,
+    code: (code || query.get('code') || '005930').trim(),
     asOf: toLocal(query.get('as_of')),
   };
   const runSel = h('select', { id: 'fc-run', onchange: (e) => { f.run = e.target.value; } },
     runs.runs.map((r) => h('option', { value: r.run_id, selected: r.run_id === f.run },
-      t('fc.runOpt', { tf: r.timeframe, at: (r.created_at || '').slice(0, 16).replace('T', ' '), n: fmt.int(r.codes) }))));
+      t('fc.runOpt', { tf: r.timeframe, at: (r.created_at || '').slice(0, 16).replace('T', ' '), n: fmt.int(r.codes) })
+      + (r.test_as_of_range ? t('fc.runRange', { a: r.test_as_of_range[0].slice(0, 10), b: r.test_as_of_range[1].slice(0, 10) }) : ''))));
   const codeIn = h('input', { id: 'fc-code', value: f.code, placeholder: t('fc.codePh'), maxlength: '6', autocomplete: 'off',
     oninput: (e) => { f.code = e.target.value.trim(); } });
   const asOfIn = h('input', { id: 'fc-asof', type: 'datetime-local', step: '60', value: f.asOf, oninput: (e) => { f.asOf = e.target.value; } });
@@ -53,8 +62,8 @@ export async function renderForecast(el, query) {
   const out = h('section', { 'aria-live': 'polite' });
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const q = new URLSearchParams({ run: f.run, code: f.code, ...(f.asOf ? { as_of: toIso(f.asOf) } : {}) });
-    location.hash = `#/forecast?${q}`;
+    const q = new URLSearchParams(f.asOf ? { as_of: toIso(f.asOf) } : {});
+    location.hash = `#/forecast/${encodeURIComponent(f.run)}/${encodeURIComponent(f.code)}${f.asOf ? `?${q}` : ''}`;
   });
   el.replaceChildren(head, notice, form, out);
   await show(out, f);
@@ -70,7 +79,7 @@ async function show(out, f) {
     return;
   }
   if (d.status !== 'ok') {
-    out.replaceChildren(stateView({ title: t('fc.noPred'), message: t('fc.noPredMsg') }));
+    out.replaceChildren(stateView((STATE_VIEW[d.status] || (() => ({ title: t('fc.noPred'), message: t('fc.noPredMsg') })))(d)));
     return;
   }
   const chartEl = h('div', { class: 'chart' });
@@ -78,7 +87,7 @@ async function show(out, f) {
   out.replaceChildren(
     h('article', { class: 'card' },
       h('h2', {}, `${d.code} · ${d.timeframe}`), h('p', { class: 'card-sub', text: t('fc.asOfAt', { at, p: won(d.base_close) }) }),
-      chartEl, h('p', { class: 'notice', role: 'note', text: t('fc.notice') })),
+      chartEl, h('p', { class: 'notice', role: 'note', text: d.notice || t('fc.notice') })),  // E17 문구는 응답 값 그대로
     table({
       caption: t('fc.tableCap'),
       columns: [

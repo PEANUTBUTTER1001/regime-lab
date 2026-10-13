@@ -51,7 +51,7 @@ const ROUTES = [
   [/^#\/presets$/, () => ({ nav: 'presets', view: renderPresets })],
   [/^#\/searches\/([^/]+)\/progress$/, (m) => ({ nav: 'search', view: (el) => renderSearchProgress(el, m[1]) })],
   [/^#\/searches\/([^/]+)\/results$/, (m) => ({ nav: 'search', view: (el) => renderSearchResult(el, m[1]) })],
-  [/^#\/forecast$/, () => ({ nav: 'forecast', view: renderForecast })],
+  [/^#\/forecast(?:\/([^/]+)\/([^/]+))?$/, (m) => ({ nav: 'forecast', view: (el, q) => renderForecast(el, q, m[1] && decodeURIComponent(m[1]), m[2]) })],
   [/^#\/evidence$/, () => ({ nav: 'evidence', view: renderEvidence })],
   [/^#\/archive$/, () => ({ nav: 'archive', view: renderArchive })],
   [/^#\/archive\/doc$/, () => ({ nav: 'archive', view: renderArchiveDoc })],
