@@ -3,7 +3,7 @@
 // (/api/influence/*)이 하고, 화면은 조건을 넘기고 응답을 표시만 한다 (FR-X6).
 // 결과 없음은 네 가지를 서로 다르게 보인다: 학습 결과 없음 · 사건 없음 · 수집 공백 · 데이터 없음 (FR-N4).
 import { api } from '../api.js';
-import { lines } from '../charts.js';
+import { influence } from '../charts.js';
 import { errorView, fmt, h, helpTip, loading, pill, stateView, table } from '../components/ui.js';
 import { paneFrame, paneHead, paneTabs } from '../components/workspace.js';
 import { has, t } from '../i18n.js';
@@ -105,10 +105,19 @@ function eventsSection(res, f) {
       rows: res.events,
     }));
   }
+  // 차트에는 연결 봉과 그날 종가가 있고 학습·검증·평가 구간인 사건만 점으로 찍는다. 연결 봉 없음·기간 밖(outside)은 표에만 남긴다.
+  // 화면 읽기용 설명의 구간별 건수는 실제로 찍은 점 수와 같다.
   const draw = () => {
     if (!chartEl) return;
-    lines(chartEl, [{ name: t('c.close'), data: res.bars.map((b) => [b.date, b.close]) }],
-      { ariaLabel: t('inf.e.chartAria', { t: res.ticker, s: res.bars[0].date, e: res.bars.at(-1).date, n: fmt.int(res.events.length) }), yName: t('c.price') });
+    const points = { train: [], valid: [], test: [] };
+    for (const e of res.events) {
+      if (e.linked_bar_start && e.close != null && points[e.period]) {
+        points[e.period].push({ date: e.linked_bar_start.slice(0, 10), close: e.close, title: e.title || e.doc_id, group: e.group, contribution: e.contribution });
+      }
+    }
+    const n = (k) => fmt.int(points[k].length);
+    influence(chartEl, { bars: res.bars, points }, t('inf.e.chartAria', { t: res.ticker, s: res.bars[0].date, e: res.bars.at(-1).date,
+      n: fmt.int(points.train.length + points.valid.length + points.test.length), a: n('train'), b: n('valid'), c: n('test') }));
   };
   return { nodes: out, draw };
 }

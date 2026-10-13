@@ -108,3 +108,42 @@ export function price(el, d, ariaLabel) {
   });
   return chart;
 }
+
+// 영향 분석 (P3-13.3): 종가 선 위에 자료 사건 점. 구간(학습·검증·평가)마다 모양과 색을 둘 다 다르게 한다(색만으로 구분하지 않음).
+// d = { bars: [{date, close}], points: {train|valid|test: [{date, close, title, group, contribution}]} } — 어떤 사건을 찍을지는 화면이 정한다.
+// 툴팁 문구는 자료 제목을 HTML 로 해석하지 않도록 바꿔서 넣는다.
+const EV_STYLE = {
+  train: { symbol: 'emptyCircle', color: C.gray, label: 'inf.c.train' },
+  valid: { symbol: 'diamond', color: C.amber, label: 'inf.c.valid' },
+  test: { symbol: 'triangle', color: C.mint, label: 'inf.c.test' },
+};
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+export function influence(el, d, ariaLabel) {
+  const chart = base(el, ariaLabel);
+  const num = (v) => Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const evSeries = Object.entries(EV_STYLE).map(([k, s]) => ({
+    name: t(s.label), type: 'scatter', symbol: s.symbol, symbolSize: 11,
+    itemStyle: { color: s.color, borderColor: '#0C1114', borderWidth: 1 },
+    data: (d.points[k] || []).map((p) => ({ value: [p.date, p.close], ev: p })),
+  }));
+  chart.setOption({
+    grid: { left: 64, right: 16, top: 42, bottom: 80 },
+    legend: { top: 0, right: 8, textStyle: { color: C.muted, fontSize: 11 } },
+    tooltip: { ...tooltip, formatter: (params) => {
+      // p.marker 는 ECharts 가 만드는 색 점 HTML 이라 그대로 두고, 자료에서 온 글자(제목·묶음)만 바꿔 넣는다
+      const rows = params.map((p) => (p.seriesType === 'line'
+        ? `${p.marker}${esc(p.seriesName)} ${num(p.value[1])}`
+        : `${p.marker}${esc(p.seriesName)} · ${esc(p.data.ev.title)} (${esc(p.data.ev.group ?? '—')}${p.data.ev.contribution == null ? '' : `, ${Number(p.data.ev.contribution).toFixed(4)}`})`));
+      return [esc(params[0]?.axisValueLabel ?? ''), ...rows].join('<br>');
+    } },
+    xAxis: { type: 'time', ...axisCommon, splitLine: { show: false } },
+    yAxis: { type: 'value', scale: true, name: t('c.price'), nameTextStyle: { color: C.muted }, ...axisCommon },
+    dataZoom: [{ type: 'inside' }, ZOOM_SLIDER],
+    series: [
+      { name: t('c.close'), type: 'line', showSymbol: false, data: d.bars.map((b) => [b.date, b.close]), lineStyle: { color: C.text, width: 1.6 }, itemStyle: { color: C.text } },
+      ...evSeries,
+    ],
+  });
+  return chart;
+}
