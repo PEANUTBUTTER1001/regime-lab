@@ -1,7 +1,8 @@
 // 역방향 백테스트 (P1-8, 설계 §3·§4, plan/01 작업 ②). 입력 → 진행 → 결과 세 화면.
 // 허용 값·기본값은 /api/searches/options, 후보 수·예상 시간은 /api/searches/preview 에서 받는다. 화면은 계산하지 않는다.
 import { api } from '../api.js';
-import { errorView, fmt, h, helpTip, linkButton, loading, metricDefs, pill, table, toast } from '../components/ui.js';
+import { errorView, fmt, h, helpTip, linkButton, loading, metricDefs, pill, stateView, table, toast } from '../components/ui.js';
+import { paneFrame, paneHead } from '../components/workspace.js';
 import { has, t } from '../i18n.js';
 import { state } from '../state.js';
 
@@ -69,7 +70,7 @@ function toBody(f) {
 const SERVER_KEY = { 'axes.stop_loss_pct': 'axes.stop', 'axes.take_profit_pct': 'axes.profit', 'axes.max_hold_days': 'axes.hold' };
 
 // ================================================================ 입력 화면 (#/search)
-export async function renderSearch(el) {
+export async function renderSearch(el, foot = null) {
   el.append(h('h1', { text: t('sx.title') }), loading(t('b.loadingData')));
   let meta = state.meta;
   let opt;
@@ -200,7 +201,8 @@ export async function renderSearch(el) {
       h('div', { class: 'notice' }, t('sx.notice', { s: opt.split_date, e: dayAfter(opt.split_date), n: opt.max_candidates }))),
     goalRow,
     h('div', { class: 'search-grid' }, rangeCard, scopeCard), serverBox,
-    h('div', { class: 'fab-spacer', 'aria-hidden': 'true' }), fab);
+    ...(foot ? [] : [h('div', { class: 'fab-spacer', 'aria-hidden': 'true' }), fab]));
+  if (foot) foot.replaceChildren(fab);
 
   // ---------------------------------------------------------------- 동작
   let timer;
@@ -526,4 +528,23 @@ export async function renderSearchResult(el, id) {
     res.rows.length ? saveCard : null,
     h('div', { style: { marginTop: '18px' } }, metricDefs(res.metric_definitions)),
     h('div', { class: 'actions' }, linkButton(t('sr.newSearch'), '#/search', true))].filter(Boolean));
+}
+
+// ================================================================ 2열 화면 (design.md §8.3, UI 개혁 B안)
+// 왼쪽: 목표·탐색 범위 입력(실행은 열 바닥), 오른쪽: 탐색 전 안내 / 진행(#/searches/:id/progress) / 후보(#/searches/:id/results)
+export async function renderSearchPage(root, { id = null, step = null } = {}) {
+  const frame = paneFrame({ cols: [{ label: t('ws.col.goal') }, { label: t('ws.col.candidates') }], cls: 'ws2l', splits: [['c1', t('ws.split.c1')]], current: id ? 1 : 0 });
+  root.append(frame.root);
+  const [left, right] = frame.panes;
+  const body = h('div', { class: 'pane-body', style: { padding: '14px 16px' } });
+  const foot = h('div', { class: 'pane-foot' });
+  const rbody = h('div', { class: 'pane-body', style: { padding: '0 16px 16px' } });
+  left.append(paneHead(t('sx.title')), body, foot);
+  right.append(paneHead(t('ws.col.candidates')), rbody);
+  const disposeForm = await renderSearch(body, foot);
+  let disposeRight = null;
+  if (!id) rbody.append(stateView({ title: t('ws.searchIdleTitle'), message: t('ws.searchIdle') }));
+  else if (step === 'progress') disposeRight = renderSearchProgress(rbody, id);
+  else disposeRight = await renderSearchResult(rbody, id);
+  return () => { if (typeof disposeForm === 'function') disposeForm(); if (typeof disposeRight === 'function') disposeRight(); };
 }

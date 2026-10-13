@@ -58,6 +58,20 @@ def status(run_id: str, request: Request):
     return snap
 
 
+@router.delete("/runs/{run_id}")
+def delete(run_id: str, request: Request):
+    """끝난 실행을 기록에서 뺀다. 파일은 runs/.deleted/ 로 옮겨 되살릴 수 있다 (10-13 결정 E20)."""
+    try:
+        moved = request.app.state.rl.jobs.delete(run_id)
+    except KeyError:
+        raise ApiError(404, "run_not_found", f"Run not found: {run_id}") from None
+    except RuntimeError as e:
+        raise ApiError(409, "run_active", "A run in progress cannot be deleted. Cancel it first.", {"status": str(e)}) from None
+    except OSError:
+        raise ApiError(500, "delete_failed", "Could not move the run files. Nothing was deleted.", retryable=True) from None
+    return {"run_id": run_id, "deleted": True, "moved_to": moved}
+
+
 @router.post("/runs/{run_id}/cancel", status_code=202)
 def cancel(run_id: str, request: Request):
     s = request.app.state.rl

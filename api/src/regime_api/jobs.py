@@ -130,6 +130,61 @@ class JobManager:
                 out.append(self.get(d.name))
         return out[:limit]
 
+    # ------------------------------------------------------------------ 삭제 (되살릴 수 있게 runs/.deleted/ 로 옮긴다, 10-13 결정 E20)
+    def delete(self, run_id: str) -> str:
+        """끝난 실행(완료·취소·실패)의 결과 폴더와 상태 파일을 runs/.deleted/<run_id>/ 로 옮긴다. 옮긴 위치를 돌려준다.
+
+        KeyError: 없는 실행 · RuntimeError(status): 실행 중·대기 중 · OSError: 옮기지 못함(원래 자리 그대로)
+        """
+        import shutil
+
+        if not run_id or run_id.startswith(".") or "/" in run_id or "\\" in run_id or run_id == self.search_dir.name:
+            raise KeyError(run_id)
+        with self._lock:
+            snap = self.get_locked(run_id)
+            if snap is None:
+                raise KeyError(run_id)
+            if snap.get("status") not in TERMINAL:
+                raise RuntimeError(snap.get("status"))
+            trash = self.runs_dir / ".deleted"
+            trash.mkdir(exist_ok=True)
+            dest = trash / run_id
+            if dest.exists():
+                dest = trash / f"{run_id}_{datetime.now():%Y%m%dT%H%M%S}"
+            src = self.runs_dir / run_id
+            status = self.status_dir / f"{run_id}.json"
+            moved = False
+            if src.exists():
+                shutil.move(str(src), str(dest))
+                moved = True
+            else:
+                dest.mkdir()
+            try:
+                if status.exists():
+                    shutil.move(str(status), str(dest / "_status.json"))
+            except OSError:
+                if moved:  # 반쯤 옮긴 상태로 남기지 않는다
+                    shutil.move(str(dest), str(src))
+                else:
+                    shutil.rmtree(dest, ignore_errors=True)
+                raise
+            job = self._jobs.pop(run_id, None)
+            if job is not None and self._current is job:
+                self._current = None
+        return dest.relative_to(self.runs_dir).as_posix()
+
+    def get_locked(self, run_id: str) -> dict | None:
+        """get() 과 같지만 이미 _lock 을 잡은 상태에서 부른다."""
+        job = self._jobs.get(run_id)
+        if job and job.kind == "run":
+            return job.snapshot()
+        f = self.status_dir / f"{run_id}.json"
+        if f.exists():
+            return json.loads(f.read_text(encoding="utf-8"))
+        if (self.runs_dir / run_id / "result.json").exists():
+            return {"run_id": run_id, "status": "completed"}
+        return None
+
     @property
     def current(self) -> Job | None:
         with self._lock:

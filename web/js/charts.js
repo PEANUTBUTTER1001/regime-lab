@@ -1,88 +1,109 @@
-// ECharts 래퍼 (design.md §7). 축·단위·범례·툴팁을 차트 가까이에 두고, 색 외에 선 종류·마커 모양으로도 구분한다.
+// ECharts 래퍼 (design.md §9). 축·단위·범례·툴팁을 차트 가까이에 두고, 색 외에 선 종류·마커 모양으로도 구분한다.
+// 색은 CSS 토큰(:root, 라이트 테마는 [data-theme="light"])에서 그릴 때마다 읽는다 → 테마를 바꾸면 화면을 다시 그려 새 색을 쓴다.
 import { t } from './i18n.js';
 
-// up/down: 한국식 손익 색 (E18 ④, css --up/--down 과 같은 값). 상승·이익·매수 = 빨강, 하락·손실·매도 = 파랑
-const C = { mint: '#88E6BC', amber: '#EAC07A', up: '#EF8F8F', down: '#8AC4E8', text: '#E8F0ED', muted: '#97A9A3', line: '#2A383B', gray: '#697b79' };
-const live = new Set();
+// 한국식 손익 색 (E18 ④): 상승·이익·매수 = --up(빨강), 하락·손실·매도 = --down(파랑). 강조 선은 --accent
+function pal() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name) => cs.getPropertyValue(name).trim();
+  return {
+    accent: v('--accent'), amber: v('--amber'), up: v('--up'), down: v('--down'), text: v('--text'), muted: v('--muted'),
+    line: v('--line'), lineStrong: v('--line-strong'), surface: v('--surface'), control: v('--control'), canvas: v('--canvas'),
+    shadeUp: v('--shade-up'), shadeDown: v('--shade-down'),
+  };
+}
+const live = new Map(); // chart → ResizeObserver
 
-window.addEventListener('resize', () => live.forEach((c) => c.resize()));
-
-export function disposeAll() { live.forEach((c) => c.dispose()); live.clear(); }
+// 열 폭(조절바·자리 바꾸기·서랍)이 바뀌어도 차트가 칸에 맞게 다시 그려지도록 요소마다 크기를 지켜본다
+export function disposeAll() { live.forEach((ro, c) => { ro.disconnect(); c.dispose(); }); live.clear(); }
+// 열 안의 내용만 다시 그릴 때(탭 전환 등) 그 안의 차트만 정리한다
+export function disposeIn(root) {
+  live.forEach((ro, c) => { if (c.isDisposed() || root.contains(c.getDom())) { ro.disconnect(); if (!c.isDisposed()) c.dispose(); live.delete(c); } });
+}
 
 function base(el, ariaLabel) {
   el.setAttribute('role', 'img');
   el.setAttribute('aria-label', ariaLabel);
   const chart = window.echarts.init(el, null, { renderer: 'canvas' });
-  live.add(chart);
+  const ro = new ResizeObserver(() => { if (!chart.isDisposed()) chart.resize(); });
+  ro.observe(el);
+  live.set(chart, ro);
   return chart;
 }
 
-const axisCommon = {
-  axisLine: { lineStyle: { color: C.line } }, axisLabel: { color: C.muted, fontSize: 10 },
+const axisCommon = (C) => ({
+  axisLine: { lineStyle: { color: C.lineStrong } }, axisLabel: { color: C.muted, fontSize: 11 },
   splitLine: { lineStyle: { color: C.line } },
-};
+});
 // 기간 조절 막대(x축 아래): 끌기 쉬운 높이 (2026-09-22 사용자 요청)
-const ZOOM_SLIDER = { type: 'slider', height: 32, bottom: 8, borderColor: C.line, textStyle: { color: C.muted }, handleSize: '110%' };
-const tooltip = { trigger: 'axis', backgroundColor: '#1B2429', borderColor: '#314145', textStyle: { color: C.text, fontSize: 12 } };
+const zoomSlider = (C) => ({ type: 'slider', height: 28, bottom: 8, borderColor: C.lineStrong, textStyle: { color: C.muted, fontSize: 11 }, handleSize: '110%',
+  fillerColor: 'rgba(128,128,128,.12)', dataBackground: { lineStyle: { color: C.lineStrong }, areaStyle: { color: C.control } } });
+const tooltip = (C) => ({ trigger: 'axis', backgroundColor: C.surface, borderColor: C.lineStrong, textStyle: { color: C.text, fontSize: 12 } });
 
 export function histogram(el, bins, ariaLabel) {
+  const C = pal();
+  const ax = axisCommon(C);
   const pc = (x) => (x * 100).toFixed(0);
   const label = (b) => (b.lo == null ? `< ${pc(b.hi)}%` : b.hi == null ? `≥ ${pc(b.lo)}%` : `${pc(b.lo)}%`);
   const chart = base(el, ariaLabel);
   chart.setOption({
     grid: { left: 48, right: 12, top: 18, bottom: 48 },
-    tooltip: { ...tooltip, formatter: (p) => {
+    tooltip: { ...tooltip(C), formatter: (p) => {
       const b = bins[p[0].dataIndex];
       const rng = b.lo == null ? t('c.binBelow', { a: pc(b.hi) }) : b.hi == null ? t('c.binAbove', { a: pc(b.lo) }) : t('c.binRange', { a: pc(b.lo), b: pc(b.hi) });
       return t('c.binTip', { r: rng, n: b.count.toLocaleString('en-US') });
     } },
-    xAxis: { type: 'category', data: bins.map(label), name: t('c.netReturn'), nameLocation: 'middle', nameGap: 32, nameTextStyle: { color: C.muted }, ...axisCommon, axisLabel: { ...axisCommon.axisLabel, interval: 4 } },
-    yAxis: { type: 'value', name: t('c.trades'), nameTextStyle: { color: C.muted }, ...axisCommon },
+    xAxis: { type: 'category', data: bins.map(label), name: t('c.netReturn'), nameLocation: 'middle', nameGap: 32, nameTextStyle: { color: C.muted }, ...ax, axisLabel: { ...ax.axisLabel, interval: 4 } },
+    yAxis: { type: 'value', name: t('c.trades'), nameTextStyle: { color: C.muted }, ...ax },
     series: [{ type: 'bar', data: bins.map((b) => ({ value: b.count, itemStyle: { color: (b.hi != null && b.hi <= 0) ? C.down : C.up } })), barCategoryGap: '8%' }],
   });
   return chart;
 }
 
 export function lines(el, series, { ariaLabel, yName, percentBase = null } = {}) {
+  const C = pal();
+  const ax = axisCommon(C);
   const chart = base(el, ariaLabel);
-  const styles = [{ color: C.mint, type: 'solid', width: 2.5 }, { color: C.muted, type: 'dashed', width: 2 }, { color: C.amber, type: 'dotted', width: 2 }];
+  const styles = [{ color: C.accent, type: 'solid', width: 1.5 }, { color: C.muted, type: 'dashed', width: 1 }, { color: C.amber, type: 'dotted', width: 1 }];
   chart.setOption({
-    grid: { left: 58, right: 16, top: 40, bottom: 76 },
-    legend: { top: 0, right: 8, textStyle: { color: C.muted, fontSize: 11 } },
-    tooltip: { ...tooltip, valueFormatter: (v) => (v == null ? '—' : percentBase != null ? `${((v / percentBase - 1) * 100).toFixed(2)}%` : v.toFixed(3)) },
-    xAxis: { type: 'time', ...axisCommon, splitLine: { show: false } },
-    yAxis: { type: 'value', scale: true, name: yName, nameTextStyle: { color: C.muted }, ...axisCommon,
-      axisLabel: { ...axisCommon.axisLabel, formatter: (v) => (percentBase != null ? `${((v / percentBase - 1) * 100).toFixed(0)}%` : v) } },
-    dataZoom: [{ type: 'inside' }, ZOOM_SLIDER],
+    // 범례(맨 위 한 줄)와 y축 이름이 겹치지 않게 차트 영역을 범례 아래로 내린다
+    grid: { left: 58, right: 16, top: 56, bottom: 72 },
+    legend: { type: 'scroll', top: 0, left: 8, right: 8, textStyle: { color: C.muted, fontSize: 11 }, pageTextStyle: { color: C.muted }, pageIconColor: C.muted, pageIconInactiveColor: C.lineStrong },
+    tooltip: { ...tooltip(C), valueFormatter: (v) => (v == null ? '—' : percentBase != null ? `${((v / percentBase - 1) * 100).toFixed(2)}%` : v.toFixed(3)) },
+    xAxis: { type: 'time', ...ax, splitLine: { show: false } },
+    yAxis: { type: 'value', scale: true, name: yName, nameTextStyle: { color: C.muted, align: 'left' }, nameGap: 12, ...ax,
+      axisLabel: { ...ax.axisLabel, formatter: (v) => (percentBase != null ? `${((v / percentBase - 1) * 100).toFixed(0)}%` : v) } },
+    dataZoom: [{ type: 'inside' }, zoomSlider(C)],
     series: series.map((s, i) => ({ name: s.name, type: 'line', showSymbol: false, data: s.data, lineStyle: styles[i % styles.length], itemStyle: { color: styles[i % styles.length].color } })),
   });
   return chart;
 }
 
-const REGIME_BG = { bull: 'rgba(239,143,143,0.09)', bear: 'rgba(138,196,232,0.09)' };
-
 export function price(el, d, ariaLabel) {
+  const C = pal();
+  const ax = axisCommon(C);
+  const regimeBg = { bull: C.shadeUp, bear: C.shadeDown };
   const s = d.series;
-  const pts = (arr) => s.date.map((t, i) => [t, arr[i]]);
-  const areas = d.stock_regime_segments.filter((g) => REGIME_BG[g.regime])
-    .map((g) => [{ xAxis: g.start, itemStyle: { color: REGIME_BG[g.regime] }, name: g.regime }, { xAxis: g.end }]);
+  const pts = (arr) => s.date.map((x, i) => [x, arr[i]]);
+  const areas = d.stock_regime_segments.filter((g) => regimeBg[g.regime])
+    .map((g) => [{ xAxis: g.start, itemStyle: { color: regimeBg[g.regime] }, name: g.regime }, { xAxis: g.end }]);
   const entries = d.markers.filter((m) => m.type === 'entry').map((m) => [m.date, m.price]);
   const exits = d.markers.filter((m) => m.type === 'exit').map((m) => [m.date, m.price, m.reason]);
   const chart = base(el, ariaLabel);
   chart.setOption({
-    grid: { left: 64, right: 16, top: 42, bottom: 80 },
-    legend: { top: 0, right: 8, textStyle: { color: C.muted, fontSize: 11 } },
-    tooltip: { ...tooltip, valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })) },
-    xAxis: { type: 'time', ...axisCommon, splitLine: { show: false } },
-    yAxis: { type: 'value', scale: true, name: t('c.price'), nameTextStyle: { color: C.muted }, ...axisCommon },
-    dataZoom: [{ type: 'inside' }, ZOOM_SLIDER],
+    grid: { left: 60, right: 12, top: 56, bottom: 72 },
+    legend: { type: 'scroll', top: 0, left: 8, right: 8, textStyle: { color: C.muted, fontSize: 11 }, pageTextStyle: { color: C.muted }, pageIconColor: C.muted, pageIconInactiveColor: C.lineStrong },
+    tooltip: { ...tooltip(C), valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })) },
+    xAxis: { type: 'time', ...ax, splitLine: { show: false } },
+    yAxis: { type: 'value', scale: true, name: t('c.price'), nameTextStyle: { color: C.muted, align: 'left' }, nameGap: 12, ...ax },
+    dataZoom: [{ type: 'inside' }, zoomSlider(C)],
     series: [
-      { name: t('c.close'), type: 'line', showSymbol: false, data: pts(s.close), lineStyle: { color: C.text, width: 1.6 }, itemStyle: { color: C.text },
+      { name: t('c.close'), type: 'line', showSymbol: false, data: pts(s.close), lineStyle: { color: C.text, width: 1.5 }, itemStyle: { color: C.text },
         markArea: { silent: true, label: { show: false }, data: areas } },
-      { name: t('c.ma20'), type: 'line', showSymbol: false, data: pts(s.sma20), lineStyle: { color: C.mint, width: 1.2, type: 'dashed' }, itemStyle: { color: C.mint } },
-      { name: t('c.ma200'), type: 'line', showSymbol: false, data: pts(s.sma200), lineStyle: { color: C.amber, width: 1.2, type: 'dotted' }, itemStyle: { color: C.amber } },
-      { name: t('c.entry'), type: 'scatter', data: entries, symbol: 'triangle', symbolSize: 11, itemStyle: { color: C.up, borderColor: '#0C1114', borderWidth: 1 } },
-      { name: t('c.exit'), type: 'scatter', data: exits, symbol: 'rect', symbolSize: 9, itemStyle: { color: C.down, borderColor: '#0C1114', borderWidth: 1 } },
+      { name: t('c.ma20'), type: 'line', showSymbol: false, data: pts(s.sma20), lineStyle: { color: C.accent, width: 1, type: 'dashed' }, itemStyle: { color: C.accent } },
+      { name: t('c.ma200'), type: 'line', showSymbol: false, data: pts(s.sma200), lineStyle: { color: C.amber, width: 1, type: 'dotted' }, itemStyle: { color: C.amber } },
+      { name: t('c.entry'), type: 'scatter', data: entries, symbol: 'triangle', symbolSize: 10, itemStyle: { color: C.up, borderColor: C.canvas, borderWidth: 1 } },
+      { name: t('c.exit'), type: 'scatter', data: exits, symbol: 'rect', symbolSize: 8, itemStyle: { color: C.down, borderColor: C.canvas, borderWidth: 1 } },
     ],
   });
   return chart;

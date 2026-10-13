@@ -25,6 +25,7 @@ def test_meta(client):
 
 def test_openapi_contract_available(client):
     spec = client.get("/openapi.json").json()
+    assert "delete" in spec["paths"]["/api/runs/{run_id}"]
     for path in ("/api/runs", "/api/runs/{run_id}", "/api/runs/{run_id}/cancel", "/api/runs/{run_id}/result",
                  "/api/runs/{run_id}/stocks/{ticker}", "/api/runs/{run_id}/report", "/api/universe/preview",
                  "/api/briefing", "/api/meta"):
@@ -124,6 +125,43 @@ def test_busy_and_cancel(client):
     assert not (client.app.state.rl.paths.runs / run_id).exists()
     assert client.post(f"/api/runs/{run_id}/cancel").status_code == 409
     jobs._prep = real
+
+
+def test_delete_moves_run_to_trash(client):
+    """DELETE /api/runs/{id} (10-13 결정 E20): 끝난 실행은 목록·조회에서 빠지고 파일은 runs/.deleted/ 로 옮겨진다."""
+    runs = client.app.state.rl.paths.runs
+    run_id, _ = run_to_end(client)
+    r = client.delete(f"/api/runs/{run_id}")
+    assert r.status_code == 200 and r.json() == {"run_id": run_id, "deleted": True, "moved_to": f".deleted/{run_id}"}
+    assert not (runs / run_id).exists() and (runs / ".deleted" / run_id / "result.json").exists()
+    assert (runs / ".deleted" / run_id / "_status.json").exists() and not (runs / ".status" / f"{run_id}.json").exists()
+    for url in (f"/api/runs/{run_id}", f"/api/runs/{run_id}/result"):
+        assert client.get(url).json()["code"] == "run_not_found"
+    assert run_id not in [x["run_id"] for x in client.get("/api/runs").json()["runs"]]
+    r = client.delete(f"/api/runs/{run_id}")
+    assert r.status_code == 404 and set(r.json()) == ERROR_KEYS and r.json()["code"] == "run_not_found"
+    for bad in ("nope", ".deleted", ".status"):
+        assert client.delete(f"/api/runs/{bad}").status_code == 404
+
+
+def test_delete_refuses_active_run(client):
+    gate = threading.Event()
+    jobs = client.app.state.rl.jobs
+    real = jobs._prep
+
+    def slow_prep():
+        gate.wait(10)
+        return real()
+
+    jobs._prep = slow_prep
+    run_id = client.post("/api/runs", json={"strategies": [STRAT]}).json()["run_id"]
+    r = client.delete(f"/api/runs/{run_id}")
+    assert r.status_code == 409 and r.json()["code"] == "run_active" and r.json()["detail"]["status"] in ("queued", "running")
+    client.post(f"/api/runs/{run_id}/cancel")
+    gate.set()
+    jobs.wait(run_id)
+    jobs._prep = real
+    assert client.delete(f"/api/runs/{run_id}").status_code == 200  # 취소된 실행은 지울 수 있다
 
 
 def test_restart_marks_running_as_failed(make_client, client):
