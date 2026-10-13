@@ -160,7 +160,9 @@ def list_runs(store) -> list[dict]:
     out = []
     for run_id in store.list_runs():
         m = store.read_meta(run_id)
-        out.append({k: m.get(k) for k in ("run_id", "timeframe", "created_at", "horizon", "codes", "format_version")})
+        rng = store.as_of_range(run_id)  # 저장된 예측 = 최종 평가 구간
+        out.append({**{k: m.get(k) for k in ("run_id", "timeframe", "created_at", "horizon", "codes", "format_version")},
+                    "test_as_of_range": [_iso_kst(t) for t in rng] if rng else None})
     return sorted(out, key=lambda r: r["created_at"] or "", reverse=True)
 
 
@@ -174,7 +176,9 @@ def stock_forecast(store, cfg: dict, run_id: str, code: str, as_of: str | None =
     """한 종목의 한 시점 예측. as_of 가 없으면 가장 최근 시점, 있으면 그 시각 이전(포함)의 마지막 확정 시점.
 
     steps: h=1..H 마다 회색 구간(가격 = 기준 종가 × exp(분위)), 통계적 방향(표시 판정 통과 h 만), 상승 확률, 실제 종가(있으면).
+    가운데 분위(q0.5)는 채점용이라 응답에 넣지 않는다 (E17: 가운데 예측선 없음).
     history: 그 시점까지의 직전 기준 종가들 (차트용, 확정 봉만).
+    상태 (P2-9a): ok / no_stock(이 실행에 종목 없음) / no_as_of(그 시각이 평가 구간 밖) / insufficient_history(예측 값 결측)
     """
     if not CODE_RE.match(code or ""):
         raise ForecastError("invalid_code", "종목코드는 6자리 영숫자입니다", {"code": code})
@@ -184,20 +188,24 @@ def stock_forecast(store, cfg: dict, run_id: str, code: str, as_of: str | None =
     except (ValueError, TypeError):
         raise ForecastError("invalid_as_of", "as_of 는 ISO 시각이어야 합니다", {"as_of": as_of}) from None
     p = store.read_predictions(run_id, code)
-    if t is not None:
-        p = p[p["as_of"] <= t]
-    base = {"status": "no_prediction", "run_id": run_id, "timeframe": meta["timeframe"], "code": code,
+    base = {"run_id": run_id, "timeframe": meta["timeframe"], "code": code,
             "horizon": meta["horizon"], "notice": meta.get("notice")}
     if p.empty:
-        return base
+        return {**base, "status": "no_stock"}
+    # 평가 구간 밖: 그 종목 첫 예측보다 이르거나, 마지막 예측 날짜보다 늦은 날 (같은 날 장 마감 뒤는 마지막 확정 시점)
+    if t is not None and (t < p["as_of"].min() or t.normalize() > p["as_of"].max().normalize()):
+        return {**base, "status": "no_as_of", "test_as_of_range": [_iso_kst(p["as_of"].min()), _iso_kst(p["as_of"].max())]}
+    if t is not None:
+        p = p[p["as_of"] <= t]
     at = p["as_of"].max()
     rows = p[p["as_of"] == at].sort_values("h")
     qs = meta["quantiles"]
-    lo, mid, hi = (f"q{qs[0]:g}", f"q{qs[len(qs) // 2]:g}", f"q{qs[-1]:g}")
+    lo, hi = f"q{qs[0]:g}", f"q{qs[-1]:g}"
+    if rows[[lo, hi, "p_up"]].isna().any(axis=None):
+        return {**base, "status": "insufficient_history", "as_of": _iso_kst(at)}
     shown = rows["direction_shown"] if "direction_shown" in rows else pd.Series("uncertain", index=rows.index)
     bc = float(rows["base_close"].iloc[0])
-    steps = [{"h": int(r["h"]), "low": bc * float(np.exp(r[lo])), "mid": bc * float(np.exp(r[mid])),
-              "high": bc * float(np.exp(r[hi])), "p_up": float(r["p_up"]), "direction": d,
+    steps = [{"h": int(r["h"]), "low": bc * float(np.exp(r[lo])), "high": bc * float(np.exp(r[hi])), "p_up": float(r["p_up"]), "direction": d,
               "actual": None if pd.isna(r["y"]) else bc * float(np.exp(r["y"])), "cross_day": bool(r["cross_day"])}
              for r, d in zip(rows.to_dict("records"), shown)]
     hist = p[(p["h"] == 1) & (p["as_of"] <= at)].sort_values("as_of").tail(cfg["forecast"]["api"]["history_bars"])

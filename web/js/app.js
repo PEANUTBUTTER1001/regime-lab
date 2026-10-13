@@ -9,6 +9,7 @@ import { renderBriefing } from './views/briefing.js';
 import { renderArchive, renderArchiveDoc } from './views/archive.js';
 import { renderBuilder } from './views/builder.js';
 import { renderEvidence } from './views/evidence.js';
+import { renderInfluence } from './views/influence.js';
 import { renderLogin } from './views/login.js';
 import { renderPassword } from './views/password.js';
 import { renderProgress } from './views/progress.js';
@@ -32,6 +33,7 @@ const NAV = [
   { id: 'results', group: 'results', icon: '▦', label: 'nav.results', href: () => (state.lastRun ? `#/runs/${state.lastRun}/results` : '#/results') },
   { id: 'evidence', group: 'docs', icon: '⌕', label: 'nav.evidence', href: () => '#/evidence' },
   { id: 'archive', group: 'docs', icon: '▤', label: 'nav.archive', href: () => '#/archive' },
+  { id: 'influence', group: 'docs', icon: '◇', label: 'nav.influence', href: () => '#/influence' },
   { id: 'briefing', group: 'market', icon: '◌', label: 'nav.briefing', href: () => '#/briefing', soon: true },
 ];
 
@@ -52,6 +54,7 @@ const ROUTES = [
   [/^#\/evidence$/, () => ({ nav: 'evidence', view: renderEvidence })],
   [/^#\/archive$/, () => ({ nav: 'archive', view: renderArchive })],
   [/^#\/archive\/doc$/, () => ({ nav: 'archive', view: renderArchiveDoc })],
+  [/^#\/influence$/, () => ({ nav: 'influence', view: renderInfluence })],
   [/^#\/briefing$/, () => ({ nav: 'briefing', view: renderBriefing })],
   [/^#\/settings$/, () => ({ nav: 'settings', view: renderSettings })],
 ];
