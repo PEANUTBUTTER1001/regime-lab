@@ -79,6 +79,39 @@ export function lines(el, series, { ariaLabel, yName, percentBase = null } = {})
   return chart;
 }
 
+// 봉 예측 (P2-10, E17): 직전 종가 선 + 다음 h 봉의 회색 띠(10~90%)만 그린다. 예상 캔들·가운데 선은 그리지 않는다.
+// x축은 봉 순서(밤·휴장 공백 없이). 실제 종가가 있으면 점으로 겹친다. 띠는 --muted 를 옅게 칠한다(라이트·다크 모두 회색).
+export function forecastBand(el, d, ariaLabel) {
+  const C = pal();
+  const ax = axisCommon(C);
+  const cats = [...d.history.map((p) => p.label), ...d.steps.map((s) => t('fc.step', { h: s.h }))];
+  const nh = d.history.length;
+  const pad = (arr) => [...Array(nh).fill(null), ...arr];
+  const chart = base(el, ariaLabel);
+  chart.setOption({
+    // 범례(맨 위 한 줄, 좁으면 넘겨 보기)와 y축 이름이 겹치지 않게 차트 영역을 범례 아래로 내린다 (price 와 같은 배치)
+    grid: { left: 64, right: 16, top: 56, bottom: 48 },
+    legend: { type: 'scroll', top: 0, left: 8, right: 8, textStyle: { color: C.muted, fontSize: 11 }, pageTextStyle: { color: C.muted },
+      pageIconColor: C.muted, pageIconInactiveColor: C.lineStrong, data: [t('fc.hist'), t('fc.band'), t('fc.actual')] },
+    tooltip: { ...tooltip(C), valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })) },
+    xAxis: { type: 'category', data: cats, ...ax, splitLine: { show: false }, axisLabel: { ...ax.axisLabel, hideOverlap: true } },
+    yAxis: { type: 'value', scale: true, name: t('c.price'), nameTextStyle: { color: C.muted, align: 'left' }, nameGap: 12, ...ax },
+    series: [
+      { name: t('fc.hist'), type: 'line', showSymbol: false, data: [...d.history.map((p) => p.close), ...Array(d.steps.length).fill(null)],
+        lineStyle: { color: C.text, width: 1.6 }, itemStyle: { color: C.text } },
+      // 띠: 아래값(투명) 위에 (위값 − 아래값)을 쌓는다
+      { name: 'low', type: 'line', stack: 'band', showSymbol: false, silent: true, tooltip: { show: false },
+        data: pad(d.steps.map((s) => s.low)), lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 } },
+      { name: t('fc.band'), type: 'line', stack: 'band', showSymbol: false, data: pad(d.steps.map((s) => s.high - s.low)),
+        lineStyle: { opacity: 0 }, itemStyle: { color: C.muted }, areaStyle: { color: C.muted, opacity: 0.3 },
+        tooltip: { valueFormatter: () => '' } },
+      { name: t('fc.actual'), type: 'scatter', symbol: 'diamond', symbolSize: 9, data: pad(d.steps.map((s) => s.actual)),
+        itemStyle: { color: C.amber, borderColor: C.canvas, borderWidth: 1 } },
+    ],
+  });
+  return chart;
+}
+
 export function price(el, d, ariaLabel) {
   const C = pal();
   const ax = axisCommon(C);
