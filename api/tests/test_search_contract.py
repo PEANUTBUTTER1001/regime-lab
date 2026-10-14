@@ -133,7 +133,7 @@ def test_busy_slot_shared_and_cancel_keeps_record(client):
         r = client.post("/api/searches", json=BODY)
         sid = r.json()["search_id"]
         busy = client.post("/api/runs", json={"strategies": [{"name": "x", "patterns": ["breakout_20d"]}]})
-        assert busy.status_code == 409 and busy.json()["code"] == "busy"
+        assert busy.status_code == 409 and busy.json()["code"] == "user_busy"
         assert busy.json()["detail"] == {"run_id": sid, "kind": "search", "id": sid}
         busy2 = client.post("/api/searches", json=BODY)
         assert busy2.status_code == 409 and busy2.json()["detail"] == {"kind": "search", "id": sid}

@@ -23,7 +23,7 @@ def test_other_user_cannot_read_cancel_or_generate_report(auth_app):
         assert b.get('/api/runs').json()=={'runs':[]}
         assert len(a.get('/api/runs').json()['runs'])==1
         busy=b.post('/api/runs',json={'strategies':[{"name":"another",**STRATEGY}]},headers=hb)
-        assert busy.status_code==409 and busy.json()['detail'] is None
+        assert busy.status_code==409 and busy.json()['code']=='user_busy' and busy.json()['detail'] is None
         assert auth_app.state.rl.jobs.cancelled==[]
 
 def test_preset_names_and_crud_are_private(auth_app):

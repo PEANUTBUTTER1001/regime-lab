@@ -55,9 +55,9 @@ class FakeProvider:
 
 class FakeJobs:
     def __init__(self): self.rows = []; self.cancelled = []
-    def submit(self, strategies):
+    def submit(self, strategies, requester=""):
         if self.rows: raise Busy(self.rows[0]["run_id"])
-        row = {"run_id":"fake-run", "status":"queued"}
+        row = {"run_id":"fake-run", "status":"queued", "queue_position":0}
         self.rows.append(row)
         return SimpleNamespace(**row)
     def list(self, limit=50): return self.rows[:limit]

@@ -244,7 +244,7 @@ class AuthService:
                 self.store.claim(kind, rid, user.id)
             except Exception:
                 raise ApiError(503, "auth_unavailable", "Resource ownership could not be recorded.", retryable=True) from None
-        if status == 409 and payload.get("code") == "busy":
+        if status == 409 and payload.get("code") in {"busy", "user_busy"}:
             detail = payload.get("detail") or {}
             kind = detail.get("kind", "run")
             rid = detail.get("id") or detail.get("run_id")

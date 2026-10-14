@@ -62,6 +62,21 @@ class RunRequest(_Strict):
                                          description="전략 1개 이상. 전략 수가 FDR 가족 크기 m")
 
 
+class RunAccepted(BaseModel):
+    run_id: str
+    status: Literal["queued"]
+    queue_position: int = Field(ge=0, description="대기 순번(1부터), 0은 계산 슬롯 확보·시작 중")
+    fdr_family_size: int
+
+
+class SearchAccepted(BaseModel):
+    search_id: str
+    status: Literal["queued"]
+    queue_position: int = Field(ge=0, description="대기 순번(1부터), 0은 계산 슬롯 확보·시작 중")
+    candidates: int
+    estimated_sec: float
+
+
 class PreviewRequest(FilterIn):
     pass
 
