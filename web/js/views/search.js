@@ -265,9 +265,10 @@ export async function renderSearch(el, foot = null) {
         serverBox.replaceChildren(h('b', {}, t('sx.serverFields')), h('ul', {}, Object.entries(err.detail.fields).map(([k, v]) => h('li', {}, `${k}: ${v}`))));
         serverBox.classList.toggle('hidden', !unknown.length);
         toast(t('b.serverRejected'));
-      } else if (err.code === 'busy') {
-        toast(err.detail?.kind === 'search' ? t('b.busySearch') : t('b.busy'));
-        location.hash = err.detail?.kind === 'search' ? `#/searches/${err.detail.id}/progress` : `#/runs/${err.detail.id}/progress`;
+      } else if (err.code === 'busy' || err.code === 'user_busy') {
+        toast(t('err.user_busy'));
+        const id = err.detail?.id || err.detail?.run_id;
+        if (id) location.hash = err.detail?.kind === 'search' ? `#/searches/${id}/progress` : `#/runs/${id}/progress`;
       } else {
         toast(`${has(`err.${err.code}`) ? t(`err.${err.code}`) : err.message} (${err.code})`);
       }
@@ -335,6 +336,7 @@ export function renderSearchProgress(el, id) {
   let timer = null;
   let failures = 0;
   let lastStage = null;
+  let lastQueue = null;
   let stopped = false;
   const stageText = (s) => (has(`sp.stage.${s}`) ? t(`sp.stage.${s}`) : s);
 
@@ -372,6 +374,7 @@ export function renderSearchProgress(el, id) {
       return;
     }
     renderSteps(snap);
+    wrap.setAttribute('data-state', snap.status);
     const resultHref = `#/searches/${id}/results`;
     if (snap.status === 'completed') {
       finish('completed', t('sp.done'), t('sp.doneMsg', { t: fmt.num(snap.elapsed_sec, 1) }),
@@ -381,8 +384,9 @@ export function renderSearchProgress(el, id) {
       return;
     }
     if (snap.status === 'cancelled') {
-      finish('cancelled', t('sp.cancelled'), t('sp.cancelledMsg'),
-        [linkButton(t('sp.viewPartial'), resultHref, true), linkButton(t('sp.back'), '#/search')]);
+      const beforeStart = snap.error?.code === 'cancelled_before_start';
+      finish('cancelled', t('sp.cancelled'), t(beforeStart ? 'p.queueCancelledMsg' : 'sp.cancelledMsg'),
+        [...(beforeStart ? [] : [linkButton(t('sp.viewPartial'), resultHref, true)]), linkButton(t('sp.back'), '#/search')]);
       return;
     }
     if (snap.status === 'failed') {
@@ -391,8 +395,11 @@ export function renderSearchProgress(el, id) {
       return;
     }
     const label = snap.stage ? stageText(snap.stage) : (snap.status === 'queued' ? t('p.waiting') : t('p.starting'));
-    title.textContent = `${label}…`;
-    statusLine.textContent = `${t('p.elapsed', { s: label, t: fmt.num(snap.elapsed_sec, 1) })}${snap.met_so_far != null ? ` · ${t('sp.met', { n: fmt.int(snap.met_so_far) })}` : ''}`;
+    const queued = snap.status === 'queued';
+    const queueLabel = snap.queue_position > 0 ? t('p.queuePosition', { n: snap.queue_position }) : t('p.starting');
+    title.textContent = queued ? t('p.waiting') : `${label}…`;
+    note.textContent = queued ? t('p.queueNote') : t('sp.note');
+    statusLine.textContent = queued ? queueLabel : `${t('p.elapsed', { s: label, t: fmt.num(snap.elapsed_sec, 1) })}${snap.met_so_far != null ? ` · ${t('sp.met', { n: fmt.int(snap.met_so_far) })}` : ''}`;
     if (snap.total > 0) {
       track.classList.remove('hidden');
       fill.style.width = `${Math.min(100, (100 * snap.processed) / snap.total)}%`;
@@ -403,13 +410,16 @@ export function renderSearchProgress(el, id) {
       track.classList.add('hidden');
       counts.textContent = '';
     }
-    if (snap.stage !== lastStage) { live.textContent = label; lastStage = snap.stage; }
+    if (snap.stage !== lastStage || snap.queue_position !== lastQueue) {
+      live.textContent = queued ? queueLabel : label;
+      lastStage = snap.stage; lastQueue = snap.queue_position;
+    }
     timer = setTimeout(poll, 1000);
   }
 
   cancelBtn.addEventListener('click', async () => {
     cancelBtn.disabled = true;
-    try { await api.cancelSearch(id); statusLine.textContent = t('p.cancelRequested'); } catch (e) {
+    try { await api.cancelSearch(id); statusLine.textContent = wrap.getAttribute('data-state') === 'queued' ? t('p.queueCancelRequested') : t('p.cancelRequested'); } catch (e) {
       toast(e.code === 'not_running' ? t('p.alreadyDone') : e.message);
       cancelBtn.disabled = false;
     }

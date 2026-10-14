@@ -29,6 +29,7 @@ export function renderProgress(el, runId, opts = {}) {
   let timer = null;
   let failures = 0;
   let lastStage = null;
+  let lastQueue = null;
   let stopped = false;
 
   function renderSteps(snap) {
@@ -69,6 +70,7 @@ export function renderProgress(el, runId, opts = {}) {
       return;
     }
     renderSteps(snap);
+    wrap.setAttribute('data-state', snap.status);
     if (snap.status === 'completed') {
       finish('completed', t('p.done'), t('p.doneMsg', { id: runId, t: fmt.num(snap.elapsed_sec, 1) }),
         [linkButton(t('p.viewResults'), `#/runs/${runId}/results`, true), linkButton(t('common.backStrategy'), '#/builder')]);
@@ -87,9 +89,12 @@ export function renderProgress(el, runId, opts = {}) {
       return;
     }
     const label = snap.stage ? stageLabel(snap.stage) : (snap.status === 'queued' ? t('p.waiting') : t('p.starting'));
-    title.textContent = `${label}…`;
+    const queued = snap.status === 'queued';
+    const queueLabel = snap.queue_position > 0 ? t('p.queuePosition', { n: snap.queue_position }) : t('p.starting');
+    title.textContent = queued ? t('p.waiting') : `${label}…`;
+    note.textContent = queued ? t('p.queueNote') : t('p.note');
     if (!opts.embedded) document.title = `${label}… — ${runId}`;
-    statusLine.textContent = t('p.elapsed', { s: label, t: fmt.num(snap.elapsed_sec, 1) });
+    statusLine.textContent = queued ? queueLabel : t('p.elapsed', { s: label, t: fmt.num(snap.elapsed_sec, 1) });
     if (snap.total > 0) {
       track.classList.remove('hidden');
       fill.style.width = `${Math.min(100, (100 * snap.processed) / snap.total)}%`;
@@ -100,7 +105,10 @@ export function renderProgress(el, runId, opts = {}) {
       track.classList.add('hidden');
       counts.textContent = '';
     }
-    if (snap.stage !== lastStage) { live.textContent = label; lastStage = snap.stage; }
+    if (snap.stage !== lastStage || snap.queue_position !== lastQueue) {
+      live.textContent = queued ? queueLabel : label;
+      lastStage = snap.stage; lastQueue = snap.queue_position;
+    }
     timer = setTimeout(poll, 1000);
   }
 
@@ -108,7 +116,7 @@ export function renderProgress(el, runId, opts = {}) {
     cancelBtn.disabled = true;
     try {
       await api.cancel(runId);
-      statusLine.textContent = t('p.cancelRequested');
+      statusLine.textContent = wrap.getAttribute('data-state') === 'queued' ? t('p.queueCancelRequested') : t('p.cancelRequested');
     } catch (e) {
       toast(e.code === 'not_running' ? t('p.alreadyDone') : e.message);
       cancelBtn.disabled = false;

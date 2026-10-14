@@ -113,7 +113,7 @@ def test_busy_and_cancel(client):
     r1 = client.post("/api/runs", json={"strategies": [STRAT]})
     run_id = r1.json()["run_id"]
     r2 = client.post("/api/runs", json={"strategies": [{**STRAT, "name": "other"}]})
-    assert r2.status_code == 409 and r2.json()["code"] == "busy" and r2.json()["detail"]["run_id"] == run_id
+    assert r2.status_code == 409 and r2.json()["code"] == "user_busy" and r2.json()["detail"]["run_id"] == run_id
     assert r2.json()["retryable"] is True
     c = client.post(f"/api/runs/{run_id}/cancel")
     assert c.status_code == 202 and c.json()["accepted"]

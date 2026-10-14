@@ -6,8 +6,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from regime_api.errors import ApiError, body
-from regime_api.jobs import Busy
-from regime_api.schemas import RunRequest, to_engine_dict
+from regime_api.jobs import Busy, QueueFull
+from regime_api.schemas import RunAccepted, RunRequest, to_engine_dict
 from regime_lab.runs import Strategy, StrategyError
 
 router = APIRouter(tags=["runs"])
@@ -31,18 +31,23 @@ def parse_strategies(req: RunRequest, cfg: dict) -> list[Strategy]:
     return out
 
 
-@router.post("/runs", status_code=202)
+@router.post("/runs", status_code=202, response_model=RunAccepted)
 def submit(req: RunRequest, request: Request):
     s = request.app.state.rl
     strategies = parse_strategies(req, s.cfg)
     s.require_prep()
     try:
-        job = s.jobs.submit(strategies)
+        requester = ("user:" + request.state.auth_user.id if s.auth.enabled
+                     else "ip:" + (request.client.host if request.client else "unknown"))
+        job = s.jobs.submit(strategies, requester=requester)
     except Busy as b:
-        return JSONResponse(body("busy", "Another run is in progress. Try again when it finishes.",
+        return JSONResponse(body("user_busy", "You already have a queued or running job.",
                                  {"run_id": b.run_id, "kind": b.kind, "id": b.run_id}, retryable=True),
                             status_code=409)
-    return {"run_id": job.run_id, "status": job.status, "fdr_family_size": len(strategies)}
+    except QueueFull:
+        raise ApiError(429, "queue_full", "The job queue is full. Try again after a job finishes.", retryable=True) from None
+    return {"run_id": job.run_id, "status": "queued", "queue_position": job.queue_position or 0,
+            "fdr_family_size": len(strategies)}
 
 
 @router.get("/runs")

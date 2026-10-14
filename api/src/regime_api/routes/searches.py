@@ -8,8 +8,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from regime_api.errors import ApiError, body
-from regime_api.jobs import Busy
-from regime_api.schemas import SearchRequestIn, to_engine_dict
+from regime_api.jobs import Busy, QueueFull
+from regime_api.schemas import SearchAccepted, SearchRequestIn, to_engine_dict
 from regime_lab.runs import DISCLAIMER
 from regime_lab.search import STATUSES, SearchError, SearchRequest, count_candidates, estimate_seconds
 
@@ -67,18 +67,22 @@ def _n_tickers(state) -> int | None:
     return len(state.tickers) if state.tickers is not None else None
 
 
-@router.post("/searches", status_code=202)
+@router.post("/searches", status_code=202, response_model=SearchAccepted)
 def submit(req: SearchRequestIn, request: Request):
     s = request.app.state.rl
     sreq = parse(req, s.cfg)
     s.require_prep()
     try:
-        job = s.jobs.submit_search(sreq)
+        requester = ("user:" + request.state.auth_user.id if s.auth.enabled
+                     else "ip:" + (request.client.host if request.client else "unknown"))
+        job = s.jobs.submit_search(sreq, requester=requester)
     except Busy as b:
-        return JSONResponse(body("busy", "Another run or search is in progress. Try again when it finishes.",
+        return JSONResponse(body("user_busy", "You already have a queued or running job.",
                                  {"kind": b.kind, "id": b.run_id}, retryable=True), status_code=409)
+    except QueueFull:
+        raise ApiError(429, "queue_full", "The job queue is full. Try again after a job finishes.", retryable=True) from None
     n = count_candidates(sreq)
-    return {"search_id": job.run_id, "status": job.status, "candidates": n,
+    return {"search_id": job.run_id, "status": "queued", "queue_position": job.queue_position or 0, "candidates": n,
             "estimated_sec": estimate_seconds(n, s.cfg, _n_tickers(s))}
 
 
@@ -119,6 +123,8 @@ def result(search_id: str, request: Request):
         raise ApiError(409, code, msg, {"status": snap["status"], "error": snap.get("error")}, retry)
     f = s.jobs.search_dir / search_id / "search.json"
     if not f.exists():
+        if (snap.get("error") or {}).get("code") == "cancelled_before_start":
+            raise ApiError(409, "search_cancelled", "The search was cancelled before execution. No result was generated.")
         raise ApiError(404, "result_not_found", "The search record is missing.", {"search_id": search_id})
     out = json.loads(f.read_text(encoding="utf-8"))
     out.setdefault("disclaimer", DISCLAIMER)

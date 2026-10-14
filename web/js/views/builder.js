@@ -405,11 +405,14 @@ export async function renderBuilder(pane, query = new URLSearchParams(), opts = 
         Object.assign(errs, server);
         showErrors(server);
         toast(t('b.serverRejected'));
-      } else if (err.code === 'busy') {
+      } else if (err.code === 'busy' || err.code === 'user_busy') {
         // 실행·탐색이 작업 슬롯을 공유한다 (P1-7). 진행 중인 쪽의 진행 화면을 연다
         const search = err.detail?.kind === 'search';
-        toast(search ? t('b.busySearch') : t('b.busy'));
-        location.hash = search ? `#/searches/${err.detail.id}/progress` : `#/runs/${err.detail.run_id}/progress`;
+        toast(t('err.user_busy'));
+        const id = err.detail?.id || err.detail?.run_id;
+        if (id) location.hash = search ? `#/searches/${id}/progress` : `#/runs/${id}/progress`;
+      } else if (err.code === 'queue_full') {
+        toast(t('err.queue_full'));
       } else {
         toast(`${err.message} (${err.code})`);
       }

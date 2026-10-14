@@ -1,5 +1,18 @@
 # PROGRESS
 
+## 2026-10-14 KST (+09:00) — PEANUTBUTTER1001 X13 작업 대기열 구현·로컬 검증
+
+- 승인 근거: 진행할 작업 안내의 첫 번째 X13에 사용자 "첫번째 작업 시작하자". 결정 F1b ④·구현 계획 §6.6 범위, 기본 수치 `jobs.queue_max: 5`·`per_user: 1` 적용. 계산·체결 규칙 변경 없음.
+- 구현: 실행·탐색이 단일 계산 스레드와 선착순 대기열 공유. 사용자 ID(데모는 접속 IP)별 대기·실행 합계 제한, `409 user_busy`에는 본인 작업만, 상한 초과 `429 queue_full`은 작업 ID 없이 재시도 가능. 접수 `202 status=queued`·`queue_position`, 상태 조회에서 순번 갱신. 대기 순번 1부터·시작 슬롯 0·실행/종료 null.
+- 취소·복구: 시작 전 취소는 즉시 대기열에서 제거하고 순번 갱신, `cancelled_before_start`·경과 0·결과 미생성. 탐색 결과 조회는 `409 search_cancelled`, 화면의 중단 기록 링크 숨김. 서버 재시작의 queued·running은 `failed(server_restarted)` 유지. 경과 시간은 계산 시작부터 측정.
+- 화면: 실행·탐색 진행에 순번·자동 시작·대기 취소 안내(한·영), 본인 작업 중복 요청 재열기와 대기열 포화 안내. `builder.js`·`search.js` 수정은 새 오류 계약 연결에 필요한 범위. 인증 응답은 `user_busy`에도 기존 소유자 정보 숨김 적용.
+- 검증: engine 전체 501 passed·8 skipped(546.20초), API 전체 187 passed(최종 코드 재실행), ingest 139 passed. 새 원본 없는 `test_job_queue.py` 5건: 실행·탐색 선착순/실패 후 다음 작업, 대기 취소/순번 파일 반영, 사용자별 조회·취소 격리, 8개 동시 요청 상한, 재시작 복구. 웹 4모듈 `node --check`·`git diff --check` 통과. jobs 수치 변경 전후 준비 캐시 해시 동일 확인.
+- 브라우저: 합성 8종목·격리된 `cache/qa/x13/`·별도 8013 서버에서 한국어/영어 대기 화면, 실행·탐색 대기 취소, 선행 작업 완료→대기 작업 실제 엔진 실행→결과 화면 이동 확인. queued 실행의 실제 계산 0.4초, 대기 시간 제외. 콘솔 오류·경고 0. 캡처 `cache/qa/x13/queue-ko.png`(Git 제외). 검증용 서버 종료, 사용자 서버 조작 없음.
+- 환경: 기본 uv 캐시 접근 거부는 `UV_CACHE_DIR=cache/uv`·`--no-sync`로 해결. 기존 각 패키지의 `cache/qa` 권한 거부로 수집 실패하는 폴더는 `--ignore=<패키지>/cache`로 제외, 새 `--basetemp`·`cache_dir`는 루트 `cache/qa/x13/` 아래. 기존 폴더 삭제 없음.
+- 기준·잔여: 원격 develop `34c1c4e`(#85)와 HEAD 동일 재조회. 실제 같은 망 두 PC 운영 검증·담당 리뷰는 미실행. README·구현 계획 계약 반영, WBS 실적·AGENTS.md 직접 변경 없음(`jobs:`·대기열 규칙은 `/agents-md` 승인 후 반영). 커밋·푸시 없음.
+
+---
+
 ## 2026-10-14 KST (+09:00) — PEANUTBUTTER1001 F1c ② 개정(받는 쪽 PR #81)과 담당자 착수 조건 보완
 
 - 승인 근거: 사용자 "관리자가 확정할 사항이 남아 있으면 지금 하고" + "엔진 `data/news_db.py` 와 API·설정으로 받음(hchee99), 원본은 서버 PC 에만" 지향 확인.
