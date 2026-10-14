@@ -8,9 +8,15 @@ import pyarrow as pa
 from regime_lab import retrieval
 from regime_lab.config import load_config
 from regime_lab.data.loader import DocsStore
-from regime_lab.data.news_db import Client, read_latest, canonical, projection, _NoRedirect
+from regime_lab.data.news_db import Client, read_latest as _read_latest, canonical, projection, _NoRedirect
 SID='a'*64
 SOURCES=['n8n_news','n8n_disclosure']
+
+
+def read_latest(*args, **kwargs):
+    policy = load_config()['news_refresh']
+    options = {key: policy[key] for key in ('page_size', 'max_versions')}
+    return _read_latest(*args, **(options | kwargs))
 
 
 def doc(source,i=0,seen='2026-10-13T00:00:00+00:00'):

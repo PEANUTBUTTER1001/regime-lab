@@ -106,7 +106,7 @@ class Client:
         return result
 
 
-def read_latest(client, root, sources, current_id=None, *, page_size=1000, max_versions=200000):
+def read_latest(client, root, sources, current_id=None, *, page_size, max_versions):
     """Validate manifest/membership/document counts before publishing any files.
 
     HTTP requests are not a transaction. A manifest visible before its members is
