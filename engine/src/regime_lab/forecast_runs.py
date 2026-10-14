@@ -1,6 +1,7 @@
 """과거 as_of 예측 일괄 생성·저장 (P2-7, 유스케이스).
 
-흐름: 종목 묶음마다 1분봉 → 정규화(N1·N4·N5·N7) → 가격 기준(N2) → 가격 구간(N3) → 시간봉 집계,
+흐름: 봉 만들기 — 일봉(1d, 제품 기본, 결정 D-2b)은 KRX 정규장 원주가 일봉에서 바로(daily_bars),
+     시간봉(1h·3h)은 종목 묶음마다 1분봉 → 정규화(N1·N4·N5·N7) → 가격 기준(N2) → 가격 구간(N3) → 시간봉 집계,
      전 종목 봉으로 특징(시장 평균 포함) → h 마다 목표·시간 분할 → 모델 학습(학습 구간)·보정(검증 구간)
      → 모든 표본 예측 + 기준선 → 채점 → 저장.
 외부 자료 결합(P4-3, 결정 P4-3a): doc_features 를 넘기면 같은 봉·분할·모델 설정으로 가격 단독과 결합 모델을 함께
@@ -20,7 +21,7 @@ import numpy as np
 import pandas as pd
 import sklearn
 
-from regime_lab.bars import (KST, MINUTE_PREP_VERSION, add_segments, aggregate_bars, apply_price_basis,
+from regime_lab.bars import (KST, MINUTE_PREP_VERSION, add_segments, aggregate_bars, apply_price_basis, daily_bars,
                              judge_price_basis, normalize_minutes, slot_edges, to_kst_naive)
 from regime_lab.forecast import model as M
 from regime_lab.forecast.baseline import historical
@@ -33,12 +34,27 @@ CODE_RE = re.compile(r"^[0-9A-Za-z]{6}$")
 # 결과 파일 형식 버전 (열을 바꾸면 올린다). 2: direction_shown·방향 표시 판정·slot/날 넘김 채점
 # 3: meta.variant(price·fused)·docs_fingerprint·as_of_mode·docs_missing_rate·run_fingerprint, fused 는 scores[h].vs_price
 #    (P4-3a ③). 형식 2 run 도 그대로 읽힌다 — 읽는 쪽은 없는 키를 price 로 본다.
-FORECAST_RUN_VERSION = 3
+# 4: meta.bar_source(krx_daily·minutes) — 일봉(1d) 예측(P2-11, 결정 D-2b). 일봉 run 은 meta.minute_prep_version 이 null 이고
+#    데이터 지문에 1분봉이 없다. 예측·채점 파일의 열은 그대로라 형식 2·3 run 도 그대로 읽힌다.
+FORECAST_RUN_VERSION = 4
+DAILY = "1d"  # KRX 원주가 일봉에서 만드는 봉 (1분봉을 쓰지 않음)
 AS_OF_MODES = ("observed", "historical_assumed")
 
 
 def build_bars(store, cfg: dict, codes: list[str], timeframe: str, batch: int) -> tuple[pd.DataFrame, dict]:
-    """종목 묶음별로 1분봉을 정규화·집계해 전 종목 봉을 만든다 (메모리 상한). 제외 행 수를 합산해 돌려준다."""
+    """종목 묶음별로 봉을 만들어 전 종목 봉을 돌려준다 (메모리 상한). 제외 행 수를 합산해 돌려준다.
+    일봉은 KRX 원주가 일봉에서(daily_bars), 시간봉은 1분봉을 정규화·집계해서."""
+    if timeframe == DAILY:
+        parts, stats = [], {"rows_in": 0, "no_trade": 0, "outliers": 0}
+        for i in range(0, len(codes), batch):
+            b, s = daily_bars(store.load_krx_raw(codes[i:i + batch]), cfg)
+            for k in stats:
+                stats[k] += s[k]
+            parts.append(b)
+        bars = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+        if bars.empty:
+            return bars, stats
+        return bars.sort_values(["code", "available_at"], kind="stable").reset_index(drop=True), stats
     parts, stats = [], {"rows_in": 0, "outliers": 0, "off_session": 0, "no_verdict": 0, "not_raw": 0}
     for i in range(0, len(codes), batch):
         chunk = codes[i:i + batch]
@@ -150,6 +166,8 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
     if fused:
         for h, r in holm_verdicts(compare, fcfg["fusion_compare"]["alpha"]).items():
             scores[h]["vs_price"] = r
+    daily = timeframe == DAILY
+    data_fp = store.fingerprint(minutes=not daily)
     chash = _hash({k: cfg[k] for k in ("minutes", "forecast")})
     run_id = f"{timeframe}-{now:%Y%m%dT%H%M%S}-{chash[:8]}"
     created = pd.Timestamp(now)
@@ -159,14 +177,14 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
         "versions": {"scikit-learn": sklearn.__version__, "numpy": np.__version__, "pandas": pd.__version__},  # NFR-10
         "timeframe": timeframe, "horizon": H, "quantiles": fcfg["quantiles"], "direction": fcfg["direction"],
         "split": fcfg["split"], "stored_splits": rcfg["store_splits"], "model": {"kind": "sklearn.HistGradientBoosting",
-        **fcfg["model"]}, "features": FEATURES, "minute_prep_version": MINUTE_PREP_VERSION, "config_hash": chash,
-        "data": store.fingerprint(), "codes": len(codes), "bars": int(len(bars)), "prep": prep,
+        **fcfg["model"]}, "features": FEATURES, "bar_source": "krx_daily" if daily else "minutes",
+        "minute_prep_version": None if daily else MINUTE_PREP_VERSION, "config_hash": chash, "data": data_fp, "codes": len(codes), "bars": int(len(bars)), "prep": prep,
         "as_of_range": [str(bars["available_at"].min()), str(bars["available_at"].max())],
         "variant": "fused" if fused else "price", "doc_features": doc_cols,
         "docs_fingerprint": docs_info["fingerprint"] if fused else None,
         "as_of_mode": docs_info["as_of_mode"] if fused else None, "docs_missing_rate": missing_rate or None,
         # 같은 입력(설정·데이터·종목·자료) → 같은 지문. run_id 의 시각과 무관하게 재현 여부를 대조한다
-        "run_fingerprint": _hash({"config": chash, "data": store.fingerprint(), "codes": codes, "timeframe": timeframe,
+        "run_fingerprint": _hash({"config": chash, "data": data_fp, "codes": codes, "timeframe": timeframe,
                                   "docs": docs_info["fingerprint"] if fused else None,
                                   "as_of_mode": docs_info["as_of_mode"] if fused else None, "doc_features": doc_cols}),
         "notice": "과거 데이터로 계산한 통계적 예상 범위이며 실제 가격 전망이나 매매 신호가 아닙니다.",

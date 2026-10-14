@@ -273,7 +273,7 @@ uv run --project engine regime-lab batch
 |---|---|
 | `uv run --project engine regime-lab rag-index` | 공시·뉴스 검색 색인을 만듭니다 (`ext_store` 필요) |
 | `uv run --project engine regime-lab rag-search "<검색어>" --as-of <시간대 포함 시각>` | 기준 시각에 보이던 자료만 검색합니다 |
-| `uv run --project engine regime-lab forecast-run --timeframe 1h` | 과거 시점별 봉 예측을 만들어 `runs/forecasts/`에 저장합니다 (1분봉 사본 필요, 화면은 준비 중) |
+| `uv run --project engine regime-lab forecast-run --timeframe 1d` | 과거 시점별 일봉 예측을 만들어 `runs/forecasts/`에 저장합니다 (store 의 KRX 원주가 일봉 사용, 결정 D-2b. 화면은 메뉴 '봉 예측') |
 
 ---
 
