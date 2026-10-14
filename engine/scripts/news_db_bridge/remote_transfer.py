@@ -132,7 +132,7 @@ class Client:
                 '--skip-column-names', '--unbuffered', '--skip-reconnect']
         self.proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True, encoding='utf-8',
-                                     env=child_env, creationflags=subprocess.CREATE_NO_WINDOW)
+                                     env=child_env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.lines, self.errors = queue.Queue(), []
         def read_stdout():
             for line in self.proc.stdout:
@@ -218,8 +218,21 @@ def transfer(client, snapshot, commit, export_root):
                'scope': 'metadata_only_local_search_snapshot', 'timestamps': 'preserve_original_offset; derived_utc'}
     client.query('START TRANSACTION;')
     try:
-        # Read all keys to detect cross-source collisions, not just the current sources.
-        existing = verify_docs(client, docs)
+        # Only inspect incoming keys. Unrelated sources may have a different
+        # license contract and must never pass through this metadata-only parser.
+        existing = set()
+        keys = sorted(docs)
+        for start in range(0, len(keys), 40):
+            values = ','.join('(' + sql_value(did) + ',' + sql_value(version) + ')'
+                              for did, version in keys[start:start + 40])
+            rows = client.query('SELECT doc_id,version,source,record_sha256 FROM ext_document_versions '
+                                'WHERE (doc_id,version) IN (' + values + ');')
+            for row in rows:
+                did, version, source, record_hash = row.split('\t')
+                key = (did, int(version))
+                if key not in docs or key in existing or source != docs[key]['source'] or record_hash != digest(docs[key]):
+                    raise ValueError('Existing document key has different content; refusing overwrite')
+                existing.add(key)
         fresh = [projection(doc) for key, doc in sorted(docs.items()) if key not in existing]
         insert(client, TABLES[1], ['doc_id','version','source','status','license_scope',
                'first_seen_at_utc','available_at_utc','record_sha256','document_json'], fresh)

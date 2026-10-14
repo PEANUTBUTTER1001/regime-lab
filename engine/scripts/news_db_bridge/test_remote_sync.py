@@ -203,3 +203,121 @@ def test_state_replace_retries_transient_windows_lock(local):
         sync.save({'status':'pending'})
     assert len(calls) == 2
     assert sync.status()['status'] == 'pending'
+
+
+class MemorySQLClient:
+    """Exercise real transfer SQL/transactions through SQLite; no DB or credentials."""
+    def __init__(self):
+        import sqlite3
+        self.db = sqlite3.connect(':memory:', isolation_level=None)
+        self.db.create_function('DATE_FORMAT', 2, lambda value, fmt: value)
+        self.db.create_function('HEX', 1, lambda value: str(value).encode().hex())
+        self.proc = Mock(poll=Mock(return_value=None))
+        self.calls = []
+        self.db.executescript("""
+            CREATE TABLE ext_document_versions (
+                doc_id TEXT, version INTEGER, source TEXT, status TEXT, license_scope TEXT,
+                first_seen_at_utc TEXT, available_at_utc TEXT, record_sha256 TEXT, document_json TEXT,
+                PRIMARY KEY(doc_id,version));
+            CREATE TABLE ext_document_manifests (
+                snapshot_id TEXT, source TEXT, schema_version INTEGER, normalization_policy_version TEXT,
+                time_policy_version TEXT, manifest_json TEXT, mapping_policy_json TEXT, arrow_schema_json TEXT,
+                coverage_state TEXT, document_versions INTEGER, coverage_rows INTEGER, imported_at_utc TEXT,
+                PRIMARY KEY(snapshot_id,source));
+            CREATE TABLE ext_document_snapshot_members (
+                snapshot_id TEXT, source TEXT, doc_id TEXT, version INTEGER,
+                PRIMARY KEY(snapshot_id,doc_id,version));
+            CREATE TABLE ext_document_coverage (snapshot_id TEXT);
+        """)
+
+    def query(self, statement):
+        import re
+        self.calls.append(statement)
+        sql = re.sub(r"CONVERT\(X'([a-f0-9]*)' USING utf8mb4\)",
+                     lambda m: "'" + bytes.fromhex(m[1]).decode().replace("'", "''") + "'", statement)
+        sql = sql.replace('START TRANSACTION;', 'BEGIN;')
+        cursor = self.db.execute(sql)
+        return ['\t'.join(str(v) for v in row) for row in cursor.fetchall()] if cursor.description else []
+
+
+@pytest.fixture
+def transfer_case(local, tmp_path):
+    from search_snapshot import export
+    store, _ = local
+    folder, _ = export(store.root/'parquet/kind=raw/history.parquet', tmp_path/'snapshots')
+    client = MemorySQLClient()
+    try:
+        yield client, load_snapshot(folder)
+    finally:
+        client.db.close()
+
+
+def test_transfer_dry_run_rolls_back_all_rows(transfer_case, tmp_path):
+    from remote_transfer import transfer
+    client, snapshot = transfer_case
+    result = transfer(client, snapshot, commit=False, export_root=tmp_path/'roundtrip')
+    assert result['result'] == 'rolled_back'
+    assert client.calls[-1] == 'ROLLBACK;'
+    assert client.db.execute('SELECT COUNT(*) FROM ext_document_versions').fetchone()[0] == 0
+    assert list((tmp_path/'roundtrip').rglob('*.parquet'))
+
+
+def test_transfer_commit_reuse_and_new_version(transfer_case):
+    from remote_transfer import transfer
+    client, snapshot = transfer_case
+    first = transfer(client, snapshot, commit=True, export_root=None)
+    assert first['new_versions'] == 1 and client.calls[-1] == 'COMMIT;'
+    repeat = transfer(client, snapshot, commit=True, export_root=None)
+    assert repeat['new_versions'] == 0 and repeat['reused_versions'] == 1
+    sid, docs, manifests, schemas, identities = snapshot
+    new_doc = {**next(iter(docs.values())), 'version': 2, 'title': 'changed metadata'}
+    more = {**docs, (new_doc['doc_id'], 2): new_doc}
+    result = transfer(client, ('b'*64, more, manifests, schemas, identities), commit=True, export_root=None)
+    assert result['new_versions'] == 1 and result['reused_versions'] == 1
+    assert client.db.execute('SELECT COUNT(*) FROM ext_document_versions').fetchone()[0] == 2
+    assert not any(q.startswith(('UPDATE', 'DELETE', 'REPLACE')) for q in client.calls)
+
+
+def test_transfer_rejects_changed_existing_key(transfer_case):
+    from remote_transfer import transfer
+    client, snapshot = transfer_case
+    transfer(client, snapshot, commit=True, export_root=None)
+    sid, docs, manifests, schemas, identities = snapshot
+    altered = {k: {**v, 'title': 'conflict'} for k, v in docs.items()}
+    with pytest.raises(ValueError, match='different content'):
+        transfer(client, ('c'*64, altered, manifests, schemas, identities), commit=True, export_root=None)
+    assert client.calls[-1] == 'ROLLBACK;'
+    assert client.db.execute('SELECT COUNT(*) FROM ext_document_manifests').fetchone()[0] == len(manifests)
+
+
+def test_transfer_rejects_changed_immutable_membership(transfer_case):
+    from remote_transfer import transfer
+    client, snapshot = transfer_case
+    transfer(client, snapshot, commit=True, export_root=None)
+    client.db.execute('DELETE FROM ext_document_snapshot_members')
+    with pytest.raises(ValueError, match='immutable snapshot differs'):
+        transfer(client, snapshot, commit=True, export_root=None)
+    assert client.calls[-1] == 'ROLLBACK;'
+
+
+def test_transfer_ignores_unrelated_license_source(transfer_case):
+    from remote_transfer import transfer
+    client, snapshot = transfer_case
+    client.db.execute("INSERT INTO ext_document_versions VALUES ('outside:1',1,'outside','active','summary_link','','','other','NOT metadata-only JSON')")
+    assert transfer(client, snapshot, commit=True, export_root=None)['new_versions'] == 1
+    assert client.db.execute('SELECT COUNT(*) FROM ext_document_versions').fetchone()[0] == 2
+    assert all('WHERE (doc_id,version) IN' in q for q in client.calls if q.startswith('SELECT') and 'FROM ext_document_versions' in q)
+
+
+def test_client_without_windows_process_flag(tmp_path, monkeypatch):
+    import io
+    import remote_transfer as module
+    conf = tmp_path/'fake.env'
+    conf.write_text('DB_NAME=regime_lab\nDB_HOST=example.invalid\nDB_PORT=3306\nDB_USER=test\nDB_PASSWORD=test')
+    fake = Mock(stdin=io.StringIO(), stdout=io.StringIO(), stderr=io.StringIO())
+    popen = Mock(return_value=fake)
+    monkeypatch.delattr(module.subprocess, 'CREATE_NO_WINDOW', raising=False)
+    monkeypatch.setattr(module.subprocess, 'Popen', popen)
+    monkeypatch.setattr(module.Client, 'query', lambda *_: [])
+    module.Client(conf, 'mariadb')
+    assert popen.call_args.kwargs['creationflags'] == 0

@@ -50,7 +50,7 @@ uv run --project ingest python engine/scripts/news_db_bridge/server.py --config 
 - `server.py`: 인증·입력 제한과 HTTP 연결, raw 저장 뒤 동기화 호출.
 - `store.py`, `normalize.py`: 기존 로컬 버전 저장/정규화와 장애 시 Parquet 복구.
 - `search_snapshot.py`: raw 이력에서 메타데이터 전용 docs 사본 생성.
-- `remote_transfer.py`: C3 DB 트랜잭션·중복/충돌·전수 대조, 수동 CLI는 기본 rollback이고 `--commit`일 때만 확정.
+- `remote_transfer.py`: C3 DB 트랜잭션·중복/충돌·해당 스냅샷 전수 대조, 수동 CLI는 기본 rollback이고 `--commit`일 때만 확정.
 - `remote_sync.py`: 원자료 후속 전송, advisory lock, 상태 파일과 실패 재시도. 운영 도구 내부에서만 사용.
 - `schema.sql`: 서버 담당자의 수동 검토/생성용. 시작 시 실행하지 않음.
 
@@ -73,3 +73,9 @@ uv run --project ingest python -m pytest engine/scripts/news_db_bridge -q --base
 - `uv run --project ingest python -m pytest ingest`: 139 passed.
 - 운영 도구 테스트만 실행: 32 passed. 위 engine 전체 수집에도 포함된다.
 - 커밋 대상에 실제 DB 비밀번호/import 키·개인 경로가 없음을 검사하고 `git diff --cached --check`를 통과했다.
+
+### PR #78 리뷰 반영 (2026-10-14)
+
+기존 키 확인은 전송할 `(doc_id, version)`만 조회한다. `source`·해시 충돌을 먼저 거절하고, 본문·파생 열 검증은 해당 스냅샷 멤버에만 수행한다. 다른 출처의 summary_link 자료는 읽거나 metadata_only 정책으로 해석하지 않는다. Windows 전용 프로세스 플래그가 없는 OS는 플래그 0을 쓴다(MariaDB 실행 파일은 수집 PC에 별도 필요).
+
+운영 도구 테스트 38개 통과. 가짜 SQL 클라이언트로 실제 transfer 함수의 INSERT/검증/COMMIT/ROLLBACK을 실행해 dry-run 무기록, 같은 키 내용 충돌, 불변 멤버십 변경 거절, 신규 버전 추가·기존 버전 재사용, 범위 밖 출처 공존을 확인했다. API 114 통과/39 원본 없음 skip, ingest 139 통과. 실서버 DB에는 이 테스트로 접속하지 않았다.
