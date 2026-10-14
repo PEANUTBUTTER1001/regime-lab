@@ -18,11 +18,17 @@ export function setLang(lang) {
 document.documentElement.lang = current;
 
 const D = {
-  'login.authHint': ['이메일 인증 후 로그인하여 내 분석 결과와 전략을 관리하세요.', 'Verify your email, then sign in to manage your results and strategies.'],
+  'login.authHint': ['내 분석 결과와 전략을 관리할 계정으로 로그인하세요.', 'Sign in to manage your results and strategies.'],
+  'login.kakao': ['카카오로 계속하기', 'Continue with Kakao'],
+  'login.google': ['Google로 계속하기', 'Continue with Google'],
+  'login.emailAlternative': ['또는 이메일로 계속하기', 'Or continue with email'],
+  'login.socialPending': ['소셜 로그인을 지금 사용할 수 없습니다. 잠시 후 다시 시도하세요.', 'Social sign-in is currently unavailable. Please try again later.'],
+  'login.socialFailed': ['소셜 로그인을 완료하지 못했습니다. 다시 시도하세요.', 'Social sign-in could not be completed. Please try again.'],
   'login.forgot': ['비밀번호를 잊으셨나요?', 'Forgot password?'],
   'login.reset': ['비밀번호 재설정', 'Reset password'],
   'login.sendReset': ['재설정 메일 보내기', 'Send reset email'],
   'login.changePassword': ['새 비밀번호 저장', 'Save new password'],
+  'login.mailUnavailable': ['인증 메일 요청을 처리하지 못했습니다. 잠시 후 다시 시도하거나 다른 로그인 방식을 이용하세요.', 'The verification email request could not be processed. Try again later or use another sign-in method.'],
   'login.checkEmail': ['안내 메일을 요청했습니다. 이메일을 확인하세요. 발송 제한으로 도착이 지연될 수 있습니다.', 'If applicable, instructions have been sent. Check your email; delivery may be delayed by sending limits.'],
   'login.verified': ['확인이 완료되었습니다. 비밀번호로 로그인하세요.', 'Confirmation completed. Sign in with your password.'],
   'login.linkExpired': ['인증 링크가 올바르지 않거나 만료되었습니다. 안내 메일을 다시 요청하세요.', 'The link is invalid or expired. Request another email.'],
@@ -99,6 +105,7 @@ const D = {
   'errmsg.warming_up': ['서버가 분석 데이터를 불러오는 중입니다. 잠시 후 다시 시도하세요.', 'The server is still loading analysis data. Try again shortly.'],
   'errmsg.run_not_found': ['해당 실행 ID를 찾을 수 없습니다.', 'This run ID was not found.'],
   'errmsg.run_failed': ['실행이 실패해 결과가 없습니다.', 'The run failed, so there is no result.'],
+  'errmsg.auth_guest_restricted': ['게스트 모드에서는 AI 보고서와 모델 설정을 사용할 수 없습니다. 계정으로 로그인해 주세요.', 'AI reports and model settings are unavailable in guest mode. Please sign in with an account.'],
   'errmsg.run_cancelled': ['취소된 실행이라 결과가 생성되지 않았습니다.', 'The run was cancelled, so no result was generated.'],
   'errmsg.run_not_ready': ['실행이 진행 중입니다. 완료 후 결과를 볼 수 있습니다.', 'The run is still in progress. Results are available when it completes.'],
   'errmsg.stale_run': ['현재 서버의 데이터·설정과 다른 조건으로 만든 실행입니다. 다시 실행하세요.', 'This run was created with different data or settings than the server now uses. Run it again.'],
@@ -121,8 +128,8 @@ const D = {
   'login.errEmail': ['올바른 이메일 주소를 입력하세요.', 'Enter a valid email address.'],
   'login.errPw': ['비밀번호는 4자 이상이어야 합니다.', 'Password must be at least 4 characters.'],
   'login.errMatch': ['비밀번호가 일치하지 않습니다.', 'Passwords do not match.'],
-  'login.guest': ['게스트 모드로 진행', 'Continue as guest'],
-  'login.guestHint': ['계정 없이 바로 사용합니다. 실행 기록과 설정은 이 브라우저에만 남습니다.', 'Use the workspace without an account. Runs and settings stay in this browser only.'],
+  'login.guest': ['테스트용 게스트 로그인', 'Continue as test guest'],
+  'login.guestHint': ['계정 없이 분석을 테스트합니다. 로그아웃하거나 세션이 만료되면 이전 테스트 기록에 다시 접근할 수 없습니다.', 'Test analyses without an account. Previous test records cannot be reopened after signing out or session expiry.'],
 
   // 전략 빌더
   'b.eyebrow': ['재현 가능한 전략 만들기', 'Build a reproducible strategy'],

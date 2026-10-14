@@ -3,7 +3,7 @@ import hashlib
 import sqlite3
 import threading
 from pathlib import Path
-from regime_api.auth.contracts import Session
+from regime_api.auth.contracts import Session, OAuthFlow
 
 class AuthStore:
     def __init__(self, root: Path, max_sessions: int):
@@ -11,6 +11,7 @@ class AuthStore:
         self.path = root / "ownership.sqlite3"
         self.max_sessions = max_sessions
         self._sessions: dict[str, Session] = {}
+        self._flows: dict[str, OAuthFlow] = {}
         self._locks = {}
         self._lock = threading.RLock()
         with self._db() as db:
@@ -30,6 +31,19 @@ class AuthStore:
             key = self._key(sid)
             self._sessions[key] = session
             self._locks[key] = threading.RLock()
+
+    def put_flow(self, fid, flow, before, old_id=None):
+        with self._lock:
+            self._flows = {key:value for key,value in self._flows.items() if value.created > before}
+            if old_id:
+                self._flows.pop(self._key(old_id), None)
+            if len(self._flows) >= self.max_sessions:
+                raise RuntimeError("OAuth capacity reached")
+            self._flows[self._key(fid)] = flow
+
+    def take_flow(self, fid):
+        with self._lock:
+            return self._flows.pop(self._key(fid), None)
 
     def locked(self, sid):
         with self._lock:

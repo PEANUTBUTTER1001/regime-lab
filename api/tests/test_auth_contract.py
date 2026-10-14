@@ -34,6 +34,13 @@ class FakeProvider:
         if email not in self.users or password != "testing-password":
             raise ApiError(401, "auth_failed", "Invalid credentials.")
         return self.bundle(self.users[email])
+    def social_providers(self): return {"google": True, "kakao": True}
+    def oauth_url(self, provider, challenge, callback):
+        from urllib.parse import urlencode
+        return "https://project.supabase.co/auth/v1/authorize?" + urlencode({"provider":provider, "code_challenge":challenge, "redirect_to":callback})
+    def exchange(self, code, verifier):
+        if code != "fake-code": raise ApiError(401, "auth_failed", "Invalid code.")
+        return self.bundle(User(A, None, False, ("google", "kakao")))
     def signup(self, email, password): self.mail.append(email)
     def recover(self, email): self.mail.append(email)
     def user(self, access): return self.tokens[access]
@@ -218,3 +225,243 @@ def test_https_session_cookie_is_secure(auth_app):
         response=c.post('/api/auth/login',json={'email':'a@example.test','password':'testing-password'},headers={'Origin':'https://testserver','X-CSRF-Token':token})
         assert response.status_code==200
         assert 'Secure' in response.headers['set-cookie']
+
+
+def start_social(c, provider='google'):
+    res = c.post('/api/auth/oauth', json={'provider':provider}, headers=csrf(c))
+    assert res.status_code == 200, res.text
+    return res
+
+@pytest.mark.parametrize('provider', ['google', 'kakao'])
+def test_oauth_cookie_exchange_refresh_logout(auth_app, provider):
+    with TestClient(auth_app) as c:
+        start = start_social(c, provider)
+        fid = c.cookies.get('rl_oauth')
+        assert 'HttpOnly' in start.headers['set-cookie'] and 'SameSite=lax' in start.headers['set-cookie']
+        assert set(start.json()) == {'url'}
+        res = c.get('/api/auth/oauth/callback?code=fake-code&redirect_to=https://evil.test', follow_redirects=False)
+        assert res.status_code == 303 and res.headers['location'] == 'http://testserver/#/builder'
+        assert c.cookies.get('rl_oauth') is None
+        assert res.headers['referrer-policy'] == 'no-referrer'
+        assert c.get('/api/auth/me').json()['user'] == {'id':A, 'email':None, 'email_confirmed':False}
+        auth_app.state.test_clock[0] += 301
+        assert c.get('/api/echo').json()['id'] == A
+        assert auth_app.state.test_provider.refreshed == 1
+        sid = c.cookies.get('rl_session')
+        c.cookies.set('rl_oauth', fid)
+        replay = c.get('/api/auth/oauth/callback?code=fake-code', follow_redirects=False)
+        assert 'auth_oauth_failed' in replay.headers['location']
+        assert c.cookies.get('rl_session') == sid
+        assert c.post('/api/auth/logout', headers=csrf(c)).status_code == 204
+        assert c.get('/api/echo').status_code == 401
+
+@pytest.mark.parametrize('kind', ['missing-cookie','expired','cancelled','bad-code','missing-code','oversized-code'])
+def test_oauth_failure_does_not_replace_existing_session(auth_app, kind):
+    with TestClient(auth_app) as c:
+        signin(c)
+        start_social(c)
+        sid = c.cookies.get('rl_session')
+        code, error = 'fake-code', ''
+        if kind == 'missing-cookie': c.cookies.delete('rl_oauth')
+        if kind == 'expired': auth_app.state.test_clock[0] += 300
+        if kind == 'cancelled': error = 'access_denied'
+        if kind == 'bad-code': code = 'bad'
+        if kind == 'missing-code': code = ''
+        if kind == 'oversized-code': code = 'x' * 2049
+        res = c.get('/api/auth/oauth/callback', params={'code':code,'error':error}, follow_redirects=False)
+        assert res.headers['location'] == 'http://testserver/#/login?auth_error=auth_oauth_failed'
+        assert c.cookies.get('rl_session') == sid
+        assert c.cookies.get('rl_oauth') is None
+        assert c.get('/api/echo').json()['id'] == A
+
+
+def test_oauth_bound_verifier_and_replacement(auth_app, monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+    import base64, hashlib
+    auth = auth_app.state.rl.auth
+    with TestClient(auth_app) as c, TestClient(auth_app) as other:
+        first = start_social(c)
+        first_id = c.cookies.get('rl_oauth')
+        second = start_social(c)
+        second_id = c.cookies.get('rl_oauth')
+        assert first_id != second_id and auth.store.take_flow(first_id) is None
+        own = start_social(other)
+        own_id = other.cookies.get('rl_oauth')
+        own_flow = auth.store.take_flow(own_id)
+        auth.store.put_flow(own_id, own_flow, 0)
+        challenge = parse_qs(urlsplit(own.json()['url']).query)['code_challenge'][0]
+        assert challenge == base64.urlsafe_b64encode(hashlib.sha256(own_flow.verifier.encode()).digest()).decode().rstrip('=')
+        assert len(own_flow.verifier) == len(challenge) == 43
+        assert own_flow.verifier not in own.text and own_flow.verifier not in repr(own_flow)
+        def exchange(code, verifier):
+            if verifier != own_flow.verifier: raise ApiError(401,'auth_failed','Code/verifier mismatch')
+            return auth_app.state.test_provider.bundle(User(A,None,False,('google',)))
+        monkeypatch.setattr(auth_app.state.test_provider, 'exchange', exchange)
+        # A code for the other browser cannot complete this browser's pending flow.
+        bad = c.get('/api/auth/oauth/callback?code=fake-code', follow_redirects=False)
+        assert 'auth_oauth_failed' in bad.headers['location']
+        assert c.cookies.get('rl_session') is None
+        good = other.get('/api/auth/oauth/callback?code=fake-code', follow_redirects=False)
+        assert good.headers['location'].endswith('/#/builder')
+
+
+def test_oauth_start_requires_csrf_and_enabled_allowlisted_provider(auth_app, monkeypatch):
+    with TestClient(auth_app) as c:
+        assert c.post('/api/auth/oauth',json={'provider':'google'}).status_code == 403
+        headers = csrf(c)
+        assert c.post('/api/auth/oauth',json={'provider':'evil'},headers=headers).status_code == 422
+        monkeypatch.setattr(auth_app.state.test_provider,'social_providers',lambda:{'google':False,'kakao':False})
+        assert c.post('/api/auth/oauth',json={'provider':'google'},headers=headers).json()['code'] == 'auth_oauth_unavailable'
+        assert c.cookies.get('rl_oauth') is None
+        assert c.get('/api/auth/config').json()['social_providers'] == {'google':False,'kakao':False}
+
+
+def test_oauth_discovery_outage_keeps_email_login(auth_app, monkeypatch):
+    def unavailable(): raise ApiError(503,'auth_unavailable','Unavailable')
+    monkeypatch.setattr(auth_app.state.test_provider,'social_providers',unavailable)
+    with TestClient(auth_app) as c:
+        assert c.get('/api/auth/config').json()['social_providers'] == {'google':False,'kakao':False}
+        signin(c)
+        assert c.get('/api/echo').status_code == 200
+
+@pytest.mark.parametrize('user', [User(A,'a@example.test',True,('kakao',)), User(B,None,False,('google',))])
+def test_oauth_wrong_identity_is_rejected(auth_app, monkeypatch, user):
+    with TestClient(auth_app) as c:
+        start_social(c)
+        monkeypatch.setattr(auth_app.state.test_provider,'user',lambda token:user)
+        res = c.get('/api/auth/oauth/callback?code=fake-code',follow_redirects=False)
+        assert 'auth_oauth_failed' in res.headers['location'] and c.cookies.get('rl_session') is None
+
+
+def test_social_identity_does_not_bypass_password_confirmation(auth_app, monkeypatch):
+    provider = auth_app.state.test_provider
+    provider.users['a@example.test'] = User(A,'a@example.test',False,('google',))
+    with TestClient(auth_app) as c:
+        assert c.post('/api/auth/login',json={'email':'a@example.test','password':'testing-password'},headers=csrf(c)).status_code == 401
+        start_social(c)
+        c.get('/api/auth/oauth/callback?code=fake-code',follow_redirects=False)
+        monkeypatch.setattr(provider,'user',lambda token:User(A,None,False,('kakao',)))
+        assert c.get('/api/echo').status_code == 401
+
+
+def test_logout_cancels_pending_flow(auth_app):
+    with TestClient(auth_app) as c:
+        start_social(c)
+        fid = c.cookies.get('rl_oauth')
+        assert c.post('/api/auth/logout',headers=csrf(c)).status_code == 204
+        assert c.cookies.get('rl_oauth') is None
+        assert auth_app.state.rl.auth.store.take_flow(fid) is None
+
+
+def test_pending_flow_capacity_and_expiry(auth_app):
+    from regime_api.auth.contracts import OAuthFlow
+    store = auth_app.state.rl.auth.store
+    store.max_sessions = 1
+    store.put_flow('one',OAuthFlow('google','private-verifier',1000),700)
+    with pytest.raises(RuntimeError): store.put_flow('two',OAuthFlow('kakao','private-verifier2',1001),701)
+    store.put_flow('two',OAuthFlow('kakao','private-verifier2',1300),1000)
+    assert store.take_flow('one') is None
+    assert store.take_flow('two') is not None
+    assert store.take_flow('two') is None
+
+
+def test_supabase_oauth_rest_and_metadata_privacy():
+    from urllib.parse import parse_qs, urlsplit
+    import json
+    calls = []
+    user = {'id':A, 'identities':[{'provider':'kakao'}]}
+    def respond(req):
+        calls.append(req)
+        if req.url.path.endswith('/settings'):
+            return httpx.Response(200,json={'external':{'google':True,'kakao':False,'secret':'PRIVATE_SECRET'}})
+        return httpx.Response(200,json={'user':user,'access_token':'private-access','refresh_token':'private-refresh','expires_in':300})
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        p = SupabaseProvider('https://project.supabase.co','PRIVATE_KEY',10,'http://localhost',client)
+        assert p.social_providers() == {'google':True,'kakao':False}
+        url = p.oauth_url('kakao','challenge','http://localhost/api/auth/oauth/callback')
+        params = parse_qs(urlsplit(url).query, keep_blank_values=True)
+        assert params == {'provider':['kakao'],'code_challenge':['challenge'],'code_challenge_method':['s256'],'redirect_to':['http://localhost/api/auth/oauth/callback'],'scope':['']}
+        assert 'scope' not in parse_qs(urlsplit(p.oauth_url('google','challenge','http://localhost/api/auth/oauth/callback')).query, keep_blank_values=True)
+        tokens = p.exchange('private-code','private-verifier')
+        assert tokens.user.email is None and tokens.user.providers == ('kakao',)
+        assert calls[-1].url.query == b'grant_type=pkce'
+        assert json.loads(calls[-1].content) == {'auth_code':'private-code','code_verifier':'private-verifier'}
+        assert calls[-1].headers['apikey'] == 'PRIVATE_KEY'
+        with pytest.raises(ApiError): p.oauth_url('evil','challenge','https://evil.test')
+    with pytest.raises(ApiError):
+        SupabaseProvider._user({'id':A,'user_metadata':{'provider':'google'},'app_metadata':{'provider':'google'}})
+
+
+def test_https_oauth_cookies_and_query_log_filter(auth_app):
+    auth_app.state.rl.auth.site_url = 'https://testserver'
+    with TestClient(auth_app,base_url='https://testserver') as c:
+        token = c.get('/api/auth/config').json()['csrf_token']
+        res = c.post('/api/auth/oauth',json={'provider':'google'},headers={'Origin':'https://testserver','X-CSRF-Token':token})
+        assert 'Secure' in res.headers['set-cookie']
+        res = c.get('/api/auth/oauth/callback?code=fake-code',follow_redirects=False)
+        assert all('Secure' in cookie for cookie in res.headers.get_list('set-cookie'))
+    record = logging.LogRecord('uvicorn.access',20,'',1,'%s %s %s %s %s',('client','GET','/api/auth/oauth/callback?code=PRIVATE_CODE','1.1',303),None)
+    AuthAccessLogFilter().filter(record)
+    assert 'PRIVATE_CODE' not in record.getMessage()
+
+
+def test_guest_session_refresh_logout_and_no_provider_calls(auth_app, monkeypatch):
+    def unexpected(*args):
+        raise AssertionError("Guest sessions must not call Supabase")
+    for name in ('user', 'refresh', 'logout'):
+        monkeypatch.setattr(auth_app.state.test_provider, name, unexpected)
+    with TestClient(auth_app) as c:
+        assert c.get('/api/auth/config').json()['guest_allowed'] is True
+        headers = csrf(c)
+        response = c.post('/api/auth/guest', headers=headers)
+        assert response.status_code == 200
+        user = response.json()['user']
+        assert user['is_guest'] and user['email'] is None and not user['email_confirmed']
+        assert user['id'].startswith('guest_')
+        assert 'HttpOnly' in response.headers['set-cookie']
+        assert 'SameSite=lax' in response.headers['set-cookie']
+        sid = c.cookies.get('rl_session')
+        auth_app.state.test_clock[0] += 301
+        assert c.get('/api/auth/me').json()['user'] == user
+        assert c.get('/api/echo').json()['id'] == user['id']
+        assert c.post('/api/auth/password', json={'password':'new-password'}, headers=csrf(c)).status_code == 401
+        # Recovery access is rejected without turning a guest into a password account.
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 200
+        sid = c.cookies.get('rl_session')
+        assert c.post('/api/auth/logout', headers=csrf(c)).status_code == 204
+        c.cookies.set('rl_session', sid)
+        assert c.get('/api/auth/me').status_code == 401
+
+
+def test_guest_creation_requires_csrf_and_can_be_disabled(auth_app):
+    with TestClient(auth_app) as c:
+        assert c.post('/api/auth/guest').status_code == 403
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 200
+        auth_app.state.rl.auth.policy['guest_enabled'] = False
+        assert c.get('/api/auth/config').json()['guest_allowed'] is False
+        assert c.get('/api/auth/me').status_code == 401
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 403
+
+
+def test_guest_rotation_expiry_and_pending_oauth_invalidation(auth_app):
+    with TestClient(auth_app) as c:
+        signin(c)
+        old_sid = c.cookies.get('rl_session')
+        start_social(c)
+        flow = c.cookies.get('rl_oauth')
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 200
+        assert auth_app.state.rl.auth.store.get(old_sid) is None
+        assert auth_app.state.rl.auth.store.take_flow(flow) is None
+        assert c.cookies.get('rl_oauth') is None
+        auth_app.state.test_clock[0] += auth_app.state.rl.auth.policy['idle_ttl_seconds']
+        assert c.get('/api/auth/me').status_code == 401
+
+
+def test_guest_creation_uses_login_rate_and_session_capacity(auth_app):
+    with TestClient(auth_app) as c:
+        for _ in range(auth_app.state.rl.auth.policy['rate_max_attempts']):
+            assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 200
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 429
+        auth_app.state.test_clock[0] += auth_app.state.rl.auth.policy['rate_window_seconds']
+        auth_app.state.rl.auth.store.max_sessions = 0
+        assert c.post('/api/auth/guest', headers=csrf(c)).status_code == 503
