@@ -128,43 +128,11 @@ uv run --project api regime-api
 | 데모 (기본) | 아무 설정 없이 실행 | 이 PC에서만 열립니다. **테스트용 게스트 로그인**으로 들어갑니다(실제 인증 아님). 실행 기록·저장한 전략은 이 서버를 쓰는 모두가 함께 봅니다 |
 | Supabase | 아래 환경변수를 설정하고 실행 | 카카오·Google 로그인과 테스트용 게스트 진입을 제공합니다. `auth.guest_enabled`로 게스트 허용을 조절합니다. 게스트별 기록도 격리되며 로그아웃·세션 만료 후 다시 접근할 수 없습니다. 실행·탐색·저장한 전략은 **본인 것만** 보이고, 소유자가 기록되지 않은 과거 실행은 보이지 않습니다 |
 
-Supabase 모드 환경변수(PowerShell 예시, 값은 각자의 Supabase 프로젝트 것으로 바꿉니다):
+다른 PC에서 카카오·Google·게스트 로그인을 실행하려면 **[팀원 로컬 실행 안내](docs/X3_팀원_로컬_실행.md)**를 순서대로 따라 하세요. 저장소 받기, PR 병합 전/후 브랜치 선택, Windows·macOS/Linux 환경변수, 접속 주소, 확인 방법을 한곳에 정리했습니다.
 
-```powershell
-$env:REGIME_AUTH_MODE = "supabase"
-$env:REGIME_SUPABASE_URL = "https://<프로젝트>.supabase.co"
-$env:REGIME_SUPABASE_PUBLISHABLE_KEY = "<sb_publishable_ 로 시작하는 공개 키>"
-$env:REGIME_AUTH_SITE_URL = "http://127.0.0.1:8000"
-$env:REGIME_AUTH_STATE_DIR = "<저장소 밖의 인증 상태 폴더>"
-$env:REGIME_AUTH_ADMIN_IDS = "<AI 보고서 설정을 관리할 사용자 UUID, 쉼표 구분>"
-uv run --project api regime-api
-```
+팀에서 함께 쓰는 값은 Supabase 프로젝트 URL과 공개 publishable key 두 개입니다. 각 PC는 자기 로컬 서버를 실행하며 `127.0.0.1`은 그 PC 자신을 뜻합니다. 작성자의 PC 경로·실행 파일·로그인 세션을 복사할 필요가 없습니다. 이 Python 서버는 `REGIME_*` 환경변수를 읽으며 `NEXT_PUBLIC_*`만 설정해서는 적용되지 않습니다.
 
-- 키는 파일에 적지 말고 환경변수로만 넣습니다. 로그인 세션은 서버 프로세스 하나에만 유지되므로 서버를 다시 켜면 다시 로그인합니다.
-- `REGIME_AUTH_STATE_DIR`에는 실행·탐색의 소유자 기록이 남습니다. 서버를 다시 켜도 보존되는 저장소 밖 경로를 쓰세요.
-- 이메일 가입·비밀번호 재설정 화면은 제공하지 않습니다. 유지된 이메일 API를 별도로 사용할 경우 SMTP와 메일 템플릿 설정이 필요합니다. 소셜 로그인 설정과 배포(HTTPS) 시 바꿀 값은 [`docs/X3_로그인_설계.md`](docs/X3_로그인_설계.md)를 보세요.
-
-### 팀원 로컬 테스트
-
-담당자에게 프로젝트 URL과 공개 publishable key를 전달받아 위 예시의 두 자리표시자를 바꿉니다. 각 PC에서 아래 값도 설정한 뒤 프로젝트 루트에서 실행합니다. 비밀키(`service_role` 등)는 사용하지 않습니다.
-
-```powershell
-$env:REGIME_AUTH_MODE = "supabase"
-$env:REGIME_SUPABASE_URL = "https://<프로젝트>.supabase.co"
-$env:REGIME_SUPABASE_PUBLISHABLE_KEY = "<sb_publishable_공개키>"
-$env:REGIME_AUTH_SITE_URL = "http://127.0.0.1:8000"
-$env:REGIME_AUTH_STATE_DIR = Join-Path $env:LOCALAPPDATA "regime-lab/auth-state"
-$env:REGIME_AUTH_ADMIN_IDS = ""
-$env:REGIME_PORT = "8000"
-uv run --project api regime-api
-```
-
-브라우저는 SITE_URL과 같은 **http://127.0.0.1:8000**으로 엽니다. `localhost`나 다른 포트로 바꾸어 열면 Origin 검사가 거부할 수 있습니다. Supabase Redirect URLs에 이 주소의 `/api/auth/oauth/callback`을 등록해야 합니다. Google·카카오 개발자 콘솔의 Redirect URI는 Supabase 프로젝트의 `/auth/v1/callback`입니다. 공급사가 테스트 모드라면 사용할 계정을 해당 서비스의 테스트 사용자로 등록합니다.
-
-1. 카카오와 Google 각각 버튼 클릭 → 공급사 화면에서 뒤로가기 → 버튼 재클릭을 확인합니다.
-2. 소셜 로그인 → 앱 복귀 → 새로고침 후 로그인 유지 → 로그아웃 → 재로그인을 확인합니다.
-3. 게스트 진입 → 새로고침 유지 → 로그아웃 → 새 게스트 진입 시 이전 게스트 기록에 접근할 수 없는지 확인합니다. 이 격리는 Supabase 모드 기준이며 데모 모드는 기록을 공유합니다.
-4. 시도 제한 안내가 나오면 반복 클릭을 멈추고 잠시 후 재시도합니다. 서버 재시작 시 기존 로그인은 풀립니다.
+Supabase 로그인 연결이 시세·뉴스 자료나 실행 결과를 다른 PC로 복사하지는 않습니다. 로그인만 확인할 때는 뉴스 수집기·DB 연결이 필요하지 않습니다. 백테스트용 시세 준비는 위의 "처음 한 번", 뉴스 DB 자동 조회는 해당 기능의 PR #81 실행 안내를 따릅니다.
 
 
 ---
@@ -184,7 +152,7 @@ uv run --project api regime-api
 
 ### 1. 시작하기
 
-데모 모드에서는 첫 화면의 **게스트 모드로 진행**을 누르면 가입 없이 바로 사용할 수 있습니다. Supabase 모드에서는 계정을 만들고 로그인합니다.
+데모 모드에서는 **테스트용 게스트 로그인**으로 들어갑니다. Supabase 모드에서는 **카카오로 계속하기** 또는 **Google로 계속하기**를 누릅니다. 첫 이용 시 Supabase 계정이 생성되며, 허용된 경우 테스트용 게스트로도 진입할 수 있습니다.
 
 ### 2. 전략 만들기
 
