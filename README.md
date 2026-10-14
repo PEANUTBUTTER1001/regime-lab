@@ -125,8 +125,8 @@ uv run --project api regime-api
 
 | 모드 | 켜는 법 | 동작 |
 |---|---|---|
-| 데모 (기본) | 아무 설정 없이 실행 | 이 PC에서만 열립니다. **게스트 모드로 진행** 또는 데모 로그인(실제 인증 아님)으로 들어갑니다. 실행 기록·저장한 전략은 이 서버를 쓰는 모두가 함께 봅니다 |
-| Supabase | 아래 환경변수를 설정하고 실행 | 이메일·비밀번호 가입·로그인·비밀번호 재설정. 게스트 모드는 없습니다. 실행·탐색·저장한 전략은 **본인 것만** 보이고, 소유자가 기록되지 않은 과거 실행은 보이지 않습니다 |
+| 데모 (기본) | 아무 설정 없이 실행 | 이 PC에서만 열립니다. **테스트용 게스트 로그인**으로 들어갑니다(실제 인증 아님). 실행 기록·저장한 전략은 이 서버를 쓰는 모두가 함께 봅니다 |
+| Supabase | 아래 환경변수를 설정하고 실행 | 카카오·Google 로그인과 테스트용 게스트 진입을 제공합니다. `auth.guest_enabled`로 게스트 허용을 조절합니다. 게스트별 기록도 격리되며 로그아웃·세션 만료 후 다시 접근할 수 없습니다. 실행·탐색·저장한 전략은 **본인 것만** 보이고, 소유자가 기록되지 않은 과거 실행은 보이지 않습니다 |
 
 Supabase 모드 환경변수(PowerShell 예시, 값은 각자의 Supabase 프로젝트 것으로 바꿉니다):
 
@@ -142,7 +142,30 @@ uv run --project api regime-api
 
 - 키는 파일에 적지 말고 환경변수로만 넣습니다. 로그인 세션은 서버 프로세스 하나에만 유지되므로 서버를 다시 켜면 다시 로그인합니다.
 - `REGIME_AUTH_STATE_DIR`에는 실행·탐색의 소유자 기록이 남습니다. 서버를 다시 켜도 보존되는 저장소 밖 경로를 쓰세요.
-- 가입 확인·비밀번호 재설정 메일은 Supabase에 SMTP와 메일 템플릿을 설정해야 동작합니다. 자세한 내용과 배포(HTTPS) 시 바꿀 값은 [`docs/X3_로그인_설계.md`](docs/X3_로그인_설계.md)를 보세요.
+- 이메일 가입·비밀번호 재설정 화면은 제공하지 않습니다. 유지된 이메일 API를 별도로 사용할 경우 SMTP와 메일 템플릿 설정이 필요합니다. 소셜 로그인 설정과 배포(HTTPS) 시 바꿀 값은 [`docs/X3_로그인_설계.md`](docs/X3_로그인_설계.md)를 보세요.
+
+### 팀원 로컬 테스트
+
+담당자에게 프로젝트 URL과 공개 publishable key를 전달받아 위 예시의 두 자리표시자를 바꿉니다. 각 PC에서 아래 값도 설정한 뒤 프로젝트 루트에서 실행합니다. 비밀키(`service_role` 등)는 사용하지 않습니다.
+
+```powershell
+$env:REGIME_AUTH_MODE = "supabase"
+$env:REGIME_SUPABASE_URL = "https://<프로젝트>.supabase.co"
+$env:REGIME_SUPABASE_PUBLISHABLE_KEY = "<sb_publishable_공개키>"
+$env:REGIME_AUTH_SITE_URL = "http://127.0.0.1:8000"
+$env:REGIME_AUTH_STATE_DIR = Join-Path $env:LOCALAPPDATA "regime-lab/auth-state"
+$env:REGIME_AUTH_ADMIN_IDS = ""
+$env:REGIME_PORT = "8000"
+uv run --project api regime-api
+```
+
+브라우저는 SITE_URL과 같은 **http://127.0.0.1:8000**으로 엽니다. `localhost`나 다른 포트로 바꾸어 열면 Origin 검사가 거부할 수 있습니다. Supabase Redirect URLs에 이 주소의 `/api/auth/oauth/callback`을 등록해야 합니다. Google·카카오 개발자 콘솔의 Redirect URI는 Supabase 프로젝트의 `/auth/v1/callback`입니다. 공급사가 테스트 모드라면 사용할 계정을 해당 서비스의 테스트 사용자로 등록합니다.
+
+1. 카카오와 Google 각각 버튼 클릭 → 공급사 화면에서 뒤로가기 → 버튼 재클릭을 확인합니다.
+2. 소셜 로그인 → 앱 복귀 → 새로고침 후 로그인 유지 → 로그아웃 → 재로그인을 확인합니다.
+3. 게스트 진입 → 새로고침 유지 → 로그아웃 → 새 게스트 진입 시 이전 게스트 기록에 접근할 수 없는지 확인합니다. 이 격리는 Supabase 모드 기준이며 데모 모드는 기록을 공유합니다.
+4. 시도 제한 안내가 나오면 반복 클릭을 멈추고 잠시 후 재시도합니다. 서버 재시작 시 기존 로그인은 풀립니다.
+
 
 ---
 

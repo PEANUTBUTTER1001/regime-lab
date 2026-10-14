@@ -46,6 +46,9 @@ export function renderLogin(el, query = new URLSearchParams()) {
     socials.forEach((item, index) => { item.disabled = busy || config.available === false || !config.social_providers?.[providers[index]]; });
     guest.disabled = busy || config.available === false || !config.guest_allowed;
   }
+  // Back/forward cache restores the disabled DOM after leaving for OAuth.
+  const onPageShow = event => { if (event.persisted) setBusy(false); };
+  window.addEventListener('pageshow', onPageShow);
   guest.onclick = async () => {
     setBusy(true); message.classList.add('hidden');
     try {
@@ -75,4 +78,5 @@ export function renderLogin(el, query = new URLSearchParams()) {
     h('div', {class:'brand'}, h('span', {class:'brand-mark', 'aria-hidden':'true'}), BRAND),
     h('h1', {}, t('login.title')), h('p', {class:'lead'}, t('login.lead')), h('p', {class:'notice'}, t('login.notice')), decoChart()),
     h('section', {class:'login-form'}, form)));
+  return () => window.removeEventListener('pageshow', onPageShow);
 }

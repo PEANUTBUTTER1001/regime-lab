@@ -83,7 +83,7 @@ class AuthService:
         return self.issue(Tokens(user, "", "", self.policy["session_ttl_seconds"]), old_sid)
 
     def social_providers(self):
-        # Discovery failures disable social buttons while preserving email sign-in.
+        # Discovery failures disable social buttons without exposing upstream errors.
         try:
             return self.provider.social_providers()
         except ApiError:
