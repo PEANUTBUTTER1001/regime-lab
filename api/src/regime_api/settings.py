@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import os
+import json
+import math
 import ipaddress
 from urllib.parse import urlsplit
 from dataclasses import dataclass, field
@@ -25,6 +27,24 @@ from regime_lab.config import REPO_ROOT, Paths, load_paths
 
 def _flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
+def _news_db_config() -> dict | None:
+    path = os.environ.get('REGIME_NEWS_DB_CONFIG')
+    if not path:
+        return None
+    config = json.loads(Path(path).read_text(encoding='utf-8-sig'))
+    interval = config['poll_seconds']
+    if isinstance(interval, bool) or not isinstance(interval, (int, float)) or not math.isfinite(interval) or interval <= 0:
+        raise ValueError('Invalid news polling interval')
+    runtime = Path(config['runtime_dir'])
+    if not runtime.is_absolute() or runtime.resolve().is_relative_to(REPO_ROOT.resolve()):
+        raise ValueError('News snapshots must be outside the repository')
+    if sorted(config['sources']) != ['n8n_disclosure', 'n8n_news']:
+        raise ValueError('Only the approved C3 sources are supported')
+    if not all(isinstance(config.get(key), str) and config[key] for key in ('env_file', 'client_executable')):
+        raise ValueError('Missing database client configuration')
+    return config
 
 
 @dataclass
@@ -46,6 +66,8 @@ class Settings:
     auth_site_url: str = "http://127.0.0.1:8000"
     auth_state_dir: Path | None = None
     auth_admin_ids: list[str] = field(default_factory=list)
+
+    news_db: dict | None = field(default=None, repr=False)
 
     def validate_auth(self):
         if self.auth_mode not in {"demo", "supabase"}:
@@ -83,6 +105,7 @@ class Settings:
         key_env = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
         return cls(
             paths=paths,
+            news_db=_news_db_config(),
             sample=_flag("REGIME_SAMPLE"),
             llm_provider=provider,
             llm_model=os.environ.get("REGIME_LLM_MODEL") or None,

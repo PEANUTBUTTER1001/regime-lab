@@ -6,6 +6,13 @@
 from __future__ import annotations
 
 import threading
+import asyncio
+import json
+import os
+from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
+from uuid import uuid4
 import time
 import secrets
 import logging
@@ -22,7 +29,7 @@ from regime_api.llm.service import ReportService
 from regime_api.settings import Settings
 from regime_lab import retrieval
 from regime_lab.config import load_config
-from regime_lab.data.loader import DocsStore, ForecastStore, InfluenceStore
+from regime_lab.data.loader import DocsStore, ForecastStore, InfluenceStore, read_news_db_snapshot
 from regime_lab.pipeline import Prepared, prepare
 from regime_lab.presets import PresetStore, presets_dir
 
@@ -101,6 +108,56 @@ class AppState:
         return self.prep
 
 
+def _read_evidence_update(state):
+    previous = getattr(state, 'news_refresh', {}).get('last_success', {})
+    result = read_news_db_snapshot(state.settings.news_db, previous.get('snapshot_id'))
+    if result is None:
+        return None
+    path, report = result
+    docs = DocsStore(path, state.paths.cache)
+    index = retrieval.open_index(docs, state.cfg, use_cache=False)
+    if len(index.docs) != report['versions']:
+        raise ValueError('Index version count mismatch')
+    return path, report, docs, index
+
+
+async def _refresh_evidence(state):
+    """Build off-thread, then publish without awaiting; preserve last good data on failure."""
+    report = getattr(state, 'news_refresh', {}).get('last_success', {})
+    status = 'ok'
+    try:
+        update = await asyncio.to_thread(_read_evidence_update, state)
+        if update is not None:
+            path, new_report, docs, index = update
+            state.docs, state.rag = docs, index
+            state.rag_status, state.rag_error = 'ready', None
+            state.paths = replace(state.paths, ext_store=path)
+            state.settings.paths = state.paths
+            report = {**new_report, 'loaded_at': datetime.now(timezone.utc).isoformat(), 'ext_store': str(path)}
+    except Exception:
+        status = 'stale'
+    state.news_refresh = {'status': status, 'checked_at': datetime.now(timezone.utc).isoformat(),
+                          'poll_seconds': state.settings.news_db['poll_seconds'], 'last_success': report}
+    # Fixed diagnostics only: upstream errors may contain credentials or data.
+    if status == 'stale':
+        state.news_refresh['error'] = 'db_refresh_unavailable'
+    try:
+        runtime = Path(state.settings.news_db['runtime_dir'])
+        runtime.mkdir(parents=True, exist_ok=True)
+        temp = runtime / ('status-' + uuid4().hex + '.tmp')
+        temp.write_text(json.dumps(state.news_refresh, ensure_ascii=False, indent=2), encoding='utf-8')
+        os.replace(temp, runtime / 'status.json')
+    except OSError:
+        logging.getLogger(__name__).warning('news_refresh_status_write_failed')
+
+
+async def _poll_evidence(state):
+    while True:
+        await asyncio.sleep(state.settings.news_db['poll_seconds'])
+        if state.rag_status != 'warming_up':
+            await _refresh_evidence(state)
+
+
 def create_app(settings: Settings | None = None, prep: Prepared | None = None, serve_web: bool = True,
                rag: retrieval.EvidenceIndex | None = None, auth_provider=None, auth_store=None) -> FastAPI:
     settings = settings or Settings.from_env()
@@ -134,13 +191,22 @@ def create_app(settings: Settings | None = None, prep: Prepared | None = None, s
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if settings.news_db is not None:
+            await _refresh_evidence(state)
         if state.prep is None:
             threading.Thread(target=state.load, name="prepare", daemon=True).start()
         if state.rag is None:
             threading.Thread(target=state.load_rag, name="rag-index", daemon=True).start()
+        news_task = asyncio.create_task(_poll_evidence(state)) if settings.news_db is not None else None
         try:
             yield
         finally:
+            if news_task is not None:
+                news_task.cancel()
+                try:
+                    await news_task
+                except asyncio.CancelledError:
+                    pass
             if enabled and hasattr(provider, "close"):
                 provider.close()
 
