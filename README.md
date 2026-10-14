@@ -91,7 +91,9 @@ uv run --project engine --with finance-datareader python engine/scripts/fetch_in
 uv run --project engine regime-lab prepare
 ```
 
-### 데이터 서버에서 받기 (원본 파일이 없는 PC)
+### 데이터 서버에서 받기 (데이터 서버 PC 전용)
+
+> **2026-10-14 결정 F1d:** 원본은 데이터 서버 PC 에서만 관리·보관합니다. 팀원 PC 는 원본을 받지 않고, 팀 서비스는 서버 PC 에서 띄운 웹을 브라우저로 씁니다. 아래 절차는 서버 PC 안에서 쓰는 방법입니다. 새 시세(2026-09-19~)의 출처는 공공데이터포털 "금융위원회_주식시세정보"(공공누리 제4유형: 출처 표시·상업적 이용 금지·변경 금지)입니다.
 
 팀 데이터 서버의 조회 API 에서 시세 원본을 받아 위 `data` 와 같은 형식으로 저장합니다(F1). 서버 주소는 담당자(Seonghwanaa)에게 직접 받고, 저장소·채팅에 적지 않습니다. 이 PC 의 IP 가 서버 허용 목록에 있어야 합니다. 자세한 내용은 [`docs/F1_데이터_서버_API.md`](docs/F1_데이터_서버_API.md).
 
