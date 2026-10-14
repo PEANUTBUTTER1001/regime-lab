@@ -29,7 +29,7 @@ from regime_api.llm.service import ReportService
 from regime_api.settings import Settings
 from regime_lab import retrieval
 from regime_lab.config import load_config
-from regime_lab.data.loader import DocsStore, ForecastStore, InfluenceStore, read_news_db_snapshot
+from regime_lab.data.loader import DocsStore, ForecastStore, InfluenceStore, read_news_api_snapshot
 from regime_lab.pipeline import Prepared, prepare
 from regime_lab.presets import PresetStore, presets_dir
 
@@ -110,7 +110,7 @@ class AppState:
 
 def _read_evidence_update(state):
     previous = getattr(state, 'news_refresh', {}).get('last_success', {})
-    result = read_news_db_snapshot(state.settings.news_db, previous.get('snapshot_id'))
+    result = read_news_api_snapshot(state.settings.news_api, previous.get('snapshot_id'))
     if result is None:
         return None
     path, report = result
@@ -137,12 +137,12 @@ async def _refresh_evidence(state):
     except Exception:
         status = 'stale'
     state.news_refresh = {'status': status, 'checked_at': datetime.now(timezone.utc).isoformat(),
-                          'poll_seconds': state.settings.news_db['poll_seconds'], 'last_success': report}
+                          'poll_seconds': state.settings.news_api['poll_seconds'], 'last_success': report}
     # Fixed diagnostics only: upstream errors may contain credentials or data.
     if status == 'stale':
-        state.news_refresh['error'] = 'db_refresh_unavailable'
+        state.news_refresh['error'] = 'news_api_refresh_unavailable'
     try:
-        runtime = Path(state.settings.news_db['runtime_dir'])
+        runtime = Path(state.settings.news_api['runtime_dir'])
         runtime.mkdir(parents=True, exist_ok=True)
         temp = runtime / ('status-' + uuid4().hex + '.tmp')
         temp.write_text(json.dumps(state.news_refresh, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -153,9 +153,8 @@ async def _refresh_evidence(state):
 
 async def _poll_evidence(state):
     while True:
-        await asyncio.sleep(state.settings.news_db['poll_seconds'])
-        if state.rag_status != 'warming_up':
-            await _refresh_evidence(state)
+        await _refresh_evidence(state)
+        await asyncio.sleep(state.settings.news_api['poll_seconds'])
 
 
 def create_app(settings: Settings | None = None, prep: Prepared | None = None, serve_web: bool = True,
@@ -191,13 +190,11 @@ def create_app(settings: Settings | None = None, prep: Prepared | None = None, s
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        if settings.news_db is not None:
-            await _refresh_evidence(state)
         if state.prep is None:
             threading.Thread(target=state.load, name="prepare", daemon=True).start()
-        if state.rag is None:
+        if state.rag is None and settings.news_api is None:
             threading.Thread(target=state.load_rag, name="rag-index", daemon=True).start()
-        news_task = asyncio.create_task(_poll_evidence(state)) if settings.news_db is not None else None
+        news_task = asyncio.create_task(_poll_evidence(state)) if settings.news_api is not None else None
         try:
             yield
         finally:

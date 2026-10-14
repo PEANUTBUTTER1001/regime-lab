@@ -214,6 +214,8 @@ uv run --project api regime-api
 
 ### 7. 공시·뉴스
 
+실시간 뉴스 검색이 필요한 PC만 HTTP 자동 갱신을 켭니다. DB 설치 없이 실행하는 절차는 [`docs/P3_DB_검색_자동갱신.md`](docs/P3_DB_검색_자동갱신.md)를 참고하세요. 엔진·예측 작업만 하면 이 설정은 불필요합니다.
+
 OpenDART 공시 등 수집한 외부 자료가 있을 때 쓸 수 있습니다(수집 방법은 [`ingest/README.md`](ingest/README.md), 위치는 `engine/config/paths.local.yaml`의 `ext_store`). 자료가 없으면 "데이터 없음"으로 표시됩니다.
 
 - **공시·뉴스 검색**: 기준 시각에 이미 알 수 있었던 자료만 제목·회사명으로 찾습니다. 비슷한 제목은 하나로 묶습니다.

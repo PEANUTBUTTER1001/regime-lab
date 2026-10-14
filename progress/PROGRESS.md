@@ -1,5 +1,15 @@
 # PROGRESS
 
+## 2026-10-14 KST — hchee99 PR #81 HTTP 뉴스 갱신 리뷰 반영
+
+- PEANUTBUTTER1001 리뷰: 팀원 PC의 MariaDB CLI·접속 파일·설정 JSON을 제거. 기존 F1 환경변수와 `REGIME_NEWS_REFRESH=1`로 GET 전용 스냅샷 API를 읽는다.
+- 출처·주기·HTTP 한도는 default.yaml, 사본 경로는 paths.example.yaml로 이동. 첫 갱신은 백그라운드이며 가격 준비와 독립. 미완성 적재·해시·페이지·왕복 검증 실패 시 마지막 정상 인덱스 보존.
+- 검증: HTTP reader 22개, API 갱신 7개 통과. API 전체 120 통과/39 원본 없음 skip(후속 가격 파일 없는 PC 테스트 추가 통과), ingest 139 통과. 엔진 전체 482 통과/47 skip/1 Windows 디렉터리 교체 실패; Parquet 읽기 핸들을 명시적으로 닫도록 보완 후 reader 22개 재통과. CI로 최종 확인.
+- 서버 응답 외곽 필드 이름은 리뷰 기반 잠정 계약이며 문서에 명시. F1 최종 규격·실서버 연결 검증은 대기. 실행 중인 8000·8001 서버는 재시작하지 않음.
+- 등록 요청: 다음 승인된 `/agents-md` 개정에서 HTTP 갱신 환경변수·news_snapshots 경로를 반영해야 함. AGENTS.md 직접 변경 없음.
+
+---
+
 ## 2026-10-14 KST (+09:00) — PEANUTBUTTER1001 AGENTS.md 개정 (#64~#77 병합분)
 
 - 승인 근거: `/agents-md` 제안 13개와 확인 질문 2개에 사용자 '권장안 진행', 이어 /git 전체 작업 선택으로 쓰기 승인. Q1 ② §6 예외 추가, Q2 ③ 유지(진입 cli.py의 forecast_store 생성은 범위 밖).
