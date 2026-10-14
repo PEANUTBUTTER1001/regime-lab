@@ -10,6 +10,7 @@ import { state } from './state.js';
 import { renderBriefing } from './views/briefing.js';
 import { renderArchive, renderArchivePage } from './views/archive.js';
 import { renderEvidence } from './views/evidence.js';
+import { renderForecast } from './views/forecast.js';
 import { renderInfluence } from './views/influence.js';
 import { renderLogin } from './views/login.js';
 import { renderPassword } from './views/password.js';
@@ -32,8 +33,7 @@ const NAV = [
   { id: 'evidence', group: 'docs', icon: '⌕', label: 'nav.evidence', href: () => '#/evidence' },
   { id: 'archive', group: 'docs', icon: '▤', label: 'nav.archive', href: () => '#/archive' },
   { id: 'influence', group: 'docs', icon: '◇', label: 'nav.influence', href: () => '#/influence' },
-  // 봉 예측 화면은 P2-10(Seonghwanaa) 범위 — 화면을 붙이면 soon 을 지우고 view 를 바꾼다
-  { id: 'forecast', group: 'market', icon: '◫', label: 'nav.forecast', href: () => '#/forecast', soon: true },
+  { id: 'forecast', group: 'market', icon: '◫', label: 'nav.forecast', href: () => '#/forecast' },
   { id: 'briefing', group: 'market', icon: '◌', label: 'nav.briefing', href: () => '#/briefing', soon: true },
 ];
 const NAV_BY_ID = Object.fromEntries(NAV.map((n) => [n.id, n]));
@@ -57,16 +57,10 @@ const ROUTES = [
   [/^#\/archive$/, () => ({ nav: 'archive', kind: 'alignr', view: renderArchive })],
   [/^#\/archive\/doc$/, () => ({ nav: 'archive', kind: 'alignr', view: renderArchivePage })],
   [/^#\/influence$/, () => ({ nav: 'influence', kind: 'two', view: renderInfluence })],
-  [/^#\/forecast$/, () => ({ nav: 'forecast', kind: 'page', view: renderSoon })],
+  [/^#\/forecast(?:\/([^/]+)\/([^/]+))?$/, (m) => ({ nav: 'forecast', kind: 'page', view: (el, q) => renderForecast(el, q, m[1] && decodeURIComponent(m[1]), m[2]) })],
   [/^#\/briefing$/, () => ({ nav: 'briefing', kind: 'page', view: renderBriefing })],
   [/^#\/settings$/, () => ({ nav: 'settings', kind: 'page', view: renderSettings })],
 ];
-
-// 내용이 아직 없는 메뉴 자리 (봉 예측 — P2-10)
-function renderSoon(el) {
-  el.append(h('div', { class: 'topline' }, h('div', {}, h('h1', { tabindex: '-1', text: t('nav.forecast') }))),
-    h('section', { class: 'state', role: 'status' }, h('h2', { text: t('soon.title') }), h('p', { text: t('soon.forecast') })));
-}
 
 // ---------------------------------------------------------------- 테마 (design.md §6.3)
 // 첫 테마는 index.html 머리 스크립트가 정한다. 고르면 저장하고, 저장값이 없으면 기기 설정을 따른다.
