@@ -18,6 +18,7 @@
 | `/health` | 서버와 DB 상태 (`SELECT 1`) | `{"ok": true}` · DB 실패 503 `{"ok": false, "detail": …}` |
 | `/tables` | 표 13개의 설명·종목 열·기간 열·필수 조건·열 목록 | JSON |
 | `/v1/{table}` | 표 조회 | JSON 또는 CSV |
+| `/v1/ext/snapshots/…` | 기사 메타데이터 스냅샷 조회 3개 (아래 "기사 메타데이터 스냅샷") | JSON |
 | `/guide` | 서버의 사용 가이드 원문 | text/plain |
 | `/docs`, `/redoc`, `/openapi.json` | FastAPI 자동 문서 (`/docs`·`/redoc` 은 화면 스크립트를 인터넷 CDN 에서 받음) | HTML / JSON |
 
@@ -67,6 +68,47 @@ date,ticker,open,high,low,close,volume,value
 
 본문은 `{"detail": ...}`. 400 필수 조건 누락·없는 열·형식 오류·종목 101개 이상·20만 행 초과, 403 허용 목록 밖 IP, 401 키 없음(인증을 켰을 때만), 422 없는 표·`format` 값 오류, 503 DB 오류, 504 쿼리 30초 초과.
 
+### 기사 메타데이터 스냅샷 (`/v1/ext/snapshots/…`, P3-11·공동 지시서 C3)
+
+수집 PC 가 서버 DB 의 기사 표 4개(`ext_document_*`, C3 v3)에 넣은 스냅샷을 팀원 PC 가 받아 검색용 로컬 Parquet 으로 만들 때 쓴다(받는 쪽 PR #81, `docs/P3_DB_검색_자동갱신.md`). 기사 표는 `/v1/{table}` 로는 열지 않고 이 경로로만 연다. `license_scope` 가 `metadata_only` 인 행만 내보낸다(제목·회사명 등 메타데이터, 본문·요약 없음).
+
+| 경로 | 응답 | 오류 |
+|---|---|---|
+| `/v1/ext/snapshots/latest?sources=n8n_news,n8n_disclosure` | `{"snapshot_id": "<64자리 소문자 hex>"}` | 404 완성된 스냅샷 없음, 400 `sources` 형식 오류, 422 `sources` 없음 |
+| `/v1/ext/snapshots/{snapshot_id}` | 출처별 manifest·멤버 수 (아래 예시) | 400 ID 형식(64자리 소문자 hex 아님), 404 없음 |
+| `/v1/ext/snapshots/{snapshot_id}/documents?source=<출처>&limit=1000[&after_doc_id=…&after_version=…]` | 문서 버전 한 쪽 (아래 예시) | 400 `limit` 이 1~1000 밖·`after_*` 하나만 있음, 404 스냅샷·출처 없음 |
+
+- **"완성된 최신" 기준:** 요청한 모든 출처의 manifest 가 있고, 출처마다 manifest 의 `document_versions` 가 그 스냅샷의 멤버 수와 같은 스냅샷 가운데 `imported_at_utc`(출처별 값 중 가장 늦은 것)가 가장 늦은 것. 같으면 `snapshot_id` 가 큰 것. 적재 중(멤버 수가 모자란) 스냅샷은 고르지 않는다.
+- **데이터 버전 식별:** `snapshot_id` 가 기사 자료의 버전이다. 같은 ID 면 같은 자료이므로 받는 쪽은 다시 받지 않는다. (주가 표에는 아직 이런 값이 없다 — §5)
+- **페이지:** 행은 `(doc_id, version)` 오름차순. 더 있으면 `next_cursor` 가 그 쪽 마지막 행의 `{"doc_id", "version"}` 이고, 다음 요청에 `after_doc_id`·`after_version` 으로 넘긴다. 마지막 쪽만 `null`. 같은 스냅샷 안에서는 멤버가 바뀌지 않아 쪽이 어긋나지 않는다.
+- **값 형식:** `manifest_json`·`arrow_schema_json`·`document_json` 은 DB 에 저장된 **원문 문자열 그대로**다(객체로 다시 인코딩하지 않음 — 받는 쪽이 `record_sha256` 으로 검증한다). 버전·개수는 정수, `first_seen_at_utc`·`available_at_utc` 는 UTC `YYYY-MM-DD HH:MM:SS.ffffff` 문자열.
+- 한도·인증·오류 형식은 위 표 조회와 같다(쿼리 30초, `{"detail"}`, §3 접근 조건).
+
+`/v1/ext/snapshots/{snapshot_id}` (값은 자리표시자)
+```json
+{
+  "snapshot_id": "<64자리 소문자 hex>",
+  "manifests": [
+    {"source": "n8n_disclosure", "manifest_json": "<원문 JSON 문자열>", "arrow_schema_json": "<원문 JSON 문자열>", "document_versions": 1, "coverage_state": "unknown", "coverage_rows": 0},
+    {"source": "n8n_news", "manifest_json": "<원문 JSON 문자열>", "arrow_schema_json": "<원문 JSON 문자열>", "document_versions": 1, "coverage_state": "unknown", "coverage_rows": 0}
+  ],
+  "member_counts": {"n8n_disclosure": 1, "n8n_news": 1},
+  "coverage_rows": 0
+}
+```
+
+`/v1/ext/snapshots/{snapshot_id}/documents?source=n8n_news&limit=1000`
+```json
+{
+  "snapshot_id": "<64자리 소문자 hex>",
+  "source": "n8n_news",
+  "rows": [{"doc_id": "n8n_news:example", "version": 1, "source": "n8n_news", "status": "active", "license_scope": "metadata_only",
+            "first_seen_at_utc": "2026-10-14 00:00:00.000000", "available_at_utc": "2026-10-14 00:00:00.000000",
+            "record_sha256": "<64자리 hex>", "document_json": "<원문 JSON 문자열>"}],
+  "next_cursor": {"doc_id": "n8n_news:example", "version": 1}
+}
+```
+
 ## 3. 접근 조건·인증
 
 - 서버가 허용한 PC 에서만 접속된다. 접속이 거부(403)되면 서버 담당(Seonghwanaa)에게 요청한다.
@@ -104,7 +146,7 @@ uv run --project engine python -c "from regime_lab.data.loader import input_file
 
 | 항목 | 상태 |
 |---|---|
-| 데이터 버전 식별값 | API 에 없음 — 동기화한 자료가 같은 것인지 판단 불가. 적재 기록을 API 로 읽는 경로 등은 별도 결정(서버 API 변경·재시작 동반) |
+| 데이터 버전 식별값 | 기사 스냅샷은 `snapshot_id` 로 해결(§2 기사 메타데이터 스냅샷). 주가 표는 API 에 없음 — 동기화한 자료가 같은 것인지 판단 불가. 적재 기록을 API 로 읽는 경로 등은 별도 결정(서버 API 변경·재시작 동반) |
 | 서버 운영·보안 | 서버 담당 비공개 운영 기록에서 관리 |
 | 1분봉 파티션 | 2026-11 까지 있음. 12월 데이터 전에 추가 필요(서버 관리자) |
 | 최신 데이터 | 일봉·지수 2026-09-18, 1분봉·지표 2026-09-17 (X4 수집·적재 뒤 갱신) |
