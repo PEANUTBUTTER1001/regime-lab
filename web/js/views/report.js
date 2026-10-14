@@ -4,7 +4,6 @@
 import { api } from '../api.js';
 import { errorView, fmt, h, loading, pill, table } from '../components/ui.js';
 import { has, t } from '../i18n.js';
-import { state } from '../state.js';
 
 function renderText(text) {
   const out = [];
@@ -21,51 +20,32 @@ function renderText(text) {
   return out;
 }
 
-export async function renderReport(el, runId, query) {
-  state.lastRun = runId;
-  el.append(h('h1', { text: t('rep.title') }), loading(t('rep.loading')));
-  let res;
+// 작업면 오른쪽 열 안의 AI 보고서 (design.md §8.2). strategy 는 결과 응답의 전략 이름
+export async function renderReportInto(el, runId, strategy) {
+  el.append(loading(t('rep.loading')));
   let rep;
-  try {
-    res = await api.result(runId);
-    const names = res.strategies.map((s) => s.strategy);
-    const cur = names.includes(query.get('strategy')) ? query.get('strategy') : names[0];
-    rep = await api.report(runId, cur);
-  } catch (e) {
-    el.replaceChildren(h('h1', { text: t('rep.title') }), errorView(e, { onRetry: () => { el.replaceChildren(); renderReport(el, runId, query); },
+  try { rep = await api.report(runId, strategy); } catch (e) {
+    el.replaceChildren(errorView(e, { onRetry: () => { el.replaceChildren(); renderReportInto(el, runId, strategy); },
       backHref: `#/runs/${runId}/results`, backText: t('common.backResults') }));
     return;
   }
   el.replaceChildren();
-  const names = res.strategies.map((s) => s.strategy);
   const f = rep.facts;
   const verified = rep.status === 'verified';
-
-  el.append(h('div', { class: 'topline' },
-    h('div', {}, h('div', { class: 'eyebrow' }, t('rep.eyebrow', { id: runId, s: rep.strategy })), h('h1', { text: t('rep.title') }),
-      h('p', { class: 'lead', text: t('rep.lead') })),
-    verified ? pill(t('rep.verified')) : pill(t('rep.template'), 'warn')));
-
-  if (names.length > 1) {
-    el.append(h('div', { class: 'tabs', role: 'group', 'aria-label': t('common.strategyTabs') },
-      names.map((n) => h('a', { class: 'tab', href: `#/runs/${runId}/report?strategy=${encodeURIComponent(n)}`, 'aria-pressed': String(n === rep.strategy) }, n))));
-  }
-
+  el.append(h('div', { class: 'filterbar' }, verified ? pill(t('rep.verified')) : pill(t('rep.template'), 'warn'),
+    h('span', {}, verified ? `${rep.provider} · ${rep.model}${rep.cached ? t('rep.cached') : ''}` : t('rep.deterministic'))));
   if (!verified) {
-    el.append(h('div', { class: 'callout', role: 'note', style: { marginBottom: '18px' } },
+    el.append(h('div', { style: { padding: '12px 16px 0' } }, h('div', { class: 'callout', role: 'note' },
       h('b', {}, t('rep.fallback')), has(`rr.${rep.reason}`) ? t(`rr.${rep.reason}`) : rep.reason,
-      rep.warnings?.length ? h('span', {}, t('rep.details', { d: rep.warnings.join(' / ') })) : null));
+      rep.warnings?.length ? h('span', {}, t('rep.details', { d: rep.warnings.join(' / ') })) : null)));
   }
-
-  el.append(h('article', { class: 'card report', lang: 'ko' },
-    h('div', { class: 'eyebrow' }, verified ? `${rep.provider} · ${rep.model}${rep.cached ? t('rep.cached') : ''}` : t('rep.deterministic')),
-    renderText(rep.text)));
+  el.append(h('article', { class: 'card report', lang: 'ko' }, h('p', { class: 'hint', text: t('rep.lead') }), renderText(rep.text)));
 
   const m = f.metrics;
   const v = f.validation;
   const judgement = has(`j.${v.split_judgement}`) ? t(`j.${v.split_judgement}`) : v.split_judgement;
-  el.append(h('div', { class: 'grid-two', style: { marginTop: '18px' } },
-    h('article', { class: 'card' }, h('h2', {}, t('rep.evidence')),
+  el.append(
+    h('section', { class: 'card' }, h('h2', {}, t('rep.evidence')),
       h('p', { class: 'card-sub', text: t('rep.evidenceSub') }),
       table({ columns: [{ label: t('common.item'), key: 'k' }, { label: t('common.value'), key: 'v', num: true }], rows: [
         { k: t('r.m.trades'), v: fmt.int(m.trades) }, { k: t('r.m.win'), v: `${m.win_rate_pct ?? '—'}%` },
@@ -74,10 +54,8 @@ export async function renderReport(el, runId, query) {
         { k: t('rep.pvalue', { m: v.fdr_family_size }), v: v.p_value ?? '—' }, { k: t('r.m.random'), v: v.random_percentile ?? '—' },
         { k: t('r.split'), v: judgement }, { k: t('rep.target'), v: v.analysis_target ? t('common.yes') : t('common.no') },
       ] })),
-    h('article', { class: 'card' }, h('h2', {}, t('rep.status')),
+    h('section', { class: 'card' }, h('h2', {}, t('rep.status')),
       h('p', { class: 'card-sub', text: t('rep.statusSub', { d: f.data_as_of, i: f.cells.insufficient_cells, t: f.cells.total_cells, n: fmt.int(f.cells.min_cell_trades) }) }),
-      h('ul', { lang: 'ko', class: 'muted', style: { fontSize: '13px', lineHeight: '1.7', paddingLeft: '18px' } }, f.limitations.map((x) => h('li', {}, x))),
-      h('div', { class: 'callout', style: { marginTop: '12px' } }, t('rep.aiLimits')),
-      h('div', { class: 'actions', style: { justifyContent: 'flex-start' } },
-        h('a', { class: 'secondary', href: `#/runs/${runId}/results${names.length > 1 ? `?strategy=${encodeURIComponent(rep.strategy)}` : ''}` }, t('common.backResults'))))));
+      h('ul', { lang: 'ko', class: 'muted', style: { lineHeight: '1.7', paddingLeft: '18px', margin: 0 } }, f.limitations.map((x) => h('li', {}, x))),
+      h('div', { class: 'callout', style: { marginTop: '10px' } }, t('rep.aiLimits'))));
 }

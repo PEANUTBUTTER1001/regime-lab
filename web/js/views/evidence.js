@@ -3,7 +3,9 @@
 // 검색 조건은 주소(#/evidence?q=…)에 남겨 새로고침·뒤로 가기에도 같은 결과를 다시 연다.
 import { api } from '../api.js';
 import { errorView, fmt, h, helpTip, loading, pill, stateView, table } from '../components/ui.js';
+import { paneFrame, paneHead } from '../components/workspace.js';
 import { has, t } from '../i18n.js';
+import { renderArchiveDoc } from './archive.js';
 
 const MODES = ['observed', 'historical_assumed'];
 const KS = [5, 10, 20];
@@ -15,10 +17,25 @@ const toIso = (local) => (local ? `${local}:00${KST}` : '');
 const toLocal = (iso) => (iso ? iso.slice(0, 16) : '');
 // 표시는 모두 KST로 맞춘다 (게시 시각은 UTC로 오는 출처가 있다). 날짜만 있는 값은 그대로 둔다
 const KST_FMT = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-const when = (iso) => (!iso ? '—' : iso.length === 10 ? iso : KST_FMT.format(new Date(iso)));
-const srcLabel = (s) => (has(`ev.src.${s}`) ? t(`ev.src.${s}`) : s);
+export const when = (iso) => (!iso ? '—' : iso.length === 10 ? iso : KST_FMT.format(new Date(iso)));
+export const srcLabel = (s) => (has(`ev.src.${s}`) ? t(`ev.src.${s}`) : s);
 
-export async function renderEvidence(el, query) {
+// 2열 (design.md §8.5): 왼쪽 검색 조건·결과 목록, 오른쪽 자료 상세. 오른쪽 열 폭은 작업면 오른쪽 열과 같은 --col3
+export async function renderEvidence(root, query) {
+  const frame = paneFrame({ cols: [{ label: t('ws.col.search') }, { label: t('ws.col.detail') }], cls: 'ws2r', splits: [['c3', t('ws.split.detail')]], current: 0 });
+  root.append(frame.root);
+  const [left, right] = frame.panes;
+  const el = h('div', { class: 'pane-body' });
+  const detail = h('div', { class: 'pane-body' });
+  left.append(paneHead(t('ev.title')), el);
+  right.append(paneHead(t('ar.docTitle')), detail);
+  detail.append(stateView({ title: t('ws.detailPickTitle'), message: t('ws.detailPick') }));
+  const openDoc = (r, asOf, mode) => {
+    detail.replaceChildren();
+    renderArchiveDoc(detail, new URLSearchParams({ id: r.doc_id, as_of: asOf, mode }), { embedded: true });
+    frame.select(1);
+    detail.scrollTop = 0;
+  };
   const f = {
     q: query.get('q') || '',
     asOf: toLocal(query.get('as_of')) || nowKst(),
@@ -69,7 +86,7 @@ export async function renderEvidence(el, query) {
     const p = new URLSearchParams({ q: f.q.trim(), as_of: toIso(f.asOf), mode: f.mode, k: String(f.k) });
     if (f.tickers.trim()) p.set('tickers', f.tickers.replace(/\s/g, ''));
     const next = `#/evidence?${p}`;
-    if (location.hash === next) { el.replaceChildren(); renderEvidence(el, p); } else location.hash = next;
+    if (location.hash === next) { root.replaceChildren(); renderEvidence(root, p); } else location.hash = next;
   });
 
   const resultBox = h('div', { 'aria-live': 'polite' });
@@ -95,7 +112,7 @@ export async function renderEvidence(el, query) {
         detail: err.detail?.error ? String(err.detail.error) : t('common.code', { c: err.code }) }));
       return;
     }
-    resultBox.append(errorView(err, { onRetry: () => { el.replaceChildren(); renderEvidence(el, query); }, backHref: '#/evidence', backText: t('ev.reset') }));
+    resultBox.append(errorView(err, { onRetry: () => { root.replaceChildren(); renderEvidence(root, query); }, backHref: '#/evidence', backText: t('ev.reset') }));
     return;
   }
   resultBox.replaceChildren();
@@ -124,5 +141,7 @@ export async function renderEvidence(el, query) {
   ];
   // 비권유 고지는 모든 화면 하단의 고정 고지(화면 언어)로 표시한다
   resultBox.append(summary,
-    h('article', { class: 'card' }, table({ caption: t('ev.caption', { n: res.items.length }), columns, rows: res.items })));
+    h('article', { class: 'card', style: { padding: 0 } }, table({ caption: t('ev.caption', { n: res.items.length }), columns, rows: res.items,
+      onRow: (r) => openDoc(r, ix.as_of, ix.mode) })),
+    h('p', { class: 'hint', text: t('ws.detailRowHint') }));
 }

@@ -108,16 +108,23 @@ export function toBody(f, meta = state.meta) {
   };
 }
 
-export async function renderBuilder(el, query = new URLSearchParams()) {
+// 조건 열 (UI 개혁 B안, design.md §8.1): 작업면 왼쪽 열 안에 머리(제목) · 본문(구획 4개) · 바닥(요약·실행)으로 그린다.
+// opts.onSubmitted(runId): 실행 요청이 접수되면 작업면이 가운데 열에서 진행을 보인다 (주소 이동 없음)
+export async function renderBuilder(pane, query = new URLSearchParams(), opts = {}) {
+  const head = h('div', { class: 'pane-head' }, h('div', { class: 'ptitle' }, opts.title || t('b.title')),
+    h('div', { class: 'aside' }, h('a', { class: 'link-btn', href: '#/presets' }, t('nav.presets'))));
+  const el = h('div', { class: 'pane-body', id: 'builder-body' });
+  const foot = h('div', { class: 'pane-foot', id: 'builder-foot' });
+  pane.replaceChildren(head, el);
   let meta = state.meta;
   if (!meta || meta.status !== 'ready') {
-    el.append(h('h1', { text: t('b.title') }), loading(t('b.loadingData')));
+    el.append(loading(t('b.loadingData')));
     try { meta = await api.meta(); state.meta = meta; } catch (e) {
-      el.replaceChildren(h('h1', { text: t('b.title') }), errorView(e, { onRetry: () => { el.replaceChildren(); renderBuilder(el, query); } }));
+      el.replaceChildren(errorView(e, { onRetry: () => renderBuilder(pane, query, opts) }));
       return;
     }
     if (meta.status !== 'ready') {
-      const tm = setTimeout(() => { el.replaceChildren(); renderBuilder(el, query); }, 2000);
+      const tm = setTimeout(() => renderBuilder(pane, query, opts), 2000);
       return () => clearTimeout(tm);
     }
     el.replaceChildren();
@@ -135,7 +142,7 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     } catch (e) {
       toast(`${has(`err.${e.code}`) ? t(`err.${e.code}`) : e.message} (${e.code})`);
     }
-    history.replaceState(null, '', '#/builder');
+    history.replaceState(null, '', location.hash.split('?')[0]);
   }
   const f = { ...defaults(meta), ...(state.draft || {}) };
   const errs = {};
@@ -170,7 +177,7 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     const box = h('input', { type: 'checkbox', checked: f.patterns.includes(p.name), 'aria-label': patLabel(p), 'aria-describedby': described('patterns') });
     const rule = meta.pattern_params?.[p.name] ? t('pp.baseRule', { r: patRule(p) }) : patRule(p);
     const lab = h('label', { class: `check${f.patterns.includes(p.name) ? ' selected' : ''}` }, box,
-      h('span', {}, patLabel(p), has(`pd.${p.name}`) && h('small', {}, t(`pd.${p.name}`)), h('small', { class: 'rule-text' }, rule)));
+      h('span', {}, patLabel(p), has(`pd.${p.name}`) && h('small', { class: 'pd-text' }, t(`pd.${p.name}`)), h('small', { class: 'rule-text' }, rule)));
     box.addEventListener('change', () => {
       f.patterns = meta.patterns.map((q) => q.name).filter((n) => (n === p.name ? box.checked : f.patterns.includes(n)));
       lab.classList.toggle('selected', box.checked); renderPP(); save();
@@ -181,10 +188,10 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
   const rulesBtn = h('button', { type: 'button', class: 'secondary small', 'aria-pressed': 'false',
     onclick: () => { const on = rulesBtn.getAttribute('aria-pressed') !== 'true'; rulesBtn.setAttribute('aria-pressed', String(on)); patternList.classList.toggle('show-rules', on); } }, t('b.showRules'));
   // 3단계 흐름 (E18 2차): 언제 살까 → 언제 팔까 → 무엇을, 언제. 카드 대신 한 바탕 위에 구분선으로 나눈다
-  const step = (n, title, sub, ...children) => h('section', { class: 'flow-step', 'aria-labelledby': `flow-step-${n}` },
-    h('h2', { id: `flow-step-${n}` }, h('span', { class: 'step-no', 'aria-hidden': 'true' }, String(n)), title, h('small', {}, sub)), ...children);
+  const step = (n, title, sub, ...children) => h('section', { class: 'sec', 'aria-labelledby': `flow-step-${n}` },
+    h('div', { class: 'sec-h' }, h('h2', { id: `flow-step-${n}` }, h('span', { class: 'no', 'aria-hidden': 'true' }, String(n)), title), h('span', { class: 'aside' }, sub)), ...children);
   const buyStep = step(1, t('b.step1'), t('b.buy'),
-    h('p', { class: 'card-sub', text: t('b.buySub') }),
+    h('p', { class: 'hint', text: t('b.buySub') }),
     h('div', { class: 'label-row' }, h('span', { class: 'label' }, t('b.logic')), helpTip(t('help.combine'), t('b.logic'))), seg,
     h('div', { class: 'pattern-head' }, h('span', { class: 'label' }, t('b.patterns')), rulesBtn),
     patternList, errorSlot('patterns'), ppBox);
@@ -206,7 +213,7 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
   };
   const lim = meta.exit_limits;
   const exitStep = step(2, t('b.step2'), t('b.exit'),
-    h('p', { class: 'card-sub', text: t('b.exitSub') }),
+    h('p', { class: 'hint', text: t('b.exitSub') }),
     h('div', { class: 'field-two' },
       h('div', {}, h('label', { for: 'stop' }, t('b.stop')), stopIn, useToggle('useStop', stopIn, t('b.stopWord')),
         h('p', { class: 'hint', text: `${lim.stop_loss_pct[0]} ~ ${lim.stop_loss_pct[1]}` }), errorSlot('exit.stop_loss_pct')),
@@ -226,7 +233,7 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
       h('div', { class: 'field-two' },
         h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'maWin' }, t('b.maExit')), helpTip(t('help.maExit'), t('b.maWord'))), maIn, useToggle('useMa', maIn, t('b.maWord')),
           h('p', { class: 'hint', text: t('b.maHint', { a: lim.ma_exit_window[0], b: lim.ma_exit_window[1] }) }), errorSlot('exit.ma_exit_window'))),
-      h('div', { class: 'callout info', style: { margin: '16px 0' } }, t('b.exitCallout'))));
+      h('p', { class: 'hint', style: { margin: '6px 0 10px' } }, t('b.exitCallout'))));
 
   // ---------------------------------------------------------------- Universe & period
   const multi = (key, options, labelOf, groupLabel) => h('div', { class: 'inline-checks', role: 'group', 'aria-label': groupLabel },
@@ -242,7 +249,7 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     oninput: (e) => { f.minValue = e.target.value.replace(/[,\s]/g, ''); save(true); } });
   const previewBox = h('div', { class: 'callout', style: { marginTop: '18px' }, 'aria-live': 'polite' }, t('b.estimating'));
   const uniStep = step(3, t('b.step3'), t('b.uni'),
-    h('p', { class: 'card-sub', text: t('b.uniSub') }),
+    h('p', { class: 'hint', text: t('b.uniSub') }),
     h('span', { class: 'label' }, t('b.market')), multi('markets', meta.markets, (m) => m, t('b.market')), errorSlot('markets'),
     h('div', { class: 'field-two' },
       h('div', {}, h('label', { for: 'start' }, t('b.start')), dateIn('start', 'start'), errorSlot('period.start')),
@@ -252,17 +259,15 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     h('p', { class: 'hint', text: t('b.valueHint', { v: fmt.int(meta.min_avg_value_krw) }) }), errorSlot('min_avg_value_krw'),
     h('div', { class: 'label-row' }, h('span', { class: 'label' }, t('b.cap')), helpTip(t('help.cap'), t('b.cap'))), multi('caps', meta.cap_groups, (c) => t(`cap.${c}`), t('b.cap')), errorSlot('cap_groups'));
 
-  // ---------------------------------------------------------------- Run bar
-  const nameIn = h('input', { id: 'sname', value: f.name, style: { maxWidth: '260px' }, 'aria-describedby': described('name'),
+  // ---------------------------------------------------------------- 전략 이름 · 실행 (바닥 고정)
+  const nameIn = h('input', { id: 'sname', value: f.name, 'aria-describedby': described('name'),
     oninput: (e) => { f.name = e.target.value.trim(); save(); } });
-  const runBtn = h('button', { class: 'primary', type: 'button' }, `${t('b.run')} `, h('span', { 'aria-hidden': 'true' }, '→'));
-  const runbar = h('div', { class: 'runbar' },
-    h('div', {}, h('label', { for: 'sname', style: { margin: '0 0 4px' } }, t('b.name')), nameIn, errorSlot('name'),
-      h('div', { class: 'run-facts' },
-        h('span', {}, h('b', {}, t('b.execution')), t('b.nextOpen')),
-        h('span', {}, h('b', {}, t('b.cost')), `${cost}%`),
-        h('span', { class: 'with-tip' }, h('b', {}, t('b.validation')), t('b.validationVal'), helpTip(t('help.validation'), t('b.validation'), { up: true })))),
-    runBtn);
+  const runBtn = h('button', { class: 'primary', type: 'button', style: { width: '100%' } }, t('b.run'), h('kbd', { 'aria-hidden': 'true' }, 'Ctrl+Enter'));
+  const runFacts = h('div', { class: 'run-facts' },
+    h('span', {}, h('b', {}, t('b.execution')), t('b.nextOpen')),
+    h('span', {}, h('b', {}, t('b.cost')), `${cost}%`),
+    h('span', { class: 'with-tip' }, h('b', {}, t('b.validation')), t('b.validationVal'), helpTip(t('help.validation'), t('b.validation'), { up: true })));
+  const errCount = h('p', { class: 'field-error hidden', 'aria-live': 'polite' });
 
   // ---------------------------------------------------------------- 저장한 조합 (P1-10)
   const presetStatus = h('p', { class: 'card-sub', 'aria-live': 'polite' });
@@ -303,16 +308,11 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
   }
   saveNewBtn.addEventListener('click', () => savePreset(false));
   overwriteBtn.addEventListener('click', () => savePreset(true));
-  const presetBlock = h('div', { class: 'sum-preset' }, h('h3', {}, t('pb.title')), presetStatus,
-    h('label', { for: 'pname' }, t('pb.name')), presetName, presetErr,
-    h('div', { class: 'actions' }, saveNewBtn, overwriteBtn,
-      h('a', { class: 'secondary', href: '#/presets' }, t('pb.list'))));
 
-  // ---------------------------------------------------------------- 내 전략 요약 (E18 2차)
-  // 입력값을 문장으로 옮겨 적기만 한다 (계산·판단 없음)
-  const sumBuy = h('dd', {});
-  const sumSell = h('dd', {});
-  const sumScope = h('dd', {});
+  // ---------------------------------------------------------------- 바닥 요약 (E18 2차): 입력값을 문장으로 옮겨 적기만 한다 (계산·판단 없음)
+  const sumBuy = h('div', { class: 'line' });
+  const sumSell = h('div', { class: 'line dim' });
+  const sumScope = h('div', { class: 'line dim' });
   function renderSummary() {
     const names = meta.patterns.filter((p) => f.patterns.includes(p.name)).map(patLabel);
     sumBuy.textContent = names.length ? t(f.combine === 'and' ? 'b.sumAnd' : 'b.sumOr', { p: names.join(', ') }) : t('b.sumNoPattern');
@@ -325,18 +325,17 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     if (f.useMa) sell.push(t('r.exMa', { v: f.maWin }));
     sumSell.textContent = sell.join(' · ');
     sumScope.textContent = [f.markets.join(' + ') || '—', f.caps.map((c) => t(`cap.${c}`)).join(', ') || '—', `${f.start} ~ ${f.end}`].join(' · ');
+    sumBuy.title = sumBuy.textContent; sumSell.title = sumSell.textContent; sumScope.title = sumScope.textContent;
   }
-  const summary = h('aside', { class: 'builder-summary', 'aria-labelledby': 'builder-summary-title' },
-    h('h2', { id: 'builder-summary-title' }, t('b.sumTitle')),
-    h('dl', { class: 'sum-list' }, h('dt', {}, t('b.sumBuy')), sumBuy, h('dt', {}, t('b.sumSell')), sumSell, h('dt', {}, t('b.sumScope')), sumScope),
-    previewBox, presetBlock);
-
-  el.append(
-    h('div', { class: 'topline' },
-      h('div', {}, h('div', { class: 'eyebrow' }, t('b.eyebrow')), h('h1', { text: t('b.title') }),
-        h('p', { class: 'lead', text: t('b.lead') })),
-      h('div', { class: 'notice' }, t('b.notice', { c: cost, d: meta.data_as_of }))),
-    h('div', { class: 'builder-layout' }, h('div', { class: 'flow' }, buyStep, exitStep, uniStep), summary), runbar);
+  previewBox.className = 'line dim';
+  previewBox.removeAttribute('style');
+  const nameStep = step(4, t('b.name'), t('pb.title'),
+    nameIn, errorSlot('name'),
+    h('div', { class: 'sum-preset' }, presetStatus, h('label', { for: 'pname' }, t('pb.name')), presetName, presetErr,
+      h('div', { class: 'actions' }, saveNewBtn, overwriteBtn)));
+  el.append(buyStep, exitStep, uniStep, nameStep);
+  foot.append(h('div', { class: 'run-sum', role: 'group', 'aria-label': t('b.sumTitle') }, sumBuy, sumSell, sumScope, previewBox), errCount, runBtn, runFacts);
+  pane.append(foot);
 
   // ---------------------------------------------------------------- behaviour
   let previewTimer;
@@ -360,17 +359,23 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     try {
       const p = await api.preview({ markets: f.markets, period: { start: f.start, end: f.end }, min_avg_value_krw: Number(f.minValue), cap_groups: f.caps });
       if (seq !== previewSeq) return;
-      previewBox.replaceChildren(h('b', {}, t('b.estimate', { n: fmt.int(p.eligible_tickers) })),
-        h('br'), h('small', { class: 'muted' }, t('b.estimateSub', { a: fmt.int(Math.round(p.avg_tickers_per_day)), d: fmt.int(p.trading_days) })));
+      previewBox.replaceChildren(h('b', {}, t('b.estimate', { n: fmt.int(p.eligible_tickers) })), ' · ',
+        t('b.estimateSub', { a: fmt.int(Math.round(p.avg_tickers_per_day)), d: fmt.int(p.trading_days) }));
+      previewBox.title = previewBox.textContent;
     } catch (err) {
       if (seq === previewSeq) previewBox.textContent = t('b.estimateErr', { m: err.message });
     }
+  }
+  function showCount(e) {
+    const n = Object.keys(e).length;
+    errCount.textContent = n ? t('b.checkFields', { n }) : '';
+    errCount.classList.toggle('hidden', !n);
   }
   function save(universeChanged = false) {
     state.draft = { ...f };
     renderPresetStatus();
     renderSummary();
-    if (Object.keys(errs).length) showErrors(validate(f, meta));
+    if (Object.keys(errs).length) { const e = validate(f, meta); showErrors(e); showCount(e); }
     if (universeChanged) { clearTimeout(previewTimer); previewTimer = setTimeout(refreshPreview, 350); }
   }
 
@@ -379,6 +384,7 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     Object.keys(errs).forEach((k) => delete errs[k]);
     Object.assign(errs, e);
     showErrors(e);
+    showCount(e);
     if (Object.keys(e).length) {
       toast(t('b.checkFields', { n: Object.keys(e).length }));
       el.querySelector('.field-error:not(.hidden)')?.scrollIntoView({ block: 'center' });
@@ -389,7 +395,8 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     try {
       const r = await api.submit([toBody(f)]);
       state.lastRun = r.run_id;
-      location.hash = `#/runs/${r.run_id}/progress`;
+      runBtn.disabled = false;
+      if (opts.onSubmitted) opts.onSubmitted(r.run_id); else location.hash = `#/runs/${r.run_id}/progress`;
     } catch (err) {
       runBtn.disabled = false;
       if (err.code === 'validation_failed' && err.detail?.fields) {
@@ -409,8 +416,11 @@ export async function renderBuilder(el, query = new URLSearchParams()) {
     }
   });
 
+  // Ctrl+Enter (macOS ⌘+Enter) 로 실행 (design.md §6.5)
+  const onKey = (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && pane.isConnected && !runBtn.disabled) { e.preventDefault(); runBtn.click(); } };
+  document.addEventListener('keydown', onKey);
   renderPresetStatus();
   renderSummary();
   refreshPreview();
-  return () => clearTimeout(previewTimer);
+  return () => { clearTimeout(previewTimer); document.removeEventListener('keydown', onKey); };
 }

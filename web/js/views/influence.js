@@ -3,8 +3,9 @@
 // (/api/influence/*)이 하고, 화면은 조건을 넘기고 응답을 표시만 한다 (FR-X6).
 // 결과 없음은 네 가지를 서로 다르게 보인다: 학습 결과 없음 · 사건 없음 · 수집 공백 · 데이터 없음 (FR-N4).
 import { api } from '../api.js';
-import { lines } from '../charts.js';
+import { influence } from '../charts.js';
 import { errorView, fmt, h, helpTip, loading, pill, stateView, table } from '../components/ui.js';
+import { paneFrame, paneHead, paneTabs } from '../components/workspace.js';
 import { has, t } from '../i18n.js';
 
 const MODES = ['', 'observed', 'historical_assumed'];  // '' = 모델의 학습 기준을 따름
@@ -104,15 +105,33 @@ function eventsSection(res, f) {
       rows: res.events,
     }));
   }
+  // 차트에는 연결 봉과 그날 종가가 있고 학습·검증·평가 구간인 사건만 점으로 찍는다. 연결 봉 없음·기간 밖(outside)은 표에만 남긴다.
+  // 화면 읽기용 설명의 구간별 건수는 실제로 찍은 점 수와 같다.
   const draw = () => {
     if (!chartEl) return;
-    lines(chartEl, [{ name: t('c.close'), data: res.bars.map((b) => [b.date, b.close]) }],
-      { ariaLabel: t('inf.e.chartAria', { t: res.ticker, s: res.bars[0].date, e: res.bars.at(-1).date, n: fmt.int(res.events.length) }), yName: t('c.price') });
+    const points = { train: [], valid: [], test: [] };
+    for (const e of res.events) {
+      if (e.linked_bar_start && e.close != null && points[e.period]) {
+        points[e.period].push({ date: e.linked_bar_start.slice(0, 10), close: e.close, title: e.title || e.doc_id, group: e.group, contribution: e.contribution });
+      }
+    }
+    const n = (k) => fmt.int(points[k].length);
+    influence(chartEl, { bars: res.bars, points }, t('inf.e.chartAria', { t: res.ticker, s: res.bars[0].date, e: res.bars.at(-1).date,
+      n: fmt.int(points.train.length + points.valid.length + points.test.length), a: n('train'), b: n('valid'), c: n('test') }));
   };
   return { nodes: out, draw };
 }
 
-export async function renderInfluence(el, query) {
+// 2열 (design.md §8.5, 10-13 hongsungmin0315 승인): 왼쪽 조건·모델 정보(--col1), 오른쪽 [가중치 | 사건·차트] 탭. 조회 로직은 그대로다.
+export async function renderInfluence(root, query) {
+  const frame = paneFrame({ cols: [{ label: t('ws.col.cond') }, { label: t('ws.col.analysis') }], cls: 'ws2l', splits: [['c1', t('ws.split.c1')]], current: 0 });
+  root.append(frame.root);
+  const [left, right] = frame.panes;
+  const el = h('div', { class: 'pane-body' });
+  const rhead = h('div', { class: 'pane-head' });
+  const rbody = h('div', { class: 'pane-body' });
+  left.append(paneHead(t('inf.title')), el);
+  right.append(rhead, rbody);
   const f = {
     asOf: toLocal(query.get('as_of')) || nowKst(),
     ticker: query.get('ticker') || '',
@@ -146,7 +165,7 @@ export async function renderInfluence(el, query) {
     const add = (k, v) => { if (v) p.set(k, v); };
     add('ticker', f.ticker.trim()); add('from', f.start); add('to', f.end); add('mode', f.mode);
     const next = `#/influence?${p}`;
-    if (location.hash === next) { el.replaceChildren(); renderInfluence(el, p); } else location.hash = next;
+    if (location.hash === next) { root.replaceChildren(); renderInfluence(root, p); } else location.hash = next;
   };
   const field = (id, key, label, hint, tip) => h('div', {},
     tip ? h('div', { class: 'label-row' }, h('label', { for: id }, label), helpTip(tip, label)) : h('label', { for: id }, label),
@@ -160,8 +179,10 @@ export async function renderInfluence(el, query) {
       h('button', { class: 'primary', type: 'submit' }, `${t('inf.run')} `, h('span', { 'aria-hidden': 'true' }, '→'))));
   form.addEventListener('submit', (e) => { e.preventDefault(); go(); });
 
-  // 결과 카드 사이 간격 (보관함 상세 .ar-doc 과 같은 14px). 공용 CSS 를 늘리지 않으려고 인라인으로 둔다
-  const box = h('div', { 'aria-live': 'polite', style: { display: 'grid', gap: '14px', marginTop: '14px' } });
+  // 왼쪽 아래: 모델 정보. 오른쪽: 결과 탭 (모델이 없거나 오류면 탭 없이 상태만)
+  const box = h('div', { 'aria-live': 'polite' });
+  const single = (title, node) => { rhead.replaceChildren(h('div', { class: 'ptitle' }, title)); rbody.replaceChildren(node); };
+  single(t('ws.col.analysis'), loading(t('inf.loading')));
   el.append(
     h('div', { class: 'topline' },
       h('div', {}, h('div', { class: 'eyebrow' }, t('inf.eyebrow')), h('h1', { text: t('inf.title') }), h('p', { class: 'lead', text: t('inf.lead') })),
@@ -175,27 +196,34 @@ export async function renderInfluence(el, query) {
     if (err.code === 'data_unavailable') return unavailable(err);
     return errorView(err, { onRetry: retry, backHref: '#/influence', backText: t('inf.reset') });
   };
-  const retry = () => { el.replaceChildren(); renderInfluence(el, query); };
+  const retry = () => { root.replaceChildren(); renderInfluence(root, query); };
 
-  box.append(loading(t('inf.loading')));
   let w;
   try {
     w = await api.influenceWeights({ as_of: asOf });
   } catch (err) {
-    box.replaceChildren(...[fail(err, retry)].filter(Boolean));
+    const node = fail(err, retry);
+    single(t('ws.col.analysis'), node || h('p', { class: 'muted', style: { padding: '14px 16px' }, text: t('inf.fixFields') }));
     return;
   }
-  box.replaceChildren();
   if (w.status === 'no_model') {
-    box.append(stateView({ kind: 'info', title: t('inf.noModelTitle'), message: t('inf.noModelMsg') }));
+    single(t('ws.col.analysis'), stateView({ kind: 'info', title: t('inf.noModelTitle'), message: t('inf.noModelMsg') }));
     return;
   }
-  box.append(modelCard(w.model),
-    h('article', { class: 'card' }, h('h2', {}, t('inf.w.title')),
-      h('p', { class: 'notice', text: t('inf.fixedNotice') }), baselineLine(w.baseline), weightsTable(w)));
-
+  box.append(modelCard(w.model));
+  const wBox = h('div', {}, h('article', { class: 'card' }, h('h2', {}, t('inf.w.title')),
+    h('p', { class: 'notice', text: t('inf.fixedNotice') }), baselineLine(w.baseline), weightsTable(w)));
   const evBox = h('article', { class: 'card' }, h('h2', {}, t('inf.e.title')));
-  box.append(evBox);
+  const eBox = h('div', {}, evBox);
+  let tab = f.ticker.trim() ? 'e' : 'w';
+  let drawn = null; // 사건 차트는 탭이 보일 때 그린다 (숨은 칸에서는 크기가 0)
+  const showTab = (k) => {
+    tab = k;
+    rhead.replaceChildren(paneTabs([['w', t('inf.tab.weights')], ['e', t('inf.tab.events')]], tab, (x) => { showTab(x); rhead.querySelector('[aria-selected="true"]')?.focus(); }, t('ws.col.analysis')));
+    rbody.replaceChildren(tab === 'w' ? wBox : eBox);
+    if (tab === 'e' && drawn) { drawn(); drawn = null; }
+  };
+  showTab(tab);
   if (!f.ticker.trim()) { evBox.append(h('p', { class: 'muted', text: t('inf.e.needTicker') })); return; }
   evBox.append(loading(t('inf.e.loading')));
   const params = { as_of: asOf, ticker: f.ticker.trim() };
@@ -212,5 +240,5 @@ export async function renderInfluence(el, query) {
   const { nodes, draw } = eventsSection(res, f);
   evBox.replaceChildren(h('h2', {}, t('inf.e.title')),
     h('p', { class: 'card-sub', text: t('inf.e.sub', { t: res.ticker, m: t(`ev.mode.${res.mode}`), b: res.last_bar || '—' }) }), ...nodes);
-  draw();
+  if (tab === 'e') draw(); else drawn = draw;
 }
