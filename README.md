@@ -91,6 +91,24 @@ uv run --project engine --with finance-datareader python engine/scripts/fetch_in
 uv run --project engine regime-lab prepare
 ```
 
+### 데이터 서버에서 받기 (원본 파일이 없는 PC)
+
+팀 데이터 서버의 조회 API 에서 시세 원본을 받아 위 `data` 와 같은 형식으로 저장합니다(F1). 서버 주소는 담당자(Seonghwanaa)에게 직접 받고, 저장소·채팅에 적지 않습니다. 이 PC 의 IP 가 서버 허용 목록에 있어야 합니다. 자세한 내용은 [`docs/F1_데이터_서버_API.md`](docs/F1_데이터_서버_API.md).
+
+1. 서버 주소를 이 터미널에만 넣습니다(서버가 인증을 켰다면 `REGIME_DATA_API_TOKEN` 도).
+
+```powershell
+$env:REGIME_DATA_API_URL = "http://<서버주소>:<포트>"
+```
+
+2. 새 폴더로 받습니다. 원본이 없는 PC 는 `--no-compare` 와 sample30 종목(`--sample-tickers`, 담당자에게 받음)을 줍니다. 원본이 있는 PC 는 두 옵션 없이 실행하면 기존 원본과 겹치는 기간을 대조해 같을 때만 저장합니다. 봉 예측까지 쓰려면 `--minutes` 를 더합니다(수 GB, 오래 걸림).
+
+```bash
+uv run --project engine python engine/scripts/sync_data_server.py --out ../regime-data-sync --no-compare --sample-tickers <30종목, 쉼표 구분>
+```
+
+3. `engine/config/paths.local.yaml` 의 `store` 를 받은 폴더(`../regime-data-sync/store`)로 바꾸고, 위 3번(과거 지수)·4번(`prepare`)을 실행합니다. 2번(SQL 덤프 추출)은 덤프가 없으면 할 수 없습니다. 이 경우 지표 워밍업(2019-08~2020-08)과 상장 거래일 보정 없이 계산되어 **기간 초반 약 250거래일의 지표·대상 종목이 덤프가 있는 PC 와 달라지고**, 워밍업·참조값 테스트는 skip 됩니다. 같은 결과가 필요하면 덤프 추출물(`cache/warmup`·`cache/reference`)을 가진 팀원에게 받습니다.
+
 ### 실행
 
 ```bash

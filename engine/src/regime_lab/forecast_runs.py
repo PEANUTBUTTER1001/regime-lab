@@ -3,6 +3,8 @@
 흐름: 종목 묶음마다 1분봉 → 정규화(N1·N4·N5·N7) → 가격 기준(N2) → 가격 구간(N3) → 시간봉 집계,
      전 종목 봉으로 특징(시장 평균 포함) → h 마다 목표·시간 분할 → 모델 학습(학습 구간)·보정(검증 구간)
      → 모든 표본 예측 + 기준선 → 채점 → 저장.
+외부 자료 결합(P4-3, 결정 P4-3a): doc_features 를 넘기면 같은 봉·분할·모델 설정으로 가격 단독과 결합 모델을 함께
+학습하고, 결합 모델 예측을 저장하면서 평가 구간 비교(vs_price)를 scores 에 남긴다. 개선이 없으면 '검증 부족'(FR-B2).
 파일·데이터 접근은 인자로 받은 store(인프라 data/forecast_store.py 의 ForecastStore)가 맡고, 시각도 호출자가
 넘긴다 — 이 파일은 파일·시계에 직접 닿지 않는다(R1·R2). 저장 형식은 ForecastStore 문서 참고.
 """
@@ -22,13 +24,17 @@ from regime_lab.bars import (KST, MINUTE_PREP_VERSION, add_segments, aggregate_b
                              judge_price_basis, normalize_minutes, slot_edges, to_kst_naive)
 from regime_lab.forecast import model as M
 from regime_lab.forecast.baseline import historical
-from regime_lab.forecast.evaluate import direction, direction_policy, score
-from regime_lab.forecast.features import FEATURES, make_features
+from regime_lab.forecast.evaluate import compare_variants, direction, direction_policy, holm_verdicts, score
+from regime_lab.forecast.features import FEATURES, attach_doc_features, make_features
 from regime_lab.forecast.split import SPLITS, assign_split
 from regime_lab.forecast.targets import make_targets
 
 CODE_RE = re.compile(r"^[0-9A-Za-z]{6}$")
-FORECAST_RUN_VERSION = 2  # 결과 파일 형식 버전 (열을 바꾸면 올린다). 2: direction_shown·방향 표시 판정·slot/날 넘김 채점
+# 결과 파일 형식 버전 (열을 바꾸면 올린다). 2: direction_shown·방향 표시 판정·slot/날 넘김 채점
+# 3: meta.variant(price·fused)·docs_fingerprint·as_of_mode·docs_missing_rate·run_fingerprint, fused 는 scores[h].vs_price
+#    (P4-3a ③). 형식 2 run 도 그대로 읽힌다 — 읽는 쪽은 없는 키를 price 로 본다.
+FORECAST_RUN_VERSION = 3
+AS_OF_MODES = ("observed", "historical_assumed")
 
 
 def build_bars(store, cfg: dict, codes: list[str], timeframe: str, batch: int) -> tuple[pd.DataFrame, dict]:
@@ -74,8 +80,14 @@ def _date_split(as_of: pd.Series, cfg: dict) -> np.ndarray:
     return np.select([a <= pd.Timestamp(s["train_end"]), a <= pd.Timestamp(s["valid_end"])], ["train", "valid"], "test")
 
 
-def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[str] | None = None) -> tuple[str, dict]:
+def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[str] | None = None,
+                 doc_features: pd.DataFrame | None = None, docs_info: dict | None = None) -> tuple[str, dict]:
+    """docs_info (doc_features 와 함께): fingerprint(자료 지문) · as_of_mode(observed | historical_assumed — 소급 공시는
+    historical_assumed 로만, 결과를 '소급 가정'으로 따로 보고, P4-3a ④)."""
     fcfg = cfg["forecast"]
+    fused = doc_features is not None
+    if fused and (not docs_info or docs_info.get("as_of_mode") not in AS_OF_MODES or not docs_info.get("fingerprint")):
+        raise ValueError(f"doc_features 에는 docs_info(fingerprint, as_of_mode: {'|'.join(AS_OF_MODES)})가 필요합니다")
     if timeframe not in fcfg["timeframes"]:
         raise ValueError(f"지원하지 않는 봉: {timeframe} (가능: {fcfg['timeframes']})")
     rcfg = fcfg["runs"]
@@ -89,6 +101,12 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
     feats = make_features(bars)
     X = feats[FEATURES]
     date_split = _date_split(bars["available_at"], cfg)
+    doc_cols, XF, missing_rate, compare = [], X, {}, {}
+    if fused:
+        D, doc_cols = attach_doc_features(feats, doc_features)
+        XF = pd.concat([X, D], axis=1)
+        missing_rate = {s: float(D.loc[date_split == s, "docs_missing"].mean()) for s in ("train", "valid", "test")
+                        if (date_split == s).any()}
     keep = np.isin(date_split, rcfg["store_splits"])
     H = fcfg["horizon"][timeframe][0]
     n_slots = len(slot_edges(timeframe, cfg)) - 1
@@ -98,8 +116,12 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
         t["split"] = assign_split(t, cfg)
         tr, va = t["split"].eq("train"), t["split"].eq("valid")
         cal, pol = _split_valid(t, va, fcfg["direction_policy"]["holdout_share"])
-        fm = M.fit(X[tr], t.loc[tr, "y"], X[cal], t.loc[cal, "y"], cfg)  # 보정은 검증 앞부분만
-        pm, pb = M.predict(fm, X), historical(t, cfg)
+        fm = M.fit(XF[tr], t.loc[tr, "y"], XF[cal], t.loc[cal, "y"], cfg)  # 보정은 검증 앞부분만
+        pm, pb = M.predict(fm, XF), historical(t, cfg)
+        if fused:  # 같은 표본·분할·설정의 가격 단독 모델 — 평가 구간에서만 비교 (FR-B2)
+            pp = M.predict(M.fit(X[tr], t.loc[tr, "y"], X[cal], t.loc[cal, "y"], cfg), X)
+            te = t["split"].eq("test")
+            compare[str(h)] = compare_variants(t[te], pp[te], pm[te], cfg)
         policy = direction_policy(t.loc[pol, "y"], pm.loc[pol, "p_up"], pb.loc[pol, "p_up"], cfg)  # 판정은 뒷부분
         ev = t[t["split"].isin(["valid", "test"])].assign(nxt=lambda d: d["nxt_period"])
         scores[str(h)] = {
@@ -125,6 +147,9 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
         out["cross_day"] = t["cross_day"].where(t["realized_at"].notna(), (t["slot"] + h) > n_slots)
         preds.append(out[keep])
     predictions = pd.concat(preds, ignore_index=True)
+    if fused:
+        for h, r in holm_verdicts(compare, fcfg["fusion_compare"]["alpha"]).items():
+            scores[h]["vs_price"] = r
     chash = _hash({k: cfg[k] for k in ("minutes", "forecast")})
     run_id = f"{timeframe}-{now:%Y%m%dT%H%M%S}-{chash[:8]}"
     created = pd.Timestamp(now)
@@ -137,6 +162,13 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
         **fcfg["model"]}, "features": FEATURES, "minute_prep_version": MINUTE_PREP_VERSION, "config_hash": chash,
         "data": store.fingerprint(), "codes": len(codes), "bars": int(len(bars)), "prep": prep,
         "as_of_range": [str(bars["available_at"].min()), str(bars["available_at"].max())],
+        "variant": "fused" if fused else "price", "doc_features": doc_cols,
+        "docs_fingerprint": docs_info["fingerprint"] if fused else None,
+        "as_of_mode": docs_info["as_of_mode"] if fused else None, "docs_missing_rate": missing_rate or None,
+        # 같은 입력(설정·데이터·종목·자료) → 같은 지문. run_id 의 시각과 무관하게 재현 여부를 대조한다
+        "run_fingerprint": _hash({"config": chash, "data": store.fingerprint(), "codes": codes, "timeframe": timeframe,
+                                  "docs": docs_info["fingerprint"] if fused else None,
+                                  "as_of_mode": docs_info["as_of_mode"] if fused else None, "doc_features": doc_cols}),
         "notice": "과거 데이터로 계산한 통계적 예상 범위이며 실제 가격 전망이나 매매 신호가 아닙니다.",
     }
     store.write_run(run_id, meta, predictions, scores)
@@ -160,7 +192,9 @@ def list_runs(store) -> list[dict]:
     out = []
     for run_id in store.list_runs():
         m = store.read_meta(run_id)
-        out.append({k: m.get(k) for k in ("run_id", "timeframe", "created_at", "horizon", "codes", "format_version")})
+        rng = store.as_of_range(run_id)  # 저장된 예측 = 최종 평가 구간
+        out.append({**{k: m.get(k) for k in ("run_id", "timeframe", "created_at", "horizon", "codes", "format_version")},
+                    "test_as_of_range": [_iso_kst(t) for t in rng] if rng else None})
     return sorted(out, key=lambda r: r["created_at"] or "", reverse=True)
 
 
@@ -174,7 +208,9 @@ def stock_forecast(store, cfg: dict, run_id: str, code: str, as_of: str | None =
     """한 종목의 한 시점 예측. as_of 가 없으면 가장 최근 시점, 있으면 그 시각 이전(포함)의 마지막 확정 시점.
 
     steps: h=1..H 마다 회색 구간(가격 = 기준 종가 × exp(분위)), 통계적 방향(표시 판정 통과 h 만), 상승 확률, 실제 종가(있으면).
+    가운데 분위(q0.5)는 채점용이라 응답에 넣지 않는다 (E17: 가운데 예측선 없음).
     history: 그 시점까지의 직전 기준 종가들 (차트용, 확정 봉만).
+    상태 (P2-9a): ok / no_stock(이 실행에 종목 없음) / no_as_of(그 시각이 평가 구간 밖) / insufficient_history(예측 값 결측)
     """
     if not CODE_RE.match(code or ""):
         raise ForecastError("invalid_code", "종목코드는 6자리 영숫자입니다", {"code": code})
@@ -184,20 +220,24 @@ def stock_forecast(store, cfg: dict, run_id: str, code: str, as_of: str | None =
     except (ValueError, TypeError):
         raise ForecastError("invalid_as_of", "as_of 는 ISO 시각이어야 합니다", {"as_of": as_of}) from None
     p = store.read_predictions(run_id, code)
-    if t is not None:
-        p = p[p["as_of"] <= t]
-    base = {"status": "no_prediction", "run_id": run_id, "timeframe": meta["timeframe"], "code": code,
+    base = {"run_id": run_id, "timeframe": meta["timeframe"], "code": code,
             "horizon": meta["horizon"], "notice": meta.get("notice")}
     if p.empty:
-        return base
+        return {**base, "status": "no_stock"}
+    # 평가 구간 밖: 그 종목 첫 예측보다 이르거나, 마지막 예측 날짜보다 늦은 날 (같은 날 장 마감 뒤는 마지막 확정 시점)
+    if t is not None and (t < p["as_of"].min() or t.normalize() > p["as_of"].max().normalize()):
+        return {**base, "status": "no_as_of", "test_as_of_range": [_iso_kst(p["as_of"].min()), _iso_kst(p["as_of"].max())]}
+    if t is not None:
+        p = p[p["as_of"] <= t]
     at = p["as_of"].max()
     rows = p[p["as_of"] == at].sort_values("h")
     qs = meta["quantiles"]
-    lo, mid, hi = (f"q{qs[0]:g}", f"q{qs[len(qs) // 2]:g}", f"q{qs[-1]:g}")
+    lo, hi = f"q{qs[0]:g}", f"q{qs[-1]:g}"
+    if rows[[lo, hi, "p_up"]].isna().any(axis=None):
+        return {**base, "status": "insufficient_history", "as_of": _iso_kst(at)}
     shown = rows["direction_shown"] if "direction_shown" in rows else pd.Series("uncertain", index=rows.index)
     bc = float(rows["base_close"].iloc[0])
-    steps = [{"h": int(r["h"]), "low": bc * float(np.exp(r[lo])), "mid": bc * float(np.exp(r[mid])),
-              "high": bc * float(np.exp(r[hi])), "p_up": float(r["p_up"]), "direction": d,
+    steps = [{"h": int(r["h"]), "low": bc * float(np.exp(r[lo])), "high": bc * float(np.exp(r[hi])), "p_up": float(r["p_up"]), "direction": d,
               "actual": None if pd.isna(r["y"]) else bc * float(np.exp(r["y"])), "cross_day": bool(r["cross_day"])}
              for r, d in zip(rows.to_dict("records"), shown)]
     hist = p[(p["h"] == 1) & (p["as_of"] <= at)].sort_values("as_of").tail(cfg["forecast"]["api"]["history_bars"])

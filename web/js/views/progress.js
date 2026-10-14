@@ -8,9 +8,10 @@ import { state } from '../state.js';
 const stageLabel = (s) => (has(`p.stage.${s}`) ? t(`p.stage.${s}`) : s);
 const unitLabel = (s) => (has(`p.unit.${s}`) ? t(`p.unit.${s}`) : t('p.unit.items'));
 
-export function renderProgress(el, runId) {
+// opts.embedded: 작업면 가운데 열 안 (제목 h2, 끝나면 주소 이동 없이 opts.onDone)
+export function renderProgress(el, runId, opts = {}) {
   state.lastRun = runId;
-  const title = h('h1', { id: 'progress-title', text: t('p.preparing') });
+  const title = h(opts.embedded ? 'h2' : 'h1', { id: 'progress-title', text: t('p.preparing') });
   const orb = h('div', { class: 'orb', 'aria-hidden': 'true' });
   const fill = h('div', { class: 'progress-fill' });
   const track = h('div', { class: 'progress-track hidden', role: 'progressbar', 'aria-label': t('p.bar'), 'aria-valuemin': '0' }, fill);
@@ -45,7 +46,7 @@ export function renderProgress(el, runId) {
     orb.classList.add('stopped');
     track.classList.add('hidden');
     title.textContent = heading;
-    document.title = `${heading} — ${runId}`;
+    if (!opts.embedded) document.title = `${heading} — ${runId}`;
     statusLine.textContent = kind === 'completed' ? t('p.allDone') : t('p.stopped', { k: heading });
     counts.textContent = '';
     note.textContent = message;
@@ -72,7 +73,8 @@ export function renderProgress(el, runId) {
       finish('completed', t('p.done'), t('p.doneMsg', { id: runId, t: fmt.num(snap.elapsed_sec, 1) }),
         [linkButton(t('p.viewResults'), `#/runs/${runId}/results`, true), linkButton(t('common.backStrategy'), '#/builder')]);
       toast(t('p.toastDone'));
-      setTimeout(() => { if (location.hash.endsWith(`${runId}/progress`)) location.hash = `#/runs/${runId}/results`; }, 1200);
+      if (opts.onDone) setTimeout(() => { if (el.isConnected) opts.onDone(runId); }, 900);
+      else setTimeout(() => { if (location.hash.endsWith(`${runId}/progress`)) location.hash = `#/runs/${runId}/results`; }, 1200);
       return;
     }
     if (snap.status === 'cancelled') {
@@ -86,7 +88,7 @@ export function renderProgress(el, runId) {
     }
     const label = snap.stage ? stageLabel(snap.stage) : (snap.status === 'queued' ? t('p.waiting') : t('p.starting'));
     title.textContent = `${label}…`;
-    document.title = `${label}… — ${runId}`;
+    if (!opts.embedded) document.title = `${label}… — ${runId}`;
     statusLine.textContent = t('p.elapsed', { s: label, t: fmt.num(snap.elapsed_sec, 1) });
     if (snap.total > 0) {
       track.classList.remove('hidden');

@@ -148,12 +148,15 @@ export function toast(message) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
 }
 
-export function metricDefs(defs) {
+// open: 처음부터 펼침, onToggle(open): 사용자가 펼침 상태를 바꿀 때 (기억은 부르는 쪽이 한다)
+export function metricDefs(defs, { open = false, onToggle = null } = {}) {
   const rows = Object.entries(defs || {}).map(([k, d]) => {
     if (!has(`md.${k}`)) return d;
     const [name, unit, ...rest] = t(`md.${k}`).split('|');
     return { name, unit, formula: rest.join('|') };
   });
-  return h('details', {}, h('summary', {}, t('common.metricDefs')),
+  const box = h('details', { open: open || null }, h('summary', {}, t('common.metricDefs')),
     h('dl', { class: 'defs' }, rows.flatMap((d) => [h('dt', { text: `${d.name} (${d.unit})` }), h('dd', { text: d.formula })])));
+  if (onToggle) box.addEventListener('toggle', (e) => { e.stopPropagation(); onToggle(box.open); });
+  return box;
 }

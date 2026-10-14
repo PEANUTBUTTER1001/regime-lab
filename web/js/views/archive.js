@@ -4,6 +4,7 @@
 // 조건은 주소(#/archive?…, #/archive/doc?id=…)에 남겨 새로고침·뒤로 가기에도 같은 화면을 다시 연다.
 import { api } from '../api.js';
 import { errorView, fmt, h, helpTip, loading, pill, stateView, table } from '../components/ui.js';
+import { paneFrame, paneHead } from '../components/workspace.js';
 import { has, t } from '../i18n.js';
 
 const MODES = ['observed', 'historical_assumed'];
@@ -12,7 +13,14 @@ const STATUSES = ['all', 'amendment', 'revised', 'unlinked'];
 const KST = '+09:00';
 const nowKst = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16);
 const toIso = (local) => (local ? `${local}:00${KST}` : '');
-const toLocal = (iso) => (iso ? iso.slice(0, 16) : '');
+// 주소의 as_of 는 어느 시간대로 와도 같은 순간의 KST 로 바꿔 입력칸에 넣는다 (문자열을 자르면 +00:00 이 9시간 어긋남)
+const KST_LOCAL = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const HAS_TZ = /([zZ]|[+-]\d{2}:?\d{2})$/;
+const toLocal = (iso) => {
+  if (!iso) return '';
+  const d = new Date(HAS_TZ.test(iso) ? iso : `${iso}${KST}`);
+  return Number.isNaN(d.getTime()) ? '' : KST_LOCAL.format(d).replace(' ', 'T');
+};
 const KST_FMT = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 const when = (iso) => (!iso ? '—' : iso.length === 10 ? iso : KST_FMT.format(new Date(iso)));
 const srcLabel = (s) => (has(`ev.src.${s}`) ? t(`ev.src.${s}`) : s);
@@ -52,7 +60,34 @@ function unavailable(err) {
     detail: err.detail?.error ? String(err.detail.error) : t('common.code', { c: err.code }) });
 }
 
-export async function renderArchive(el, query) {
+// 2열 (design.md §8.5, 10-13 hongsungmin0315 승인): 왼쪽 조건·목록, 오른쪽 자료 상세(--col3).
+// #/archive/doc?id=… 로 들어오면 같은 as_of·mode 의 목록과 그 상세를 함께 연다. 조회 로직은 그대로다.
+export function renderArchive(root, query) { return archivePage(root, query, null); }
+export function renderArchivePage(root, query) {
+  const list = new URLSearchParams();
+  for (const k of ['as_of', 'mode']) if (query.get(k)) list.set(k, query.get(k));
+  return archivePage(root, list, query);
+}
+function archivePage(root, listQuery, docQuery) {
+  const frame = paneFrame({ cols: [{ label: t('ws.col.list') }, { label: t('ws.col.detail') }], cls: 'ws2r', splits: [['c3', t('ws.split.detail')]], current: docQuery ? 1 : 0 });
+  root.append(frame.root);
+  const [left, right] = frame.panes;
+  const lb = h('div', { class: 'pane-body' });
+  const rb = h('div', { class: 'pane-body' });
+  left.append(paneHead(t('nav.archive')), lb);
+  right.append(paneHead(t('ar.docTitle')), rb);
+  const openDoc = (id, asOf, mode) => {
+    rb.replaceChildren();
+    renderArchiveDoc(rb, new URLSearchParams({ id, as_of: asOf, mode }), { embedded: true });
+    frame.select(1);
+    rb.scrollTop = 0;
+  };
+  if (docQuery?.get('id')) openDoc(docQuery.get('id'), docQuery.get('as_of') || toIso(nowKst()), docQuery.get('mode') || 'observed');
+  else rb.append(stateView({ title: t('ws.detailPickTitle'), message: t('ws.listPick') }));
+  return renderArchiveList(lb, listQuery, openDoc);
+}
+
+async function renderArchiveList(el, query, openDoc) {
   const f = {
     asOf: toLocal(query.get('as_of')) || nowKst(),
     mode: MODES.includes(query.get('mode')) ? query.get('mode') : 'observed',
@@ -94,7 +129,7 @@ export async function renderArchive(el, query) {
     add('tickers', f.tickers.replace(/\s/g, '')); if (f.status !== 'all') p.set('status', f.status);
     for (const [k, v] of Object.entries(overrides)) { if (v == null) p.delete(k); else p.set(k, String(v)); }
     const next = `#/archive?${p}`;
-    if (location.hash === next) { el.replaceChildren(); renderArchive(el, p); } else location.hash = next;
+    if (location.hash === next) { el.replaceChildren(); renderArchiveList(el, p, openDoc); } else location.hash = next;
   };
   // tip: 늘 보이는 안내 대신 ? 도움말로 보여 줄 문구 (E18)
   const field = (id, key, label, hint, tip) => h('div', {},
@@ -127,7 +162,7 @@ export async function renderArchive(el, query) {
     box.replaceChildren();
     if (err.code === 'validation_failed') { showErrors(err.detail?.fields || {}); return; }
     if (err.code === 'data_unavailable') { box.append(unavailable(err)); return; }
-    box.append(errorView(err, { onRetry: () => { el.replaceChildren(); renderArchive(el, query); }, backHref: '#/archive', backText: t('ar.reset') }));
+    box.append(errorView(err, { onRetry: () => { el.replaceChildren(); renderArchiveList(el, query, openDoc); }, backHref: '#/archive', backText: t('ar.reset') }));
     return;
   }
   box.replaceChildren();
@@ -148,7 +183,8 @@ export async function renderArchive(el, query) {
   }
   const columns = [
     { label: t('ev.col.published'), render: (r) => h('span', {}, when(r.published_at), r.time_precision === 'date_only' ? h('span', {}, ' ', pill(t('ev.dateOnly'), 'neutral')) : null) },
-    { label: t('ar.col.title'), render: (r) => h('div', {}, h('a', { href: docHref(r.doc_id, ix.as_of, ix.mode) }, r.title),
+    { label: t('ar.col.title'), render: (r) => h('div', {}, h('a', { href: docHref(r.doc_id, ix.as_of, ix.mode),
+      onclick: (e) => { e.preventDefault(); e.stopPropagation(); openDoc(r.doc_id, ix.as_of, ix.mode); } }, r.title),
       r.url ? h('a', { class: 'ar-ext', href: r.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': t('ar.openSource') }, ' ↗') : null) },
     { label: t('ev.col.source'), render: (r) => h('span', {}, srcLabel(r.source), r.corp_name ? h('small', { class: 'muted', style: { display: 'block' } }, r.corp_name) : null) },
     { label: t('ar.col.tickers'), render: (r) => (r.tickers.length ? r.tickers.join(', ') : '—') },
@@ -161,18 +197,20 @@ export async function renderArchive(el, query) {
     h('span', { class: 'muted' }, t('ar.pageOf', { p: res.page, n: res.pages })),
     h('button', { type: 'button', class: 'secondary', disabled: res.page >= res.pages, onclick: () => go({ page: res.page + 1 }) }, `${t('ar.next')} →`));
   box.append(chips, summary, cov,
-    h('article', { class: 'card' }, table({ caption: t('ar.caption', { n: res.items.length, total: fmt.int(res.total) }), columns, rows: res.items }), pager));
+    h('article', { class: 'card' }, table({ caption: t('ar.caption', { n: res.items.length, total: fmt.int(res.total) }), columns, rows: res.items,
+      onRow: (r) => openDoc(r.doc_id, ix.as_of, ix.mode) }), pager));
 }
 
-export async function renderArchiveDoc(el, query) {
+// opts.embedded: 공시·뉴스 검색 화면 오른쪽 열 안 (제목 h2, 목록 돌아가기 링크 없음)
+export async function renderArchiveDoc(el, query, opts = {}) {
   const id = query.get('id') || '';
   const asOf = query.get('as_of') || toIso(nowKst());
   const mode = MODES.includes(query.get('mode')) ? query.get('mode') : 'observed';
   const back = `#/archive?${new URLSearchParams({ as_of: asOf, mode })}`;
   el.append(h('div', { class: 'topline' },
-    h('div', {}, h('div', { class: 'eyebrow' }, t('ar.eyebrow')), h('h1', { tabindex: '-1', text: t('ar.docTitle') }),
+    h('div', {}, h('div', { class: 'eyebrow' }, t('ar.eyebrow')), h(opts.embedded ? 'h2' : 'h1', { tabindex: '-1', text: t('ar.docTitle') }),
       h('p', { class: 'lead', text: t('ar.docLead', { a: when(asOf), m: t(`ev.mode.${mode}`) }) })),
-    h('a', { class: 'secondary', href: back }, `← ${t('ar.backList')}`)));
+    opts.embedded ? null : h('a', { class: 'secondary', href: back }, `← ${t('ar.backList')}`)));
   const box = h('div', { class: 'ar-doc', 'aria-live': 'polite' }, loading(t('ar.loading')));
   el.append(box);
   let res;
@@ -181,7 +219,7 @@ export async function renderArchiveDoc(el, query) {
   } catch (err) {
     box.replaceChildren();
     if (err.code === 'data_unavailable') { box.append(unavailable(err)); return; }
-    box.append(errorView(err, { onRetry: () => { el.replaceChildren(); renderArchiveDoc(el, query); }, backHref: back, backText: t('ar.backList') }));
+    box.append(errorView(err, { onRetry: () => { el.replaceChildren(); renderArchiveDoc(el, query, opts); }, backHref: back, backText: t('ar.backList') }));
     return;
   }
   box.replaceChildren();

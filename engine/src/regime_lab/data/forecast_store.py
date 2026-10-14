@@ -15,6 +15,7 @@ import shutil
 from pathlib import Path
 
 import pandas as pd
+import pyarrow.parquet as pq
 
 from regime_lab.data.minutes import load_minutes, minutes_fingerprint
 
@@ -85,6 +86,15 @@ class ForecastStore:
     def read_predictions(self, run_id: str, code: str) -> pd.DataFrame:
         """한 종목의 예측 행만 (Parquet 필터로 읽음)."""
         return pd.read_parquet(self.root / run_id / "predictions.parquet", filters=[("code", "==", code)])
+
+    def as_of_range(self, run_id: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+        """저장된 예측의 as_of 최소·최대 — Parquet 행 그룹 통계만 읽음 (전 종목 run 도 가볍게)."""
+        md = pq.ParquetFile(self.root / run_id / "predictions.parquet").metadata
+        col = md.schema.to_arrow_schema().get_field_index("as_of")
+        stats = [md.row_group(i).column(col).statistics for i in range(md.num_row_groups)]
+        if not stats or any(s is None or not s.has_min_max for s in stats):
+            return None
+        return pd.Timestamp(min(s.min for s in stats)), pd.Timestamp(max(s.max for s in stats))
 
     def read_run(self, run_id: str) -> tuple[dict, pd.DataFrame, dict]:
         d = self.root / run_id

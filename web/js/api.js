@@ -48,6 +48,7 @@ export const api = {
   runs: () => request('GET', '/runs'),
   status: (id) => request('GET', `/runs/${encodeURIComponent(id)}`),
   cancel: (id) => request('POST', `/runs/${encodeURIComponent(id)}/cancel`),
+  deleteRun: (id) => request('DELETE', `/runs/${encodeURIComponent(id)}`),
   result: (id) => request('GET', `/runs/${encodeURIComponent(id)}/result`),
   stock: (id, ticker, strategy) =>
     request('GET', `/runs/${encodeURIComponent(id)}/stocks/${encodeURIComponent(ticker)}${strategy ? `?strategy=${encodeURIComponent(strategy)}` : ''}`),
@@ -81,4 +82,7 @@ export const api = {
   forecastRuns: () => request('GET', '/forecasts/runs'),
   forecastStock: (runId, code, params) => request('GET', `/forecasts/runs/${encodeURIComponent(runId)}/stocks/${encodeURIComponent(code)}?${new URLSearchParams(params)}`),
   forecastScores: (runId) => request('GET', `/forecasts/runs/${encodeURIComponent(runId)}/scores`),
+  // 영향 분석 (P3-13.3)
+  influenceWeights: (params) => request('GET', `/influence/weights?${new URLSearchParams(params)}`),
+  influenceEvents: (params) => request('GET', `/influence/events?${new URLSearchParams(params)}`),
 };

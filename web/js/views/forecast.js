@@ -15,6 +15,7 @@ const toLocal = (iso) => {
   const d = new Date(/([zZ]|[+-]\d\d:?\d\d)$/.test(s) ? s : `${s}${KST}`);
   return Number.isNaN(d.getTime()) ? '' : new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 16);
 };
+const kst = (iso) => toLocal(iso).replace('T', ' ');  // 표시용 'YYYY-MM-DD HH:MM' (KST)
 const won = (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 }));
 // 방향 표시는 한국식 색(E18 ④): 상승 쪽 빨강 ▲, 하락 쪽 파랑 ▼, 불확실은 색 없는 표시
 const DIR_SIGN = { up: 1, down: -1 };
@@ -32,7 +33,7 @@ function testHit(scores, h) {
 const STATE_VIEW = {
   no_stock: () => ({ title: t('fc.noStock'), message: t('fc.noStockMsg') }),
   no_as_of: (d) => ({ title: t('fc.noAsOf'), message: d.test_as_of_range
-    ? t('fc.noAsOfMsg', { a: toLocal(d.test_as_of_range[0]).replace('T', ' '), b: toLocal(d.test_as_of_range[1]).replace('T', ' ') }) : t('fc.noPredMsg') }),
+    ? t('fc.noAsOfMsg', { a: kst(d.test_as_of_range[0]), b: kst(d.test_as_of_range[1]) }) : t('fc.noPredMsg') }),
   insufficient_history: () => ({ title: t('fc.thin'), message: t('fc.thinMsg') }),
 };
 
@@ -53,8 +54,8 @@ export async function renderForecast(el, query, runId, code) {
   };
   const runSel = h('select', { id: 'fc-run', onchange: (e) => { f.run = e.target.value; } },
     runs.runs.map((r) => h('option', { value: r.run_id, selected: r.run_id === f.run },
-      t('fc.runOpt', { tf: r.timeframe, at: (r.created_at || '').slice(0, 16).replace('T', ' '), n: fmt.int(r.codes) })
-      + (r.test_as_of_range ? t('fc.runRange', { a: r.test_as_of_range[0].slice(0, 10), b: r.test_as_of_range[1].slice(0, 10) }) : ''))));
+      t('fc.runOpt', { tf: r.timeframe, at: kst(r.created_at), n: fmt.int(r.codes) })
+      + (r.test_as_of_range ? t('fc.runRange', { a: kst(r.test_as_of_range[0]).slice(0, 10), b: kst(r.test_as_of_range[1]).slice(0, 10) }) : ''))));
   const codeIn = h('input', { id: 'fc-code', value: f.code, placeholder: t('fc.codePh'), maxlength: '6', autocomplete: 'off',
     oninput: (e) => { f.code = e.target.value.trim(); } });
   const asOfIn = h('input', { id: 'fc-asof', type: 'datetime-local', step: '60', value: f.asOf, oninput: (e) => { f.asOf = e.target.value; } });
@@ -89,7 +90,7 @@ async function show(out, f) {
     return;
   }
   const chartEl = h('div', { class: 'chart' });
-  const at = d.as_of.slice(0, 16).replace('T', ' ');
+  const at = kst(d.as_of);
   out.replaceChildren(
     h('article', { class: 'card' },
       h('h2', {}, `${d.code} · ${d.timeframe}`), h('p', { class: 'card-sub', text: t('fc.asOfAt', { at, p: won(d.base_close) }) }),
@@ -108,5 +109,7 @@ async function show(out, f) {
       rows: d.steps,
     }),
     h('p', { class: 'hint', text: t('fc.dirNote') }));
-  forecastBand(chartEl, d, t('fc.chart', { c: d.code, n: d.steps.length }));
+  // x축 이름은 KST 로 바꾼 'MM-DD HH:MM' — 차트는 받은 이름을 그대로 쓴다
+  const history = d.history.map((p) => ({ ...p, label: kst(p.as_of).slice(5) }));
+  forecastBand(chartEl, { ...d, history }, t('fc.chart', { c: d.code, n: d.steps.length }));
 }

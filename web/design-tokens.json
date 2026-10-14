@@ -1,32 +1,50 @@
 {
-  "$comment": "디자인 토큰 원본 (design.md §2, docs/regime-lab_prototype.html). 웹(css/app.css :root)과 추후 Unity(T-8)가 같은 값을 쓴다. 값을 바꾸면 css/app.css :root 도 함께 바꾼다.",
+  "$comment": "디자인 토큰 원본 (docs/design.md v2 §2–§4, UI 개혁 B안 2026-10-13, 시안 docs/prototype/reform-b-hybrid.html). 웹(css/app.css :root · :root[data-theme=light])이 같은 값을 쓴다. 값을 바꾸면 design.md·app.css 를 함께 바꾸고 design.md §2.2 대비표를 다시 계산한다.",
   "color": {
-    "bg-canvas": "#0C1114",
-    "bg-surface": "#12191D",
-    "bg-control": "#1B2429",
-    "line": "#2A383B",
-    "text-primary": "#E8F0ED",
-    "text-secondary": "#97A9A3",
-    "accent-mint": "#88E6BC",
-    "text-on-mint": "#0C2B20",
-    "accent-amber": "#EAC07A",
-    "state-up": "#EF8F8F",
-    "state-down": "#8AC4E8",
-    "state-error": "#F2A065",
-    "state-info": "#8AC4E8"
-  },
-  "layout": {
-    "header-height": 78,
-    "sidebar-width": 260,
-    "single-column-breakpoint": 1050,
-    "mobile-breakpoint": 680,
-    "min-hit-target": 44
+    "dark": {
+      "canvas": "#0A0E11", "surface": "#0D1317", "control": "#152028", "hover": "#172229", "sel": "#11241D",
+      "line": "#1C2730", "line-strong": "#2A3944",
+      "text": "#E6EDF2", "muted": "#9AA9B3", "dim": "#7C8C97", "prose": "#CAD6DE",
+      "accent": "#88E6BC", "mint": "#88E6BC", "mint-ink": "#071F16", "mint-line": "#2D5B47",
+      "up": "#EF8F8F", "down": "#8AC4E8", "error": "#F2A065", "amber": "#EAC07A",
+      "warn-line": "#5B4A2C", "err-line": "#5E3E28",
+      "hatch": "rgba(234,192,122,.08)", "hatch-key": "rgba(234,192,122,.45)",
+      "shade-up": "rgba(239,143,143,.07)", "shade-down": "rgba(138,196,232,.07)",
+      "shade-up-key": "rgba(239,143,143,.25)", "shade-down-key": "rgba(138,196,232,.25)",
+      "band": "rgba(154,169,179,.22)", "band-line": "rgba(154,169,179,.5)", "band-key": "rgba(154,169,179,.35)",
+      "shadow": "8px 0 24px rgba(0,0,0,.45)", "scrim": "rgba(0,0,0,.35)"
+    },
+    "light": {
+      "canvas": "#F5FFFC", "surface": "#FFFFFF", "control": "#EDF7F3", "hover": "#E5F3ED", "sel": "#DAF2E7",
+      "line": "#D2E3DC", "line-strong": "#B2C8BF",
+      "text": "#0F1F26", "muted": "#45585F", "dim": "#5A6C73", "prose": "#24363E",
+      "accent": "#11774D", "mint": "#88E6BC", "mint-ink": "#071F16", "mint-line": "#8CCBAE",
+      "up": "#C4373A", "down": "#1D6CAD", "error": "#AE500C", "amber": "#855E00",
+      "warn-line": "#D9C08A", "err-line": "#E3B48F",
+      "hatch": "rgba(133,94,0,.09)", "hatch-key": "rgba(133,94,0,.45)",
+      "shade-up": "rgba(196,55,58,.07)", "shade-down": "rgba(29,108,173,.07)",
+      "shade-up-key": "rgba(196,55,58,.25)", "shade-down-key": "rgba(29,108,173,.25)",
+      "band": "rgba(69,88,95,.16)", "band-line": "rgba(69,88,95,.45)", "band-key": "rgba(69,88,95,.3)",
+      "shadow": "8px 0 24px rgba(15,31,38,.14)", "scrim": "rgba(15,31,38,.22)"
+    }
   },
   "type": {
-    "page-title": 34,
-    "card-title": 19,
-    "body": 14,
-    "label": 12,
-    "meta": 11
-  }
+    "sans": "\"Pretendard\", \"Malgun Gothic\", \"Apple SD Gothic Neo\", \"Segoe UI\", system-ui, sans-serif",
+    "mono": "\"JetBrains Mono\", \"SF Mono\", Consolas, ui-monospace, monospace",
+    "meta": 11, "body": 12, "input": 13, "head": 16, "kpi": 24
+  },
+  "space": [2, 4, 6, 8, 10, 12, 14, 16, 24, 32],
+  "size": {
+    "radius": 2, "bar-height": 40, "tab-height": 32, "control-in-bar": 24, "input": 30, "run-button": 36, "nav-item": 34
+  },
+  "layout": {
+    "rail-width": 208,
+    "col1": { "default": "clamp(264px, 22vw, 320px)", "min": 240, "max": 520 },
+    "col3": { "default": "clamp(300px, 26vw, 400px)", "min": 280, "max": 720 },
+    "center-min": 400,
+    "conditions-drawer-breakpoint": 1280,
+    "single-column-breakpoint": 1024,
+    "focus-drawer-width": 340
+  },
+  "storage": { "theme": "rl.theme", "layout": "rl.layout" }
 }

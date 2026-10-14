@@ -144,3 +144,10 @@ def test_forecast_store_roundtrip(tmp_path):
     with pytest.raises(FileExistsError):
         fs.write_run("1h-x", {}, pred, {})
     assert not any(x.name.startswith(".tmp") for x in (tmp_path / "runs" / "forecasts").iterdir())
+
+
+def test_forecast_store_as_of_range_from_parquet_stats(tmp_path):
+    fs = ForecastStore(tmp_path / "store", tmp_path / "minutes", tmp_path / "runs")
+    at = pd.to_datetime(["2026-09-02 11:00", "2026-09-01 10:00", "2026-09-03 15:31"])
+    fs.write_run("1h-r", {}, pd.DataFrame({"code": ["A", "B", "A"], "as_of": at, "h": [1, 1, 2]}), {})
+    assert fs.as_of_range("1h-r") == (pd.Timestamp("2026-09-01 10:00"), pd.Timestamp("2026-09-03 15:31"))

@@ -20,7 +20,7 @@ from test_auth_contract import auth_app, signin  # noqa: E402,F401 — 로그인
 RUN = "1h-20261012T090000-abcdef12"
 NOTICE = "과거 데이터로 계산한 통계적 예상 범위이며 실제 가격 전망이나 매매 신호가 아닙니다."
 ERROR_KEYS = {"code", "message", "detail", "retryable"}
-STEP_KEYS = {"h", "low", "mid", "high", "p_up", "direction", "actual", "cross_day"}
+STEP_KEYS = {"h", "low", "high", "p_up", "direction", "actual", "cross_day"}   # 가운데 분위(q0.5)는 응답에 없음 (E17)
 
 
 @pytest.fixture(scope="module")
@@ -36,6 +36,8 @@ def _write_run(runs: Path):
                          "base_close": 1000.0 + i, "q0.1": -0.01, "q0.5": 0.0, "q0.9": 0.02, "p_up": 0.6,
                          "direction": "up", "direction_shown": "up" if h == 2 else "uncertain", "reason": None,
                          "y": 0.01 if i < 2 else None, "cross_day": False})
+    # 예측 값이 결측인 종목 (특징 이력 부족) → insufficient_history
+    rows += [{**rows[0], "code": "035720", "h": h, "q0.1": None, "p_up": None} for h in (1, 2)]
     meta = {"run_id": RUN, "created_at": "2026-10-12T09:00:00", "format_version": 2, "timeframe": "1h", "horizon": 2,
             "codes": 1, "quantiles": [0.1, 0.5, 0.9], "split": {"train_end": "2026-01-30", "valid_end": "2026-05-29"},
             "notice": NOTICE}
@@ -58,7 +60,8 @@ def test_runs_list(client):
     body = r.json()
     assert body["status"] == "ok" and body["disclaimer"]
     assert body["runs"] == [{"run_id": RUN, "timeframe": "1h", "created_at": "2026-10-12T09:00:00", "horizon": 2,
-                             "codes": 1, "format_version": 2}]
+                             "codes": 1, "format_version": 2,
+                             "test_as_of_range": ["2026-09-01T10:00:00+09:00", "2026-09-01T12:00:00+09:00"]}]
 
 
 def test_runs_empty_is_no_run_not_error(tmp_path, market):
@@ -77,7 +80,7 @@ def test_stock_latest_prices_and_direction(client):
     s1, s2 = b["steps"]
     assert set(s1) == STEP_KEYS and [s1["h"], s2["h"]] == [1, 2]
     assert math.isclose(s1["low"], 1002 * math.exp(-0.01)) and math.isclose(s1["high"], 1002 * math.exp(0.02))
-    assert s1["mid"] == 1002.0 and s1["actual"] is None          # 마지막 시점은 아직 실현 전
+    assert s1["actual"] is None                                   # 마지막 시점은 아직 실현 전
     assert s1["direction"] == "uncertain" and s2["direction"] == "up"  # 표시 판정 통과 h 만 방향
     assert [x["close"] for x in b["history"]] == [1000.0, 1001.0, 1002.0]
 
@@ -90,10 +93,20 @@ def test_stock_as_of_picks_last_confirmed_and_accepts_timezone(client):
         assert [x["close"] for x in b["history"]] == [1000.0, 1001.0]   # 그 시점 뒤 값은 없음
 
 
-def test_stock_no_prediction_and_errors(client):
-    early = client.get(f"/api/forecasts/runs/{RUN}/stocks/005930", params={"as_of": "2026-08-01T10:00:00+09:00"})
-    assert early.status_code == 200 and early.json()["status"] == "no_prediction"
-    assert client.get(f"/api/forecasts/runs/{RUN}/stocks/000660").json()["status"] == "no_prediction"
+def test_stock_states_and_errors(client):
+    # P2-9a 상태: no_stock / no_as_of(평가 구간 밖) / insufficient_history — 모두 200
+    def get(code, as_of=None):
+        r = client.get(f"/api/forecasts/runs/{RUN}/stocks/{code}", params={"as_of": as_of} if as_of else {})
+        assert r.status_code == 200
+        return r.json()
+    assert get("000660")["status"] == "no_stock"
+    early = get("005930", "2026-08-01T10:00:00+09:00")
+    assert early["status"] == "no_as_of" and "steps" not in early
+    assert early["test_as_of_range"] == ["2026-09-01T10:00:00+09:00", "2026-09-01T12:00:00+09:00"]
+    assert get("005930", "2026-09-02T10:00:00+09:00")["status"] == "no_as_of"      # 마지막 예측 다음 날
+    assert get("005930", "2026-09-01T15:40:00+09:00")["as_of"] == "2026-09-01T12:00:00+09:00"  # 같은 날은 마지막 확정
+    thin = get("035720")
+    assert thin["status"] == "insufficient_history" and "steps" not in thin
     nf = client.get("/api/forecasts/runs/1h-none/stocks/005930")
     assert nf.status_code == 404 and set(nf.json()) == ERROR_KEYS and nf.json()["code"] == "forecast_run_not_found"
     bad = client.get(f"/api/forecasts/runs/{RUN}/stocks/5930")
