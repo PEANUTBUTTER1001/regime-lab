@@ -114,8 +114,10 @@ const D = {
   'errmsg.strategy_not_found': ['이 실행에 없는 전략입니다.', 'This strategy is not in the run.'],
 
   // 로그인
-  'login.title': ['과거를 비교하고, 그다음을 살펴보세요.', 'Compare the past. Explore what comes next.'],
-  'login.lead': ['코스피·코스닥 일봉 데이터로 고정된 기술적 패턴을 시험하고, 시장 국면·시장·시가총액 그룹별로 나눠 기간 분할·FDR·무작위 벤치마크로 검증합니다.', 'Test fixed technical patterns on KOSPI and KOSDAQ daily data, split by market regime, market and market-cap group, and check them against a period split, false-discovery control and a random benchmark.'],
+  'hero.line1': ['과거를 비교하고,', 'Compare the past.'],
+  'hero.line2': ['그다음을 살펴보세요.', 'Explore what comes next.'],
+  'hero.sub': ['코스피·코스닥 6년 치 일봉이라는 우주를 탐색합니다. 시장 국면별로 나눠 보고, 세 번 검증해 우연을 걸러냅니다.', 'Explore six years of KOSPI and KOSDAQ daily data — split it by market regime and filter out luck with three checks.'],
+  'hero.replay': ['다시 보기', 'Replay'],
   'login.notice': ['과거 데이터 분석이며 투자 권유가 아닙니다. "그다음"은 예측이 아니라 과거 사례의 이후 결과를 뜻합니다.', 'Historical analysis — not investment advice. "What comes next" refers to past outcomes, not forecasts.'],
   'login.signIn': ['로그인', 'Sign in'],
   'login.signUp': ['계정 만들기', 'Create an account'],

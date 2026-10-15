@@ -32,7 +32,7 @@ const state={authConfig:{enabled:true,available:true,social_providers:{kakao:tru
 if(scenario==='unavailable') {state.authConfig.social_providers.google=false;state.authConfig.guest_allowed=false;}
 let calls=[];
 let destinations=[];
-const context={h,BRAND:'test',t:k=>k,state,URLSearchParams,
+const context={h,BRAND:'test',t:k=>k,state,URLSearchParams,mountHero:()=>()=>{},
  document:{createElementNS:(_,tag)=>new Element(tag)},
  window:{addEventListener:(name,fn)=>events.set(name,fn),removeEventListener:(name,fn)=>{assert.equal(events.get(name),fn);events.delete(name);}},
  api:{startOAuth:async provider=>{calls.push(provider);if(scenario==='failure')throw {code:'auth_oauth_unavailable'};return {url:'https://example.test/'+provider};}},

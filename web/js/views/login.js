@@ -1,28 +1,9 @@
 // 소셜 로그인과 테스트용 게스트 진입. 인증 상태와 세션은 서버에서 확인한다.
 import { h } from '../components/ui.js';
-import { BRAND } from '../config.js';
 import { t } from '../i18n.js';
 import { state } from '../state.js';
 import { api } from '../api.js';
-
-function decoChart() {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 600 200');
-  svg.setAttribute('class', 'deco');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('focusable', 'false');
-  for (const [d, color, dash] of [
-    ['M0 150 L60 138 L120 146 L180 110 L240 122 L300 88 L360 96 L420 64 L480 78 L540 46 L600 52', '#88E6BC', ''],
-    ['M0 160 L60 152 L120 158 L180 136 L240 144 L300 120 L360 128 L420 108 L480 116 L540 96 L600 102', '#97A9A3', '6 6'],
-  ]) {
-    const p = document.createElementNS(ns, 'path');
-    p.setAttribute('d', d); p.setAttribute('fill', 'none'); p.setAttribute('stroke', color); p.setAttribute('stroke-width', '3');
-    if (dash) p.setAttribute('stroke-dasharray', dash);
-    svg.append(p);
-  }
-  return svg;
-}
+import { mountHero } from '../components/hero.js';
 
 export function renderLogin(el, query = new URLSearchParams()) {
   const config = state.authConfig || { enabled: true, available: false };
@@ -74,9 +55,9 @@ export function renderLogin(el, query = new URLSearchParams()) {
     show(t('login.unavailable'));
     form.append(h('button', {type:'button', class:'secondary', onclick:()=>location.reload()}, t('common.retry')));
   } else if (config.enabled && !Object.values(config.social_providers || {}).some(Boolean)) show(t('login.socialPending'));
-  el.append(h('div', {class:'login'}, h('section', {class:'login-intro'},
-    h('div', {class:'brand'}, h('span', {class:'brand-mark', 'aria-hidden':'true'}), BRAND),
-    h('h1', {}, t('login.title')), h('p', {class:'lead'}, t('login.lead')), h('p', {class:'notice'}, t('login.notice')), decoChart()),
-    h('section', {class:'login-form'}, form)));
-  return () => window.removeEventListener('pageshow', onPageShow);
+  // 왼쪽 소개 영역은 히어로(차트 → 로켓 영상 → 우주 장면, X1)가 그린다. 로그인 카드는 그 위에 뜬다
+  const intro = h('section', {class:'login-intro'});
+  const stopHero = mountHero(intro);
+  el.append(h('div', {class:'login login-hero'}, intro, h('section', {class:'login-form'}, form)));
+  return () => { window.removeEventListener('pageshow', onPageShow); stopHero(); };
 }
