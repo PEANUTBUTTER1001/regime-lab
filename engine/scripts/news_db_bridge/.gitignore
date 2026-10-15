@@ -1,0 +1,13 @@
+# Local configuration, credentials and generated output must not be committed.
+config.json
+config.local.json
+*.env
+!*.env.example
+local/
+backups/
+*.log
+*.pid
+*.sqlite*
+*.parquet
+__pycache__/
+.pytest_cache/
