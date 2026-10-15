@@ -63,7 +63,7 @@ def _forecast(args, cfg, paths) -> int:
 
     from regime_lab import forecast_runs  # scikit-learn 을 끌어오므로 예측 명령에서만 불러온다 (다른 명령 시작 시간)
 
-    store = ForecastStore(paths.store, args.minutes or paths.store.parent / "minutes", paths.runs)
+    store = ForecastStore(paths.store, args.minutes or paths.store.parent / "minutes", paths.runs)  # 1분봉은 시간봉에서만 읽음
     codes = sorted(set(load_sample_tickers(paths.store)) & set(store.common_codes())) if args.sample else None
     t = time.time()
     try:
@@ -100,9 +100,9 @@ def main(argv: list[str] | None = None) -> int:
             sp.add_argument("--gold", type=Path, required=True, help="평가셋 JSON (저장소 밖)")
             sp.add_argument("--split", required=True, choices=["dev", "test"])
     sp = sub.add_parser("forecast-run", help="P2-7 과거 as_of 예측 일괄 생성")
-    sp.add_argument("--timeframe", required=True, help="봉 단위 (설정 forecast.timeframes, 예: 1h·3h)")
+    sp.add_argument("--timeframe", required=True, help="봉 단위 (설정 forecast.timeframes, 제품 기본 1d — 결정 D-2b)")
     sp.add_argument("--sample", action="store_true", help="store/sample30 종목만 사용")
-    sp.add_argument("--minutes", type=Path, help="1분봉 사본 폴더 (기본: store 옆 minutes)")
+    sp.add_argument("--minutes", type=Path, help="1분봉 사본 폴더 — 시간봉(1h·3h)에만 쓰임 (기본: store 옆 minutes)")
     args = ap.parse_args(argv)
 
     cfg, paths = load_config(), load_paths()

@@ -90,7 +90,9 @@ async function show(out, f) {
     return;
   }
   const chartEl = h('div', { class: 'chart' });
-  const at = kst(d.as_of);
+  // 일봉(P2-11)은 봉 하나가 하루라 시각(확정 15:31)과 "다음 거래일" 표시가 뜻이 없다 — 날짜만 보이고 표시를 뺀다
+  const daily = d.timeframe === '1d';
+  const at = daily ? kst(d.as_of).slice(0, 10) : kst(d.as_of);
   out.replaceChildren(
     h('article', { class: 'card' },
       h('h2', {}, `${d.code} · ${d.timeframe}`), h('p', { class: 'card-sub', text: t('fc.asOfAt', { at, p: won(d.base_close) }) }),
@@ -98,7 +100,7 @@ async function show(out, f) {
     table({
       caption: t('fc.tableCap'),
       columns: [
-        { label: t('fc.col.h'), render: (s) => (s.cross_day
+        { label: t('fc.col.h'), render: (s) => (s.cross_day && !daily
           ? h('span', {}, t('fc.step', { h: s.h }), ' ', pill(t('fc.col.nextDay'), 'neutral')) : t('fc.step', { h: s.h })) },
         { label: withTip(t('fc.col.range'), t('help.fcRange')), num: true, render: (s) => `${won(s.low)} ~ ${won(s.high)}` },
         { label: t('fc.col.dir'), render: (s) => dirCell(s.direction) },
@@ -109,7 +111,7 @@ async function show(out, f) {
       rows: d.steps,
     }),
     h('p', { class: 'hint', text: t('fc.dirNote') }));
-  // x축 이름은 KST 로 바꾼 'MM-DD HH:MM' — 차트는 받은 이름을 그대로 쓴다
-  const history = d.history.map((p) => ({ ...p, label: kst(p.as_of).slice(5) }));
+  // x축 이름은 KST 로 바꾼 'MM-DD HH:MM'(일봉은 'MM-DD') — 차트는 받은 이름을 그대로 쓴다
+  const history = d.history.map((p) => ({ ...p, label: kst(p.as_of).slice(5, daily ? 10 : 16) }));
   forecastBand(chartEl, { ...d, history }, t('fc.chart', { c: d.code, n: d.steps.length }));
 }

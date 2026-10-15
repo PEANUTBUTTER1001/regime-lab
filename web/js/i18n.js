@@ -1097,7 +1097,7 @@ const D = {
   'ws.searchIdle': ['왼쪽에서 목표와 탐색 범위를 정한 뒤 탐색을 실행하세요. 최근 탐색 기록에서 지난 결과를 다시 열 수도 있습니다.', 'Set the target and range on the left, then run the search. You can also reopen a past result from Recent searches.'],
   // 봉 예측 (P2-10, SRS FR-F1~F7, E17)
   'fc.title': ['봉 예측', 'Bar forecast'],
-  'fc.lead': ['과거 1분봉으로 만든 시간봉의 다음 몇 개 봉 예상 범위입니다. 회색 띠는 10~90% 구간이고, 방향은 검증을 통과한 봉 수에만 표시합니다.', 'Expected range of the next few hourly bars, built from past minute data. The gray band is the 10–90% range; direction is shown only for horizons that passed validation.'],
+  'fc.lead': ['과거 KRX 정규장 일봉으로 만든 다음 며칠(봉)의 예상 범위입니다. 회색 띠는 10~90% 구간이고, 방향은 검증을 통과한 봉 수에만 표시합니다.', 'Expected range of the next few daily bars, built from past KRX regular-session daily prices. The gray band is the 10–90% range; direction is shown only for horizons that passed validation.'],
   'fc.notice': ['과거 데이터로 계산한 통계적 예상 범위이며 실제 가격 전망이나 매매 신호가 아닙니다.', 'This is a statistical range computed from past data, not a price outlook or a trading signal.'],
   'fc.formTitle': ['조건', 'Conditions'],
   'fc.run': ['예측 실행', 'Forecast run'],
@@ -1114,7 +1114,7 @@ const D = {
   'fc.noPredMsg': ['최종 평가 기간의 예측만 있습니다. 종목코드나 기준 시각을 바꿔 보세요.', 'Only final evaluation-period forecasts are stored. Try another code or time.'],
   'fc.runRange': [' · 평가 {a}~{b}', ' · test {a}–{b}'],
   'fc.noStock': ['이 예측 실행에 없는 종목입니다', 'This stock is not in the forecast run'],
-  'fc.noStockMsg': ['종목코드를 확인하거나 다른 예측 실행을 고르세요. 1분봉이 없는 종목(우선주 등)은 예측하지 않습니다.', 'Check the stock code or pick another run. Stocks without minute bars (e.g. preferred shares) are not forecast.'],
+  'fc.noStockMsg': ['종목코드를 확인하거나 다른 예측 실행을 고르세요. 보통주가 아니거나(우선주 등) 거래 기록이 없는 종목은 예측하지 않습니다.', 'Check the stock code or pick another run. Stocks that are not common shares (e.g. preferred shares) or have no trading records are not forecast.'],
   'fc.noAsOf': ['기준 시각이 평가 기간 밖입니다', 'The reference time is outside the test period'],
   'fc.noAsOfMsg': ['이 종목의 예측은 {a} ~ {b} 사이에만 있습니다. 그 안의 시각을 고르거나 비워 두세요.', 'Forecasts for this stock exist only from {a} to {b}. Pick a time in that range or leave it blank.'],
   'fc.thin': ['데이터 부족', 'Not enough data'],
