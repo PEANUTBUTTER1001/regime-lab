@@ -3,11 +3,12 @@
 // 모든 수치는 같은 run_id 의 /result·/stocks·/report 응답에서만 가져온다. 화면은 계산하지 않는다.
 import { api } from '../api.js';
 import { disposeIn, histogram, lines } from '../charts.js';
-import { errorView, fmt, h, helpTip, loading, metricDefs, passPill, pill, stateView, table, updown } from '../components/ui.js';
+import { easyName, glyph, viz } from '../components/easy.js';
+import { errorView, fmt, h, loading, metricDefs, passPill, pill, stateView, strongT, table, term, updown } from '../components/ui.js';
 import { paneFrame, paneTabs, setRouteGuard, swapped, toggleSwap } from '../components/workspace.js';
 import { has, t } from '../i18n.js';
 import { state } from '../state.js';
-import { renderBuilder } from './builder.js';
+import { exampleDraft, renderBuilder } from './builder.js';
 import { srcLabel, when } from './evidence.js';
 import { renderProgress } from './progress.js';
 import { renderReportInto } from './report.js';
@@ -19,9 +20,64 @@ const CAPS = ['large', 'mid', 'small'];
 const judge = (j) => [has(`j.${j}`) ? t(`j.${j}`) : j, has(`jd.${j}`) ? t(`jd.${j}`) : '', JUDGE_KIND[j] ?? 'neutral'];
 const patText = (inp) => inp.patterns.map((p) => (has(`pat.${p}`) ? t(`pat.${p}`) : p)).join(` ${inp.combine.toUpperCase()} `);
 
-// help: 어려운 지표 이름 옆 ? 도움말 문구 (E18)
-function metric(label, value, sub, tone = '', help = null) {
-  return h('div', { class: 'metric' }, h('span', { class: 'label' }, label, help && helpTip(help, label)), h('strong', { class: tone }, value), h('small', {}, sub));
+// info: 지표 이름을 점선 용어로 만들고 누르면 설명 카드 (X15 ③, design.md §7.9)
+function metric(label, value, sub, tone = '', info = null) {
+  return h('div', { class: 'metric' }, h('span', { class: 'label' }, info ? term(label, info) : label), h('strong', { class: tone }, value), h('small', {}, sub));
+}
+
+// 용어 설명 카드 문구 (쉬운 한 줄 + 보는 기준). 값은 이 실행의 API 값을 옮겨 적기만 한다
+const tip = (id, vars = {}) => ({ say: t(`tm.${id}.say`, vars), rule: t(`tm.${id}.rule`, vars) });
+const finite = (...xs) => xs.every((x) => typeof x === 'number' && Number.isFinite(x));
+const year = (d) => (d ? new Date(`${d}T00:00:00Z`).getUTCFullYear() : '—');
+
+// 결과 맨 위 한 줄 요약과 신호등 (X15 ①). 초록 = 서버 판정 analysis_target, 노랑 = 검사 3개 중 2개 이상 통과, 빨강 = 그 밖.
+// 새 판정이 아니라 서버의 판정·검사 결과를 쉬운 문장으로 옮긴다. 아래 판정 블록과 수치는 그대로 둔다
+function summaryCard(s, onMore) {
+  const m = s.summary;
+  const v = s.validation;
+  const passes = [v.split_pass, v.fdr_pass, v.random_pass].filter(Boolean).length;
+  const light = v.analysis_target ? 'green' : passes >= 2 ? 'yellow' : 'red';
+  const k = fmt.int(state.meta?.validation?.random_iterations ?? 1000);
+  const top = fmt.num((1 - (v.random_percentile ?? 0)) * 100, 1);
+  const split = v.split_pass ? ['ok', t('sum.split.ok')] : v.split_judgement === 'sample_insufficient' ? ['warn', t('sum.split.wait')] : ['no', t('sum.split.no')];
+  const checks = [split, v.fdr_pass ? ['ok', t('sum.fdr.ok')] : ['no', t('sum.fdr.no')],
+    v.random_pass ? ['ok', t('sum.random.ok', { k, top })] : ['no', t('sum.random.no')]];
+  const mark = { ok: '✓', warn: '!', no: '✕' };
+  const more = h('a', { href: '#', class: 'sum-more' }, t('sum.more'));
+  more.addEventListener('click', (e) => { e.preventDefault(); onMore(); });
+  return h('section', { class: `sum ${light}`, 'aria-label': t('sum.aria') },
+    h('div', { class: 'sum-head' }, h('span', { class: 'sum-light', 'aria-hidden': 'true' }, h('i'), h('i'), h('i')), h('b', {}, t(`sum.${light}`))),
+    h('p', { class: 'sum-main' },
+      strongT('sum.s1', { a: year(m.period_start), b: year(m.period_end), n: fmt.int(m.trades), w: fmt.pct(m.win_rate, 1, false) }),
+      finite(m.mean_excess) && [' ', strongT(m.mean_excess >= 0 ? 'sum.s2up' : 'sum.s2down', { x: `${Math.abs(m.mean_excess * 100).toFixed(2)}%p` })]),
+    h('ul', { class: 'sum-checks' }, checks.map(([kind, text]) => h('li', { class: kind }, h('span', { 'aria-hidden': 'true' }, mark[kind]), text))),
+    h('div', { class: 'sum-foot' }, h('span', {}, t('sum.foot')), more));
+}
+
+// 예시로 시작하기 (X15 ②): 실행 기록이 없는 사람에게 결과 칸에서 바로 시험할 예시 3개. 값은 허용 범위 안의 기본 청산
+const EXAMPLES = [
+  { key: 'high_52w', patterns: ['high_52w'], stop: -8, profit: 20, hold: 10 },
+  { key: 'rsi_rebound', patterns: ['rsi_rebound'], stop: -8, profit: 15, hold: 10 },
+  { key: 'ma_cross', patterns: ['ma_cross_5_20'], stop: -8, profit: 20, hold: 20 },
+];
+function examplesBlock(meta, onPick) {
+  const known = new Set(meta.patterns.map((p) => p.name));
+  const years = Math.round((Date.parse(meta.data_as_of) - Date.parse(meta.backtest_start)) / (365.25 * 864e5));
+  return h('section', { class: 'examples', 'aria-labelledby': 'ex-title' },
+    h('h2', { id: 'ex-title' }, t('ex.title')), h('p', { class: 'card-sub' }, t('ex.sub', { y: years })),
+    h('div', { class: 'ex-grid' }, EXAMPLES.filter((ex) => ex.patterns.every((n) => known.has(n))).map((ex) => {
+      const go = h('span', { class: 'ex-go' }, t('ex.go'));
+      const btn = h('button', { type: 'button', class: 'ex-card' }, glyph(ex.patterns[0], 'ex-glyph'), h('b', {}, t(`ex.${ex.key}`)),
+        h('span', { class: 'ex-d' }, easyName(ex.patterns[0])), h('span', { class: 'ex-e' }, t('ex.exit', { d: ex.hold, p: `${ex.profit}`, s: ex.stop })), go);
+      btn.addEventListener('click', () => {
+        btn.disabled = true; go.textContent = t('ex.busy');
+        onPick(ex);
+        // 실행이 시작되지 않았으면(입력 오류·대기열 가득) 다시 누를 수 있게
+        setTimeout(() => { if (btn.isConnected) { btn.disabled = false; go.textContent = t('ex.go'); } }, 4000);
+      });
+      return btn;
+    })),
+    h('p', { class: 'hint' }, t('ex.or'), ' ', h('a', { href: '#/presets' }, t('nav.presets')), ' · ', h('a', { href: '#/runs' }, t('nav.runs'))));
 }
 
 function heatCell(c) {
@@ -81,33 +137,58 @@ function summaryTab(box, res, s) {
   const minN = res.min_cell_trades;
   const pct = fmt.num((v.random_percentile ?? 0) * 100, 1);
   const [jl, jd, jk] = judge(v.split_judgement);
+  const k = fmt.int(state.meta?.validation?.random_iterations ?? 1000);
+  const top = fmt.num((1 - (v.random_percentile ?? 0)) * 100, 1);
+  const ok = (pass, yes, no) => (pass ? { value: t('common.passed'), tone: 'good', text: yes } : { value: t('common.notPassed'), tone: 'bad', text: no });
+  const info = {
+    trades: { ...tip('trades'), now: { value: fmt.int(m.trades), text: t('tm.trades.now', { a: year(m.period_start), b: year(m.period_end) }) } },
+    win: { ...tip('win'), viz: finite(m.win_rate) ? viz.dots(m.win_rate) : null,
+      now: { value: fmt.pct(m.win_rate, 1, false), text: finite(m.win_rate) ? t('tm.win.now', { n: Math.round(m.win_rate * 10) }) : '' } },
+    avg: { ...tip('avg'), now: { value: fmt.pct(m.mean_ret), tone: fmt.tone(m.mean_ret), text: m.mean_ret > 0 ? t('tm.avg.up') : m.mean_ret < 0 ? t('tm.avg.down') : '' } },
+    excess: { ...tip('excess'), viz: finite(m.mean_ret, m.mean_excess) ? viz.excess(m.mean_ret, m.mean_excess) : null,
+      now: { value: fmt.pctp(m.mean_excess), tone: fmt.tone(m.mean_excess), text: m.mean_excess > 0 ? t('tm.excess.up') : m.mean_excess < 0 ? t('tm.excess.down') : '' } },
+    split: { ...tip('split'), viz: finite(v.h1_mean_excess, v.h2_mean_excess) ? viz.split(fmt.int(v.h1_trades), v.h1_mean_excess, fmt.int(v.h2_trades), v.h2_mean_excess) : null,
+      now: v.split_pass ? { value: t('common.passed'), tone: 'good', text: t('tm.split.pass') }
+        : v.split_judgement === 'sample_insufficient' ? { value: jl, tone: 'warn', text: t('tm.split.wait') } : { value: jl, tone: 'bad', text: t('tm.split.fail') } },
+    fdr: { ...tip('fdr'), now: ok(v.fdr_pass, t('tm.fdr.pass'), t('tm.fdr.fail')) },
+    random: { ...tip('random'), viz: finite(v.random_percentile) ? viz.random(v.random_percentile) : null, now: ok(v.random_pass, t('tm.random.pass', { k, top }), t('tm.random.fail')) },
+    randomPct: { ...tip('randomPct', { k }), viz: finite(v.random_percentile) ? viz.random(v.random_percentile) : null,
+      now: { value: t('r.m.randomVal', { p: pct }), tone: v.random_pass ? 'good' : 'bad', text: t('tm.randomPct.now', { k, top }) } },
+    payoff: { ...tip('payoff'), now: { value: t('tm.payoff.now', { x: fmt.num(m.payoff_ratio) }), tone: m.payoff_ratio > 1 ? 'good' : 'bad', text: finite(m.payoff_ratio) ? t(m.payoff_ratio > 1 ? 'tm.payoff.up' : 'tm.payoff.down') : '' } },
+    sharpe: { ...tip('sharpe'), now: { value: fmt.num(m.sharpe, 2), text: '' } },
+    mdd: { ...tip('mdd'), viz: finite(m.mdd) ? viz.mdd(m.mdd) : null,
+      now: { value: fmt.pct(m.mdd, 1), tone: 'down', text: finite(m.mdd) ? t('tm.mdd.now', { v: Math.round(100 * (1 + m.mdd)) }) : '' } },
+  };
   box.append(h('div', { class: 'filterbar' }, h('span', {}, t('r.lead', {
     name: s.strategy, pats: patText(inp), mk: inp.markets.join(' + '), s: inp.period.start, e: inp.period.end,
     sl: inp.exit.stop_loss_pct ?? t('r.off'), tp: inp.exit.take_profit_pct ?? t('r.off'), h: inp.exit.max_hold_days }) + extraExits(inp.exit))));
 
   // 판정 블록 (E18 2차): 결론(서버 판정 analysis_target)을 먼저, 그 근거인 검증 3종을 질문으로. 상세 수치(p·q·m·백분위·분할일)는 그대로 둔다
-  const check = (question, name, help, result, detail) => h('li', { class: 'verdict-row' },
-    h('div', { class: 'verdict-q' }, h('span', { class: 'with-tip' }, h('b', {}, question), helpTip(help, name)), h('small', { class: 'muted' }, name)),
+  const check = (question, name, about, result, detail) => h('li', { class: 'verdict-row' },
+    h('div', { class: 'verdict-q' }, h('b', {}, question), h('small', { class: 'muted' }, term(name, about))),
     h('div', { class: 'verdict-res' }, result),
     h('p', { class: 'verdict-detail' }, detail));
   const target = !!v.analysis_target;
-  box.append(h('section', { class: `verdict${target ? '' : ' no'}`, 'aria-label': t('r.gates') },
+  const verdictEl = h('section', { class: `verdict${target ? '' : ' no'}`, 'aria-label': t('r.gates') });
+  if (m.trades > 0) box.append(summaryCard(s, () => verdictEl.scrollIntoView({ behavior: 'smooth', block: 'start' })));
+  box.append(verdictEl);
+  verdictEl.append(
     h('div', { class: 'verdict-head' }, h('span', { class: 'verdict-mark', 'aria-hidden': 'true' }, target ? '●' : '✕'),
       h('div', {}, h('h2', {}, t(target ? 'r.vTarget' : 'r.vNotTarget')), h('p', {}, t(target ? 'r.vTargetMsg' : 'r.vNotTargetMsg')))),
     h('ol', { class: 'verdict-list' },
-      check(t('r.qSplit'), t('r.split'), t('help.split'), v.split_pass ? passPill(true) : pill(jl, jk || 'bad'),
+      check(t('r.qSplit'), t('r.split'), info.split, v.split_pass ? passPill(true) : pill(jl, jk || 'bad'),
         t('r.splitText', { j: jd, d: s.split.split_date, n1: fmt.int(v.h1_trades), e1: fmt.pctp(v.h1_mean_excess), n2: fmt.int(v.h2_trades), e2: fmt.pctp(v.h2_mean_excess) })),
-      check(t('r.qFdr'), t('r.fdr'), t('help.fdr'), passPill(v.fdr_pass),
+      check(t('r.qFdr'), t('r.fdr'), info.fdr, passPill(v.fdr_pass),
         t('r.fdrText', { p: fmt.num(v.p_value, 4), q: fmt.num(state.meta?.validation?.fdr_q ?? 0.1, 2), m: res.fdr_family_size })),
-      check(t('r.qRandom'), t('r.random'), t('help.random'), passPill(v.random_pass),
-        t('r.randomText', { p: pct, n: fmt.int(state.meta?.validation?.random_iterations ?? 1000) })))));
+      check(t('r.qRandom'), t('r.random'), info.random, passPill(v.random_pass),
+        t('r.randomText', { p: pct, n: fmt.int(state.meta?.validation?.random_iterations ?? 1000) }))));
 
   // 핵심 지표 4개 (거래 수 병기, NFR-9)
   box.append(h('div', { class: 'metrics key' },
-    metric(t('r.m.trades'), fmt.int(m.trades), `${m.period_start ?? '—'} ~ ${m.period_end ?? '—'}`),
-    metric(t('r.m.win'), fmt.pct(m.win_rate, 1, false), t('r.m.winSub', { n: fmt.int(m.trades) })),
-    metric(t('r.m.avg'), updown(m.mean_ret, fmt.pct(m.mean_ret)), t('r.m.avgSub')),
-    metric(t('r.m.excess'), updown(m.mean_excess, fmt.pctp(m.mean_excess)), t('r.m.excessSub'), '', t('help.excess'))));
+    metric(t('r.m.trades'), fmt.int(m.trades), `${m.period_start ?? '—'} ~ ${m.period_end ?? '—'}`, '', info.trades),
+    metric(t('r.m.win'), fmt.pct(m.win_rate, 1, false), t('r.m.winSub', { n: fmt.int(m.trades) }), '', info.win),
+    metric(t('r.m.avg'), updown(m.mean_ret, fmt.pct(m.mean_ret)), t('r.m.avgSub'), '', info.avg),
+    metric(t('r.m.excess'), updown(m.mean_excess, fmt.pctp(m.mean_excess)), t('r.m.excessSub'), '', info.excess)));
 
   // 국면 × 시가총액 (시장·국면 기준 선택)
   let basis = 'cells_market';
@@ -118,9 +199,9 @@ function summaryTab(box, res, s) {
     h('div', { class: 'sec-h' }, h('h2', { id: 'heat-title' }, t('r.heat'))),
     h('p', { class: 'how', text: t('r.heatHow') }), h('p', { class: 'card-sub', text: t('r.heatSub') }),
     h('div', { class: 'tabs' },
-      toggleGroup(t('r.basis'), [['cells_market', t('r.basisMarket')], ['cells_stock', t('r.basisStock')]], basis, (k) => { basis = k; drawHeat(); }),
-      helpTip(t('help.regime'), t('r.basis')),
-      toggleGroup(t('b.market'), inp.markets.map((mk) => [mk, mk]), market, (k) => { market = k; drawHeat(); })),
+      h('span', { class: 'label tabs-label' }, term(t('r.basis'), tip('regime'))),
+      toggleGroup(t('r.basis'), [['cells_market', t('r.basisMarket')], ['cells_stock', t('r.basisStock')]], basis, (b) => { basis = b; drawHeat(); }),
+      toggleGroup(t('b.market'), inp.markets.map((mk) => [mk, mk]), market, (mk) => { market = mk; drawHeat(); })),
     heatBox));
   drawHeat();
   const reasons = exitReasons(m.exit_by_reason);
@@ -129,11 +210,11 @@ function summaryTab(box, res, s) {
   // 자세한 지표: 나머지 6개는 표로 (항목 · 값 · 설명). 기본 접힘
   const detail = [
     [t('r.m.random'), h('span', { class: v.random_pass ? 'positive' : 'warning' }, t('r.m.randomVal', { p: pct })),
-      t('r.m.randomSub', { p: pct, k: fmt.int(state.meta?.validation?.random_iterations ?? 1000), n: fmt.int(v.random_n_trades) }), t('help.randomPct')],
+      t('r.m.randomSub', { p: pct, k: fmt.int(state.meta?.validation?.random_iterations ?? 1000), n: fmt.int(v.random_n_trades) }), info.randomPct],
     [t('r.m.median'), updown(m.median_ret, fmt.pct(m.median_ret)), t('r.m.perTrade')],
-    [t('r.m.payoff'), fmt.num(m.payoff_ratio), t('r.m.payoffSub'), t('help.payoff')],
-    [t('r.m.sharpe'), fmt.num(m.sharpe, 3), t('r.m.sharpeSub'), t('help.sharpe')],
-    [t('r.m.mdd'), updown(m.mdd, fmt.pct(m.mdd, 1)), t('r.m.mddSub'), t('help.mdd')],
+    [t('r.m.payoff'), fmt.num(m.payoff_ratio), t('r.m.payoffSub'), info.payoff],
+    [t('r.m.sharpe'), fmt.num(m.sharpe, 3), t('r.m.sharpeSub'), info.sharpe],
+    [t('r.m.mdd'), updown(m.mdd, fmt.pct(m.mdd, 1)), t('r.m.mddSub'), info.mdd],
     [t('r.m.excl'), `${fmt.int(m.excluded_trades)} / ${fmt.int(m.skipped_entries)}`, t('r.m.exclSub')],
   ];
   const prefs = state.prefs;
@@ -141,8 +222,8 @@ function summaryTab(box, res, s) {
     h('summary', {}, t('r.detail')),
     h('div', { class: 'table-wrap' }, h('table', { class: 'detail-table' },
       h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, t('common.item')), h('th', { scope: 'col', class: 'num' }, t('common.value')), h('th', { scope: 'col' }, t('r.detailDesc')))),
-      h('tbody', {}, detail.map(([name, value, desc, help]) => h('tr', {},
-        h('th', { scope: 'row' }, h('span', { class: 'with-tip' }, name, help && helpTip(help, name))),
+      h('tbody', {}, detail.map(([name, value, desc, about]) => h('tr', {},
+        h('th', { scope: 'row' }, about ? term(name, about) : name),
         h('td', { class: 'num' }, value), h('td', { class: 'muted' }, desc)))))),
     metricDefs(res.metric_definitions, { open: prefs.defsOpen, onToggle: (o) => { state.prefs = { ...state.prefs, defsOpen: o }; } }));
   more.addEventListener('toggle', (e) => { if (e.target === more) state.prefs = { ...state.prefs, detailOpen: more.open }; });
@@ -420,8 +501,9 @@ export async function renderRunWorkspace(el, { mode, runId = null, progress = fa
     center.aside.replaceChildren();
     if (!ctx.runId) {
       center.main.replaceChildren(h('div', { class: 'ptitle' }, t('r.title')));
-      center.body.replaceChildren(stateView({ title: t('norun.title'), message: t('norun.msg'),
-        actions: [h('a', { class: 'secondary', href: '#/presets' }, t('nav.presets')), h('a', { class: 'secondary', href: '#/runs' }, t('nav.runs'))] }));
+      center.body.replaceChildren(mode === 'ws' && state.meta?.status === 'ready' ? examplesBlock(state.meta, runExample)
+        : stateView({ title: t('norun.title'), message: t('norun.msg'),
+          actions: [h('a', { class: 'secondary', href: '#/presets' }, t('nav.presets')), h('a', { class: 'secondary', href: '#/runs' }, t('nav.runs'))] }));
       barCtx('none');
       return;
     }
@@ -502,7 +584,8 @@ export async function renderRunWorkspace(el, { mode, runId = null, progress = fa
   }
 
   // ---------------------------------------------------------------- 조건 (전략 만들기)
-  const disposeBuilder = await renderBuilder(p1, query, {
+  let builderCtl = null;
+  const builderOpts = {
     title: t('ws.col.cond'),
     onSubmitted: (id) => {
       Object.assign(ctx, { runId: id, progress: true, resP: null, res: null, ticker: null, docs: null, tab: 'summary', strategy: null });
@@ -511,8 +594,18 @@ export async function renderRunWorkspace(el, { mode, runId = null, progress = fa
       frame.select(1);
       renderCenter(); renderRight();
     },
-  });
-  if (typeof disposeBuilder === 'function') cleanups.push(disposeBuilder);
+    onReady: (ctl) => { builderCtl = ctl; },
+  };
+  let disposeBuilder = await renderBuilder(p1, query, builderOpts);
+  cleanups.push(() => { if (typeof disposeBuilder === 'function') disposeBuilder(); });
+  // 예시 카드: 조건 열을 예시 값으로 다시 그린 뒤 원래 실행 버튼과 같은 경로로 실행한다 (검증·대기열 그대로)
+  async function runExample(ex) {
+    state.draft = exampleDraft(state.meta, ex);
+    state.loadedPreset = null;
+    if (typeof disposeBuilder === 'function') disposeBuilder();
+    disposeBuilder = await renderBuilder(p1, new URLSearchParams(), builderOpts);
+    builderCtl?.run();
+  }
   if (ctx.runId) state.lastRun = ctx.runId;
   renderCenter();
   renderRight();

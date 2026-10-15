@@ -547,3 +547,140 @@ button.doc:hover { background:var(--hover); }
 .del-cell .confirm { display:inline-flex; align-items:center; gap:6px; }
 .ibtn svg { width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:1.5; }
 .ibtn.danger:hover { color:var(--error); border-color:var(--err-line); }
+
+/* ===== X15 처음 쓰는 사람을 위한 화면 (design.md §7.9·§8.1·§8.2·§8.3) ===== */
+/* 용어 설명: 용어 글자에 옅은 점선, 설명 카드는 화면에 하나 (fixed) */
+.term { cursor:help; text-decoration:underline dotted; text-decoration-thickness:1.5px; text-underline-offset:3px;
+  text-decoration-color:color-mix(in srgb, var(--muted) 60%, transparent); border-radius:var(--r); outline:none; }
+.term:hover, .term[aria-expanded="true"] { text-decoration-color:var(--accent); color:var(--text); }
+.term:focus-visible { box-shadow:0 0 0 2px var(--mint-line); }
+.term-pop { position:fixed; z-index:90; width:300px; max-width:calc(100vw - 32px); padding:12px 14px 11px; background:var(--surface); border:1px solid var(--line-strong);
+  border-radius:var(--r); box-shadow:var(--shadow); color:var(--text); font-size:var(--fs-body); line-height:1.55; text-align:left; white-space:normal;
+  letter-spacing:normal; text-transform:none; font-weight:400; opacity:0; transform:translateY(3px); transition:opacity .12s, transform .12s; }
+.term-pop.on { opacity:1; transform:none; }
+.term-pop[hidden] { display:none; }
+.term-name { display:block; color:var(--muted); font-size:var(--fs-meta); margin-bottom:2px; }
+.term-say { margin:0; font-size:var(--fs-input); font-weight:600; line-height:1.5; word-break:keep-all; }
+.term-viz { margin:10px 0 2px; }
+.term-viz svg { display:block; width:100%; height:auto; overflow:visible; font:600 11px var(--sans); }
+.term-now { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; margin-top:10px; padding-top:9px; border-top:1px solid var(--line); }
+.term-now span { color:var(--muted); font-size:var(--fs-meta); }
+.term-now b { font:700 var(--fs-head)/1.2 var(--mono); font-variant-numeric:tabular-nums; }
+.term-now em { font-style:normal; color:var(--muted); word-break:keep-all; }
+.term-rule { margin:6px 0 0; color:var(--muted); font-size:var(--fs-meta); word-break:keep-all; }
+.term-pop .up { color:var(--up); } .term-pop .down { color:var(--down); }
+.term-pop .good { color:var(--accent); } .term-pop .warn { color:var(--amber); } .term-pop .bad { color:var(--error); }
+.term-pop.sheet { left:12px!important; right:12px; top:auto!important; bottom:12px; width:auto; max-width:none; padding:16px 18px 14px; transform:translateY(10px); }
+.term-pop.sheet.on { transform:none; }
+.term-pop.sheet::before { content:''; display:block; width:36px; height:4px; border-radius:2px; background:var(--line-strong); margin:-6px auto 10px; }
+/* 작은 그림 색 (토큰만, E19) */
+.term-viz .v-on { fill:var(--accent); } .term-viz .v-off { fill:none; stroke:var(--line-strong); stroke-width:1.5; }
+.term-viz .v-mid { fill:var(--line-strong); } .term-viz .v-soft { fill:color-mix(in srgb, var(--accent) 16%, transparent); }
+.term-viz .v-line { fill:none; stroke:var(--muted); stroke-width:1.5; } .term-viz .v-mark { stroke:var(--accent); stroke-width:2; }
+.term-viz .v-base { stroke:var(--line-strong); } .term-viz .v-path { fill:none; stroke:var(--text); stroke-width:1.8; stroke-linejoin:round; }
+.term-viz .v-dash { stroke:var(--muted); stroke-dasharray:2 4; } .term-viz .v-dot { fill:var(--text); }
+.term-viz .v-down { stroke:var(--down); stroke-width:1.5; } .term-viz .v-downf { fill:var(--down); }
+.term-viz .v-mut { fill:var(--muted); font-weight:500; } .term-viz .v-txt { fill:var(--text); }
+.term-viz .v-upt { fill:var(--up); font-size:12px; } .term-viz .v-downt { fill:var(--down); font-size:12px; }
+.tabs-label { margin:0 4px 0 0; }
+
+/* 패턴 카드: 언제 사는지 묶음 · 모양 그림 · 쉬운 이름 (체크박스는 카드 안에 그대로) */
+.pat-cards { display:grid; gap:12px; margin-top:6px; }
+.pat-group { display:grid; gap:4px; }
+.pat-gh { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 8px; margin:2px 0 2px; }
+.pat-gh b { font-size:var(--fs-input); }
+.pat-gh span { color:var(--muted); font-size:var(--fs-meta); }
+.pat-card { position:relative; display:grid; grid-template-columns:52px minmax(0,1fr) 16px; align-items:center; gap:10px; padding:7px 10px 7px 8px;
+  border:1px solid var(--line); border-radius:var(--r); cursor:pointer; color:var(--text); }
+.pat-card:hover { border-color:var(--line-strong); background:var(--hover); }
+.pat-card.selected { border-color:var(--accent); background:var(--sel); }
+.pat-box { position:absolute; opacity:0; width:1px; height:1px; margin:0; }
+.pat-card:focus-within { outline:2px solid var(--mint-line); outline-offset:1px; }
+.pat-glyph svg, .ex-glyph svg { display:block; width:52px; height:26px; overflow:visible; }
+.pat-t { display:grid; gap:1px; min-width:0; }
+.pat-t b { font-size:var(--fs-input); font-weight:600; line-height:1.4; word-break:keep-all; }
+.pat-t small { color:var(--dim); font-size:var(--fs-meta); }
+.pat-t .rule-text { display:none; color:var(--dim); font:var(--fs-meta)/1.45 var(--mono); word-break:break-word; margin-top:2px; }
+.pat-cards.show-rules .rule-text { display:block; }
+.pat-check { width:16px; height:16px; border-radius:50%; border:1.5px solid var(--line-strong); position:relative; }
+.pat-card.selected .pat-check { background:var(--accent); border-color:var(--accent); }
+.pat-card.selected .pat-check::after { content:''; position:absolute; left:4px; top:1px; width:4px; height:8px; border:solid var(--canvas); border-width:0 2px 2px 0; transform:rotate(45deg); }
+.pat-glyph .g-p, .ex-glyph .g-p { fill:none; stroke:var(--text); stroke-width:1.6; stroke-linejoin:round; stroke-linecap:round; }
+.pat-glyph .g-a, .ex-glyph .g-a { fill:none; stroke:var(--muted); stroke-width:1.2; stroke-dasharray:2.5 3; }
+.pat-glyph .g-d, .ex-glyph .g-d { fill:var(--accent); } .pat-glyph .g-m, .ex-glyph .g-m { fill:var(--muted); }
+.pat-glyph .g-v, .ex-glyph .g-v { fill:var(--line-strong); } .pat-glyph .g-vh, .ex-glyph .g-vh { fill:var(--accent); }
+.pat-glyph .g-w, .ex-glyph .g-w { stroke:var(--muted); stroke-width:1; }
+.pat-glyph .g-up, .ex-glyph .g-up { fill:var(--up); } .pat-glyph .g-dn, .ex-glyph .g-dn { fill:var(--down); }
+.seg-code { margin-left:4px; color:var(--dim); font-size:10px; font-weight:500; }
+
+/* 입력값을 옮겨 적는 문장 */
+.say { margin:10px 0 2px; padding:9px 12px; border-left:2px solid var(--accent); background:var(--sel); border-radius:var(--r); font-size:var(--fs-body); line-height:1.6; word-break:keep-all; }
+.say-h { display:block; color:var(--accent); font-size:var(--fs-meta); font-weight:700; margin-bottom:1px; }
+
+/* 목표 동그라미 · 기간 그림 */
+.dots { display:inline-flex; gap:4px; vertical-align:middle; }
+.dots i { flex:none; width:10px; height:10px; border-radius:50%; border:1.5px solid var(--line-strong); }
+.dots i.on { background:var(--accent); border-color:var(--accent); }
+.goal { display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin:4px 0 14px; padding:9px 12px; border-left:2px solid var(--accent); background:var(--sel); border-radius:var(--r); }
+.goal p { margin:0; font-size:var(--fs-body); line-height:1.55; word-break:keep-all; }
+.tl { margin:8px 0 4px; }
+.tl-bar { display:flex; gap:3px; height:24px; }
+.tl-bar span { display:flex; align-items:center; justify-content:center; border-radius:var(--r); font-size:var(--fs-meta); font-weight:600; white-space:nowrap; overflow:hidden; color:var(--text); }
+.tl-bar .a { background:color-mix(in srgb, var(--accent) 18%, transparent); }
+.tl-bar .b { background:color-mix(in srgb, var(--amber) 20%, transparent); }
+.tl-dates { display:flex; justify-content:space-between; gap:6px; margin-top:3px; color:var(--muted); font:10.5px var(--mono); white-space:nowrap; }
+.tl p { margin:6px 0 0; color:var(--muted); font-size:var(--fs-meta); line-height:1.55; word-break:keep-all; }
+.tl.compact { min-width:min(360px, 100%); }
+
+/* 결과 맨 위 한 줄 요약과 신호등 (초록=서버 판정, 노랑=검사 2개 이상 통과, 빨강=그 밖) */
+.sum { --l:var(--error); margin:12px 16px 4px; padding:14px 16px; border:1px solid var(--line); border-left:3px solid var(--l); border-radius:var(--r); background:var(--surface); }
+.sum.green { --l:var(--accent); } .sum.yellow { --l:var(--amber); }
+.ssum { margin:0 0 18px; }
+.sum-head { display:flex; align-items:center; gap:10px; }
+.sum-head b { font-size:var(--fs-head); line-height:1.35; word-break:keep-all; }
+.sum-light { flex:none; display:inline-flex; gap:3px; padding:4px 6px; border-radius:999px; background:var(--control); }
+.sum-light i { width:9px; height:9px; border-radius:50%; background:var(--line-strong); }
+.sum.red .sum-light i:nth-child(1), .sum.yellow .sum-light i:nth-child(2), .sum.green .sum-light i:nth-child(3) { background:var(--l); }
+.sum-main { margin:10px 0 0; font-size:var(--fs-input); line-height:1.65; word-break:keep-all; max-width:78ch; }
+.sum-main strong { font-weight:700; }
+.sum-checks { list-style:none; margin:10px 0 0; padding:0; display:grid; gap:4px; }
+.sum-checks li { display:flex; align-items:flex-start; gap:8px; font-size:var(--fs-body); line-height:1.5; }
+.sum-checks span { flex:none; width:16px; height:16px; border-radius:50%; display:grid; place-items:center; font-size:10px; font-weight:800; margin-top:1px; }
+.sum-checks .ok span { color:var(--accent); background:var(--sel); }
+.sum-checks .warn span { color:var(--amber); background:var(--control); }
+.sum-checks .no span { color:var(--error); background:var(--control); }
+.sum-foot { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px 12px; margin-top:12px; color:var(--dim); font-size:var(--fs-meta); }
+.sum-more { color:var(--accent); font-weight:600; }
+.sum-warn { margin:10px 0 0; color:var(--amber); font-size:var(--fs-body); line-height:1.55; word-break:keep-all; }
+.stack { display:flex; gap:2px; height:10px; border-radius:var(--r); overflow:hidden; margin:12px 0 6px; }
+.stack .both, .legend-row .both i { background:var(--accent); }
+.stack .ex, .legend-row .ex i { background:var(--amber); }
+.stack .no, .legend-row .no i { background:var(--muted); }
+.stack .few, .legend-row .few i { background:var(--line-strong); }
+.legend-row { display:flex; flex-wrap:wrap; gap:4px 14px; margin:0; padding:0; list-style:none; color:var(--muted); font-size:var(--fs-meta); }
+.legend-row li { display:flex; align-items:center; gap:5px; } .legend-row i { width:8px; height:8px; border-radius:1px; }
+.legend-row b { color:var(--text); font-variant-numeric:tabular-nums; }
+.pick { margin-top:12px; padding:10px 12px; border:1px solid var(--line); border-radius:var(--r); }
+.pick-h { display:flex; flex-wrap:wrap; gap:2px 8px; color:var(--muted); font-size:var(--fs-meta); font-weight:700; }
+.pick-h em { font-style:normal; font-weight:400; }
+.pick > p { margin:4px 0 8px; font-size:var(--fs-body); line-height:1.6; word-break:keep-all; }
+.pick-row { display:grid; grid-template-columns:64px max-content minmax(0,1fr); align-items:center; gap:10px; margin-top:4px; font-size:var(--fs-body); }
+.pick-row > span { color:var(--muted); font-size:var(--fs-meta); }
+.pick-row em { font-style:normal; color:var(--muted); word-break:keep-all; }
+
+/* 예시로 시작하기 */
+.examples { margin:16px; padding:16px; border:1px solid var(--line); border-radius:var(--r); background:var(--surface); }
+.examples h2 { font-size:var(--fs-head); }
+.ex-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:10px; margin-top:4px; }
+.ex-card { display:grid; gap:4px; align-content:start; text-align:left; padding:12px; border:1px solid var(--line-strong); border-radius:var(--r); background:transparent; color:var(--text); }
+.ex-card:hover:not(:disabled) { border-color:var(--accent); background:var(--hover); }
+.ex-card:disabled { opacity:.7; cursor:progress; }
+.ex-card .ex-glyph svg { width:96px; height:48px; margin-bottom:4px; }
+.ex-card b { font-size:var(--fs-head); }
+.ex-d { font-size:var(--fs-body); line-height:1.5; word-break:keep-all; }
+.ex-e { color:var(--muted); font-size:var(--fs-meta); line-height:1.5; word-break:keep-all; }
+.ex-go { margin-top:6px; color:var(--accent); font-weight:700; font-size:var(--fs-body); }
+.examples .hint a { color:var(--accent); }
+/* 목표로 찾기 결과 표: 머리는 두 줄까지 감싸고 전략 칸은 좁아지지 않게 */
+.sr-table th { white-space:normal; word-break:keep-all; line-height:1.35; vertical-align:bottom; }
+.sr-table td:nth-child(3) { min-width:190px; }
