@@ -1,5 +1,75 @@
 # PROGRESS
 
+## 2026-10-15 20:40:08 KST (+09:00) — PEANUTBUTTER1001 AGENTS.md X12 지침·WBS 갱신
+
+- 승인 근거: 사용자 $agents-md 점검·제안 뒤 “1~8 그리고 wbs도 갱신바람”. 선택 1~8 반영, 9번 압축안 보류.
+- AGENTS.md: §1 데모 LAN 실행 조건, §2 설정 검증/HTTP 필터 책임, §4 환경변수·팀원별 /32 운영 및 실제 주소 비기록·paths.local.yaml 전체 경로, §7 RFC1918/strict CIDR·loopback/mapped/원격 IPv6·Supabase 파싱/검증/필터 제외·직접 접속/전달 헤더/원격 LLM 제한, §8 실제 서버·두 PC 완료 기준 반영. 141→146줄, §1~§9 제목·§6 예외 원문 유지.
+- WBS: X12·X12.1·X12.2 메모만 갱신. AGENTS 등록·기존 검증 근거·리뷰어 hongsungmin0315 및 미실행 수용 AC12 명시. X12 진행 중60%(완료 확정0.3/0.5)·X12.1 완료100%·X12.2 진행 중 유지. 담당 PEANUTBUTTER1001·작업량·일정·선행·상태/진척률·실제 일자 유지.
+- 검증: AGENTS lint FAIL0·WARN42·INFO10(기존 경고 수 유지), (사람이 작성) 빈칸0. WBS 대상3행 외305행 바이트 동일·19열·UTF-8 BOM/CRLF 보존. 코드·기존 비대상 변경 해시 동일, 과거 진행 기록 원문 보존. git diff --check 확인.
+- Claude Code: 기존 점검 버전2.1.294·detect의 claude_md 빈 목록, AGENTS.md 직접 로딩 조건 충족. CLAUDE 파일 수정 없음.
+- 테스트: 문서 개정만 수행하여 제품 테스트 재실행 없음. 직전 X12 전체 회귀1102 passed·8 skipped·실패0 근거 유지, 이번 문서 검사와 구분.
+- 잔여: hongsungmin0315 리뷰·실제 서버 허용/비허용 기기·원격 LLM 거부·두 PC X13 대기→완료 수용 미확인. 서버·방화벽·주소·원본·의존성 변경 및 커밋·푸시·PR·병합 없음.
+
+---
+
+## 2026-10-15 19:55:03 KST (+09:00) — PEANUTBUTTER1001 X12 구현·검증
+
+- 시작 시각: 2026-10-15 19:55:03 KST (+09:00).
+- 승인 근거: X12 구현 요구사항 명세 제시 뒤 사용자 $execute 호출. 1A 팀원별 /32 운영·2B IPv4 사설망만·3B Supabase LAN 변수 무시 및 공통 기본안 확정.
+- 목표: 설정·조립 최소 변경으로 데모 LAN 접속 필터 구현, 기존 인증·LLM·대기열 동작 보존 및 원본 없는 검증.
+- 기준: develop 6c2a7df. 작업 브랜치 feat/X12-lan-allowlist. 기존 문서 6개 변경·미추적 명세 보존, 백업/해시는 cache/qa/x12/에 보관. 실제 서버·원본·의존성·AGENTS.md·커밋·푸시·PR·병합 변경 제외.
+
+### 단계 상태
+
+| 단계 | 상태 | 비고 |
+|---|---|---|
+| 1. 보존·작업 브랜치·API 기준선 | 🟢 완료 | feat/X12-lan-allowlist, 기존 변경 보존, API 195 passed(74.10초) |
+| 2. 설정·요청 필터·실행 진입점 | 🟢 완료 | 데모 RFC1918 검증·모든 HTTP 경로 차단·Supabase 무시·demo proxy_headers=False |
+| 3. 정책·호환성·실제 Uvicorn 검증 | 🟢 완료 | 신규94·인증/소유자/대기열/로그인 포함148 passed, 실제 Uvicorn 전달 헤더 무시 확인 |
+| 4. API·엔진·수집기 전체 회귀 | 🟢 완료 | engine666 passed·8 skipped(562.46초)·API289 passed(81.10초)·ingest147 passed(9.13초), 실패0 |
+| 5. 문서·WBS·보존·완료 기록 | 🟢 완료 | 문서·결정·명세반영, WBS대상3행만 갱신·비대상305행/BOM/CRLF 보존 |
+| 6. 실제 서버·두 PC 수용 | 🟠 연기 | 별도 서버 적용·재시작 승인 및 환경 필요, X12 전체 완료 판정 보류 |
+
+- 최종 확인: 2026-10-15 20:26:55 KST (+09:00). 승인된 로컬 구현·검증 완료, 실제 서버 수용은 연기 상태. 코드 동작·API 계약·문서 외 원본·사용자 서버·AGENTS.md·의존성·웹 파일 변경 없음. 커밋·푸시·PR·병합 없음.
+- 구현: settings.py의 데모 전용 REGIME_ALLOWED_NETS 파싱·strict RFC1918 IPv4 검증·직접 Settings 검증·비 loopback 시작 조건, main.py의 전체 HTTP 경로 필터·loopback/mapped 처리·고정403 JSON·데모 proxy_headers=False. Supabase에서는 LAN 변수 파싱·검증·필터 전부 무시, 기존 Uvicorn 옵션 유지.
+- 테스트: 신규 test_lan_allowlist.py 94건, 기존 인증/소유자/대기열/로그인 포함148 passed. 초기7실패는 새 검사 fixture의 StaticFiles 순서·키 삭제 후 초기화 문제였으며 검사만 수정, 제품 코드는 추가 변경 없이 통과. 실제 Uvicorn 임시 loopback 서버에서 전달 헤더·FORWARDED_ALLOW_IPS=* 조건 검증 후 정상 종료.
+- 전체 결과: engine666 passed·8 skipped, API289 passed, ingest147 passed. 합계1102 passed·8 skipped·실패0. skip은 1분봉 사본 부재3·지수 워밍업 부재5, API 기존 deprecation1. CI 필수 engine3·API4·ingest2 모듈과 신규94검사 모두 존재·통과·skip 없음.
+- 검증 명령: UV_CACHE_DIR=cache/uv·PYTHONDONTWRITEBYTECODE=1, uv run --no-sync --project <engine|api|ingest> python -B -m pytest <패키지> --ignore=<패키지>/cache -q --basetemp=cache/x12-<e|a|i> -o cache_dir=cache/x12-<ec|ac|ic> --junitxml=cache/qa/x12/<패키지>.xml. API 기준선195 passed, 전체API는 신규94 증가한289 passed. 관련148은 전체 합계에 중복 가산하지 않음.
+- 기록: README·readme-preview·X3 설계·F1·B22·결정 F1b·X12 명세 갱신. WBS X12.1 100%, 부모X12 60%(완료 확정0.3/0.5), X12.2는 로컬 테스트·문서 완료이나 실제 서버/두 PC 수용 미실행으로 진행 중. 계획·담당·작업량·선행 유지, 대상3행 외305행 바이트 동일·19열·BOM/CRLF 확인.
+- 보존: 기존 진행 기록은 새 섹션 아래 원문 보존, P2-P4 기존 변경·AGENTS.md·확정 default.yaml·LLM/인증 라우트 해시 동일. Git 제외 cache/qa/x12/에 시작 백업·해시·패치·JUnit·verification.json 보관. git diff --check·Python AST·문서 링크 확인.
+- 후속: hongsungmin0315 리뷰, REGIME_ALLOWED_NETS의 AGENTS 등록은 /agents-md로 요청. 서버 PC /32·방화벽·직접 접속·원격 LLM 거부·X13 두 PC 대기→완료 확인 뒤 전체 완료 판정. 실제 서버 재시작은 별도 승인 전 실행하지 않음.
+
+---
+
+## 2026-10-15 19:51:58 KST (+09:00) — PEANUTBUTTER1001 X12 정책 3건 확정·구현 전 SRS
+
+- 승인 근거: 사용자 “1a / 2b /3b 공통기본안 반영 3개의 사항은 문서로 기록할것 이제 구현전 검토후 $srs”. 문서 기록은 명시 요청에 따라 반영, 제품 구현 승인과 구분.
+- 확정: 1A 운영은 팀원별 IPv4 /32, 2B 원격 허용 목록은 RFC1918 IPv4만, 3B Supabase에서는 LAN 변수 파싱·검증·필터 모두 무시. loopback 자동 허용·직접 접속·network_not_allowed·원격 LLM 제한·서버 수용 후 완료 공통안 반영.
+- 검토: 기존 settings/main 경계로 구현 가능, 새 외부 의존성·공통 모듈 필요x. CIDR 입력 기능과 운영 /32 정책 구분, IPv6 loopback/mapped 표현과 native IPv6 원격 지원 구분, Supabase 파싱 전 모드 분기·실행 옵션 보존 필요.
+- 산출물: docs/X12_구현_요구사항_명세.md의 10개 절·정책 표·기능/수용 기준·최소 변경/검증 계획 작성. 결정 F1b·B22에 확정 정책·구현 게이트 연결. 구현 담당 PEANUTBUTTER1001·리뷰 hongsungmin0315 유지.
+- 상태: 정책 기록 완료·코드 구현 연기(명세 승인 대기), 실제 서버 상태 미확인. 기존 미커밋 변경 보존. WBS·AGENTS.md·제품 코드·데이터·서버 변경 및 테스트·설치·브랜치 생성·커밋·푸시 없음.
+- 검증: 기존 보호 대상 해시·진행 기록 원문·BOM/CRLF 보존 확인, 명세 링크·핵심 선택 대조 및 git diff --check 수행. 현재 문서 검증을 제품 수용 통과로 취급하지 않음.
+
+---
+
+## 2026-10-15 19:26:10 KST (+09:00) — PEANUTBUTTER1001 X12 리뷰어 위임
+
+- 승인 근거: 사용자 "리뷰어 hongsungmin0315 위임". X12 리뷰어 hchee99 → hongsungmin0315 변경, 구현 담당 PEANUTBUTTER1001 유지.
+- 반영: P3-P4 로드맵 B22 리뷰 표기·확정 결정 F1b 갱신. 직전 담당 이관 기록은 당시 이력으로 보존하며, 현재 리뷰어는 이번 위임을 기준으로 함.
+- 검증: WBS 바이트 동일·담당/작업량/일정/상태/진척률 유지, git diff --check 통과. 문서 개정만 수행, 테스트·외부 리뷰 요청·커밋·푸시 없음.
+
+---
+
+## 2026-10-15 19:23:13 KST (+09:00) — PEANUTBUTTER1001 X12 담당 이관
+
+- 승인 근거: X12 담당 확인 후 사용자 "내가 할거임 개정바람". hchee99 → PEANUTBUTTER1001 이관.
+- WBS: X12·X12.1·X12.2 3행의 인원·역할 변경, 부모 행에 승인 근거 추가. 작업량 0.5(0.3+0.2)·계획/기준선·선행·상태 대기·진척률 0% 유지. 비대상 행 원문·UTF-8 BOM·CRLF 보존.
+- 연결 문서: P3-P4 로드맵 B22·범위/요약표, F1 §6.3 분담표, P2-P4 로드맵 S8 연계표, 확정 결정 F1b에 반영. 협업 규칙 §3.5에 따라 본인 리뷰를 피하도록 B22 리뷰는 인증 영역 담당 hchee99로 변경. 과거 진행 기록 보존.
+- 가중 진행률(수준2·보류 제외): 전체 69.5% 유지, PEANUTBUTTER1001 53.6→52.2%(9.6/18.4), hchee99 40.8→42.4%(5.3/12.5). 담당 작업량 이동에 따른 분모 변경이며 완료 실적 변화 없음. Seonghwanaa 81.6%·hongsungmin0315 97.4% 유지.
+- 검증: WBS 19열·ID·행 순서·비대상 행 바이트 보존, 대상 행의 허용 열 외 불변, 관련 담당 표기 대조 및 git diff --check 확인. 문서 개정만 수행, 제품 코드·AGENTS.md·데이터·서버 변경 및 테스트 실행 없음. 커밋·푸시 없음.
+
+---
+
 ## 2026-10-15 17:41:22 KST (+09:00) — PEANUTBUTTER1001 AGENTS.md 개정·WBS 실적 갱신
 
 - 승인 근거: 사용자 "agents.md 개정하고 wbs 현재 진행상황에 맞게 업데이트도 추가 진행". 앞서 제시한 AGENTS 개정 1~8 반영, 전체 압축·§6 예외 정리는 보류.

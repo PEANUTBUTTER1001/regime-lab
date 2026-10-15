@@ -10,6 +10,7 @@
 | REGIME_LLM_TIMEOUT | 30 | LLM 호출 제한 시간(초) |
 | REGIME_CORS_ORIGINS | (없음) | 개발용 추가 허용 출처(쉼표 구분). 기본은 같은 출처만 |
 | REGIME_HOST / REGIME_PORT | 127.0.0.1 / 8000 | 서버 바인딩 |
+| REGIME_ALLOWED_NETS | (없음) | 데모 LAN 허용 IPv4 사설 CIDR(쉼표 구분), 운영은 팀원별 /32. Supabase는 무시 |
 """
 
 from __future__ import annotations
@@ -50,6 +51,25 @@ def _news_api_config(paths: Paths) -> dict | None:
     return config
 
 
+def _demo_allowed_nets(values) -> list[ipaddress.IPv4Network]:
+    # RFC1918 protocol ranges, not tunable analysis parameters. is_private also includes special addresses.
+    private = tuple(ipaddress.IPv4Network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+    nets = []
+    for i, value in enumerate(values, 1):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                continue
+            try:
+                value = ipaddress.IPv4Network(value)  # strict: do not widen a mistyped host/CIDR
+            except ValueError:
+                raise ValueError(f"Invalid REGIME_ALLOWED_NETS entry {i}") from None
+        if not isinstance(value, ipaddress.IPv4Network) or not any(value.subnet_of(n) for n in private):
+            raise ValueError(f"Invalid REGIME_ALLOWED_NETS entry {i}")
+        nets.append(value)
+    return nets
+
+
 @dataclass
 class Settings:
     paths: Paths
@@ -62,6 +82,7 @@ class Settings:
     web_dir: Path = REPO_ROOT / "web"
     host: str = "127.0.0.1"
     port: int = 8000
+    allowed_nets: list[ipaddress.IPv4Network] = field(default_factory=list, repr=False)
 
     auth_mode: str = "demo"
     supabase_url: str | None = None
@@ -76,12 +97,13 @@ class Settings:
         if self.auth_mode not in {"demo", "supabase"}:
             raise ValueError("REGIME_AUTH_MODE must be demo or supabase")
         if self.auth_mode == "demo":
+            self.allowed_nets = _demo_allowed_nets(self.allowed_nets)
             try:
                 local = ipaddress.ip_address(self.host).is_loopback
             except ValueError:
                 local = self.host == "localhost"
-            if not local:
-                raise ValueError("Demo authentication is only allowed on loopback")
+            if not local and not self.allowed_nets:
+                raise ValueError("Set REGIME_ALLOWED_NETS for non-loopback demo authentication")
             return
         url = urlsplit(self.supabase_url or "")
         site = urlsplit(self.auth_site_url)
@@ -104,6 +126,7 @@ class Settings:
         runs = os.environ.get("REGIME_RUNS_DIR")
         if runs:
             paths = replace(paths, runs=Path(runs))
+        auth_mode = os.environ.get("REGIME_AUTH_MODE") or ("supabase" if os.environ.get("REGIME_SUPABASE_URL") or os.environ.get("REGIME_SUPABASE_PUBLISHABLE_KEY") else "demo")
         provider = os.environ.get("REGIME_LLM_PROVIDER", "openai").strip().lower()
         key_env = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
         return cls(
@@ -117,7 +140,8 @@ class Settings:
             cors_origins=[o.strip() for o in os.environ.get("REGIME_CORS_ORIGINS", "").split(",") if o.strip()],
             host=os.environ.get("REGIME_HOST", "127.0.0.1"),
             port=int(os.environ.get("REGIME_PORT", "8000")),
-            auth_mode=os.environ.get("REGIME_AUTH_MODE") or ("supabase" if os.environ.get("REGIME_SUPABASE_URL") or os.environ.get("REGIME_SUPABASE_PUBLISHABLE_KEY") else "demo"),
+            auth_mode=auth_mode,
+            allowed_nets=_demo_allowed_nets(os.environ.get("REGIME_ALLOWED_NETS", "").split(",")) if auth_mode == "demo" else [],
             supabase_url=os.environ.get("REGIME_SUPABASE_URL"),
             supabase_publishable_key=os.environ.get("REGIME_SUPABASE_PUBLISHABLE_KEY"),
             auth_site_url=os.environ.get("REGIME_AUTH_SITE_URL", "http://127.0.0.1:" + os.environ.get("REGIME_PORT", "8000")),

@@ -205,7 +205,7 @@ uv run --project api regime-api
 | Morning Briefing (사이드바 '시장 브리핑', 준비 중) | 야간·뉴스 입력이 없어 `Data unavailable`과 사유만 표시합니다(추후 과제 T-2) |
 | 설정 (⚙) | 화면 언어(한국어 기본 / English), **AI 보고서 모델명·API 키 입력**(서버 메모리에만 보관, 서버 종료 시 소멸 — 결정 E10 잠정, 추후 T-9 재논의), 데이터 기준일·범위 등 서버 데이터 정보 |
 
-**환경변수** (모두 선택)
+**환경변수** (기본은 선택. 비 loopback 데모의 `REGIME_ALLOWED_NETS` 및 Supabase 필수 설정은 예외)
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
@@ -216,12 +216,14 @@ uv run --project api regime-api
 | `REGIME_RUNS_DIR` | `runs/` | 실행 결과 폴더 |
 | `REGIME_CORS_ORIGINS` | 없음 | 개발용 추가 허용 출처(쉼표 구분). 기본은 같은 출처만 허용합니다 |
 | `REGIME_HOST` / `REGIME_PORT` | 127.0.0.1 / 8000 | 서버 주소 |
-| `REGIME_AUTH_MODE` | `demo` | `demo`(loopback 전용, 실제 인증 없음) 또는 `supabase`. Supabase 변수가 있으면 `supabase` |
+| `REGIME_AUTH_MODE` | `demo` | `demo`(기본 loopback, 비 loopback은 허용 목록 필수) 또는 `supabase`. Supabase 변수가 있으면 `supabase` |
+| `REGIME_ALLOWED_NETS` | 없음 | 데모 전용 IPv4 사설 IP/CIDR·쉼표 구분. 운영은 팀원별 `/32`, loopback 자동 허용. Supabase에서는 파싱·검증·필터 없이 무시 |
 | `REGIME_SUPABASE_URL` / `REGIME_SUPABASE_PUBLISHABLE_KEY` | 없음 | Supabase 모드의 프로젝트 주소(HTTPS)와 공개 키(`sb_publishable_`). 파일에 적지 않습니다 |
 | `REGIME_AUTH_SITE_URL` | `http://127.0.0.1:<포트>` | 인증 메일 링크가 돌아올 주소. loopback 개발 주소 또는 HTTPS |
 | `REGIME_AUTH_STATE_DIR` | 없음 (Supabase 모드 필수) | 실행·탐색 소유자 기록 폴더. 저장소 밖의 지속 경로 |
 | `REGIME_AUTH_ADMIN_IDS` | 없음 | AI 보고서 설정(`/api/llm/config`)을 바꿀 수 있는 Supabase 사용자 ID(쉼표 구분). Supabase 모드에서 비어 있으면 아무도 바꿀 수 없습니다 |
 
+- X12 데모는 모든 HTTP 경로에서 목록 밖 요청을 403 `network_not_allowed`로 거부합니다. 원격 LLM 변경은 `local_only` 유지. IPv6 원격·공인/특수 대역·전체 대역·잘못된 CIDR 제외. 공식 데모 실행은 `proxy_headers=False`, 직접 접속만 지원하며 로컬 프록시·터널·외부 공개 제외. [X12 명세](X12_구현_요구사항_명세.md) 참조.
 - API 명세는 `http://127.0.0.1:8000/docs`(OpenAPI)에서 볼 수 있습니다. 오류 응답은 모두 `{code, message, detail, retryable}` 형식입니다.
 - `GET/PUT/DELETE /api/llm/config`: AI 보고서 모델명·키 조회·적용·지우기. 응답에는 키 마지막 4자리만 담고, PUT·DELETE는 이 PC(루프백) 요청만 받습니다(`403 local_only`). 적용한 값은 서버 메모리에만 있고 재시작하면 환경변수 값으로 돌아갑니다. 보고서 캐시(`cache/llm_reports/`)는 유지되며 키를 담지 않습니다.
 - 실행은 한 번에 1개만 할 수 있습니다. 실행 중 새 요청은 `409 busy`와 현재 `run_id`를 받습니다.
