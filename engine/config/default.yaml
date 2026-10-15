@@ -151,6 +151,8 @@ rag:                                # P3-11 근거 검색 (역방향 탐색 sear
   group_candidate_k: 100            # 묶기 전에 보는 BM25 후보 수 (묶음 크기는 이 안에서만 센다)
   min_score: 0.0                    # 상위 점수가 이 값 이하이면 근거 없음 (no_evidence)
   max_query_len: 200                # 질의 글자 수 상한
+  query_particles: [이, 가, 은, 는, 을, 를, 과, 와]  # 받침이 맞는 조사 1회만 분리. 약칭·동의어 확장 아님
+  particle_min_base_chars: 2        # 조사 분리 후 최소 기본어 길이. 더 짧으면 원형만 검색
 
 archive:                            # P3-13 자료 보관함 (SRS FR-N7). PREP_SECTIONS 밖 — 준비 캐시와 무관
   page_size: 50                     # 목록 한 쪽 기본 건수

@@ -99,6 +99,28 @@ def test_select_as_of_picks_latest_allowed_version(tmp_path, cfg):
     assert [d["version"] for d in select_as_of(docs, later + timedelta(minutes=1))] == [2]
 
 
+
+@pytest.mark.parametrize("mode,cutoff,expected", [
+    ("observed", "2026-10-07T09:00:00+09:00", [("a", 1)]),
+    ("observed", "2026-10-07T00:59:59+00:00", [("a", 1), ("b", 1)]),
+    ("observed", "2026-10-07T10:00:00+09:00", [("a", 2), ("b", 1)]),
+    ("historical_assumed", "2026-10-07T00:00:00+00:00", [("a", 1), ("late", 1)]),
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_shared_as_of_boundary_matrix(mode, cutoff, expected, reverse):
+    """engine/test_rag_select ↔ ingest/test_contract: 같은 입력·기대값, 직접 import 없이 계약 검증."""
+    docs = [
+        {"doc_id": "a", "version": 1, "first_seen_at": "2026-10-07T00:00:00+00:00", "available_at": "2026-10-07T09:00:00+09:00"},
+        {"doc_id": "a", "version": 2, "first_seen_at": "2026-10-07T01:00:00+00:00", "available_at": "2026-10-07T10:00:00+09:00"},
+        {"doc_id": "b", "version": 1, "first_seen_at": "2026-10-07T09:30:00+09:00", "available_at": "2026-10-07T00:30:00+00:00"},
+        {"doc_id": "late", "version": 1, "first_seen_at": "2026-10-07T11:00:00+09:00", "available_at": "2026-10-06T00:00:00+09:00"},
+    ]
+    if reverse:
+        docs.reverse()
+    rows = select_as_of(docs, datetime.fromisoformat(cutoff), mode)
+    assert [(d["doc_id"], d["version"]) for d in rows] == expected
+
+
 def test_forward_then_backfill_keeps_version_and_first_seen(tmp_path, cfg):
     """T6: 순방향으로 본 공시를 소급으로 다시 받아도 문서 수·version·first_seen_at·available_at 불변."""
     items = make_items(date(2026, 10, 6), date(2026, 10, 6))

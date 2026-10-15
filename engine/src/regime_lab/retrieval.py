@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from array import array
 from collections import Counter, defaultdict
@@ -21,9 +22,9 @@ from regime_lab.rag.metrics import abstention, ndcg_at_k, percentile, reciprocal
 from regime_lab.rag.rank import Index, build_index, title_sets
 from regime_lab.rag.rank import search as rank_search
 from regime_lab.rag.select import AS_OF_MODES, aware, select_as_of, with_tickers
-from regime_lab.rag.text import doc_text, tokenize
+from regime_lab.rag.text import doc_text, matches_conditions, query_conditions, tokenize
 
-INDEX_VERSION = 2  # 토큰화·순위·시점 선택 규칙이나 캐시 형식을 바꾸면 올린다 (AGENTS.md §4). 2: 캐시 postings = [행 목록, 빈도 목록]
+INDEX_VERSION = 3  # 3: 문자 구간별 토큰화·조사 변형·완전 조건 후보 검사. 2: postings 정수 배열
 SPLITS = ("dev", "test")
 _DOC_FIELDS = ("doc_id", "version", "source", "title", "corp_name", "url", "published_at", "time_precision",
                "first_seen_at", "available_at")
@@ -127,9 +128,11 @@ def search(ei: EvidenceIndex, cfg: dict, q: str, as_of, mode: str = "observed", 
     q, t, mode, tickers, k = _validate(cfg, q, as_of, mode, tickers, k)
     r = cfg["rag"]
     rows = with_tickers(ei.docs, select_as_of(ei.docs, t, mode), tickers)
+    conditions = query_conditions(q, r["query_particles"], r["particle_min_base_chars"])
     hits = rank_search(ei.index, ei.keys, tokenize(q), set(rows), k1=r["k1"], b=r["b"], top_k=k,
                        candidate_k=r["candidate_k"], mmr_lambda=r["mmr_lambda"], min_score=r["min_score"],
-                       group_threshold=r["group_threshold"], group_candidate_k=r["group_candidate_k"])
+                       group_threshold=r["group_threshold"], group_candidate_k=r["group_candidate_k"],
+                       eligible=lambda i: matches_conditions((ei.docs[i].get(f) for f in ei.fields), conditions))
     items = []
     for h in hits:
         d = ei.docs[h.row]
@@ -151,6 +154,66 @@ def _summary(ms: dict[str, list[float]]) -> dict[str, float | None]:
     return {("mrr" if m == "rr" else m): _mean(v) for m, v in ms.items()}
 
 
+def _validate_gold(gold: list[dict], cfg: dict, split: str) -> list[dict]:
+    """선택 분할은 채점 전에 검증. 다른 분할은 ID·분할만 확인하고 정답을 읽지 않는다."""
+    def fail(field, message):
+        raise RetrievalError("validation_failed", "Check the evaluation set.", {"fields": {field: message}})
+
+    def nonempty(value):
+        return isinstance(value, str) and bool(value.strip())
+
+    if not isinstance(gold, list):
+        fail("gold", "평가셋은 문항 배열이어야 합니다")
+    selected, seen = [], set()
+    for i, item in enumerate(gold):
+        prefix = f"gold[{i}]"
+        if not isinstance(item, dict):
+            fail(prefix, "문항은 객체여야 합니다")
+        ident = item.get("id")
+        if not nonempty(ident) or ident in seen:
+            fail(f"{prefix}.id", "비어 있지 않은 고유 문항 ID가 필요합니다")
+        seen.add(ident)
+        if item.get("split") not in SPLITS:
+            fail(f"{prefix}.split", f"{SPLITS} 중 하나")
+        if item["split"] != split:
+            continue
+        tickers = item.get("tickers")
+        if tickers is not None and (not isinstance(tickers, list) or any(not nonempty(x) for x in tickers)):
+            fail(f"{prefix}.tickers", "종목코드 문자열 배열이 필요합니다")
+        if "type" in item and not nonempty(item["type"]):
+            fail(f"{prefix}.type", "비어 있지 않은 유형 문자열이 필요합니다")
+        try:
+            _validate(cfg, item.get("query"), item.get("as_of"), item.get("mode", "observed"), tickers, None)
+        except RetrievalError as e:
+            raise RetrievalError(e.code, e.message,
+                                 {"fields": {f"{prefix}.{k}": v for k, v in e.detail["fields"].items()}}) from None
+        refs = item.get("relevant")
+        if not isinstance(refs, list):
+            fail(f"{prefix}.relevant", "정답 배열이 필요합니다 (답 없음은 빈 배열)")
+        for j, ref in enumerate(refs):
+            field = f"{prefix}.relevant[{j}]"
+            if not isinstance(ref, dict) or not any(nonempty(ref.get(k)) for k in ("url", "doc_id")):
+                fail(field, "url 또는 doc_id 문자열이 필요합니다")
+            if any(k in ref and not nonempty(ref[k]) for k in ("url", "doc_id")):
+                fail(field, "식별자는 비어 있지 않은 문자열이어야 합니다")
+            grade = ref.get("grade", 1)
+            try:
+                valid = (type(grade) in (int, float) and math.isfinite(grade) and grade >= 0
+                         and math.isfinite(2.0 ** grade))
+            except OverflowError:
+                valid = False
+            if not valid:
+                fail(f"{field}.grade", "0 이상의 유한 숫자이며 DCG 이득을 계산할 수 있어야 합니다")
+        clusters = item.get("clusters")
+        if clusters is not None and (not isinstance(clusters, dict)
+                                     or any(not nonempty(k) or not nonempty(v) for k, v in clusters.items())):
+            fail(f"{prefix}.clusters", "자료 식별자와 사건 ID 문자열의 객체가 필요합니다")
+        selected.append(item)
+    if not selected:
+        fail("split", "선택한 분할에 평가 문항이 없습니다")
+    return selected
+
+
 def evaluate(ei: EvidenceIndex, cfg: dict, gold: list[dict], split: str, *, allow_test: bool = False,
              clock: Callable[[], float] | None = None) -> dict:
     """평가셋 채점. test 분할은 allow_test=True(CLI --split test 명시)일 때만. clock 을 주면 질의 지연(ms)도 잰다."""
@@ -158,20 +221,24 @@ def evaluate(ei: EvidenceIndex, cfg: dict, gold: list[dict], split: str, *, allo
         raise RetrievalError("validation_failed", "Check the input values.", {"fields": {"split": f"{SPLITS} 중 하나"}})
     if split == "test" and not allow_test:
         raise RetrievalError("test_split_locked", "The test split is scored only when requested explicitly.")
+    selected = _validate_gold(gold, cfg, split)
     k = cfg["rag"]["top_k"]
     lookup = {**{d["url"]: d["doc_id"] for d in ei.docs if d.get("url")}, **{d["doc_id"]: d["doc_id"] for d in ei.docs}}
     warnings, per_query, latencies, abst_cases = [], [], [], []
     by_type: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     overall: dict[str, list[float]] = defaultdict(list)
-    for item in (g for g in gold if g.get("split") == split):
+    for item in selected:
         grades, clusters = {}, {}
         for rel in item.get("relevant", []):
+            grade = float(rel.get("grade", 1))
+            if grade == 0:
+                continue  # 비관련 자료는 Recall·MRR 정답이나 답 있음 판정에 포함하지 않는다
             ident = rel.get("url") or rel.get("doc_id")
             did = lookup.get(ident)
             if did is None:
                 warnings.append(f"{item['id']}: 정답 {ident} 가 문서에 없음 (찾지 못한 정답으로 센다)")
                 did = f"_missing:{ident}"
-            grades[did] = float(rel.get("grade", 1))
+            grades[did] = max(grades.get(did, 0), grade)  # URL/doc_id 중복 표기의 입력 순서와 무관
         for ident, cluster in (item.get("clusters") or {}).items():
             clusters[lookup.get(ident, ident)] = cluster
         t0 = clock() if clock else None

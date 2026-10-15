@@ -1,23 +1,80 @@
-"""토큰화 (P3-11). 형태소 분석기 없이 한글은 문자 2-gram으로 잘라 조사·어미가 붙어도 겹치게 한다.
+"""검색 조건·토큰화 (P3-11). 완전 조건 판정과 BM25 점수용 2-gram을 구분한다.
 
-"한빛반도체가" → 한빛 빛반 반도 도체 체가 (조사 없는 "한빛반도체"와 4개 공유). 영문·숫자 단어는 그대로 둔다.
+한글 연속 구간은 2-gram, ASCII 영숫자 연속 구간은 식별자 전체를 유지한다.
+조사는 받침이 맞는 결합만 1회 분리하며, 기본어가 문서의 독립 단어로 확인되어야 한다.
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
+from collections.abc import Iterable
 
 _NOT_WORD = re.compile(r"[^0-9a-z가-힣]+")
+_SEGMENTS = re.compile(r"[0-9a-z]+|[가-힣]+")
+_WORD_CHARS = r"0-9a-z가-힣"
+# 수치가 아닌 한국어 결합 규칙: 받침 있음/없음에 따라 허용하는 조사.
+_PARTICLE_FINAL = {"이": True, "가": False, "은": True, "는": False,
+                   "을": True, "를": False, "과": True, "와": False}
+
+
+def _normalize(text: str | None) -> str:
+    return _NOT_WORD.sub(" ", unicodedata.normalize("NFKC", text or "").lower())
 
 
 def tokenize(text: str | None) -> list[str]:
     out: list[str] = []
-    for w in _NOT_WORD.sub(" ", (text or "").lower()).split():
+    for w in _SEGMENTS.findall(_normalize(text)):
         if len(w) < 2 or w.isascii():
             out.append(w)
         else:
             out.extend(w[i:i + 2] for i in range(len(w) - 1))
     return out
+
+
+def _particles(base: str, allowed: list[str]) -> list[str]:
+    """한글로 끝나는 기본어에 붙일 수 있는 조사. 영숫자 식별자 자체는 자르지 않는다."""
+    if not base or not "가" <= base[-1] <= "힣":
+        return []
+    has_final = (ord(base[-1]) - ord("가")) % 28 != 0
+    return [p for p in allowed if _PARTICLE_FINAL.get(p) is has_final]
+
+
+def _body(word: str) -> str:
+    # 한글·한글/ASCII 사이 공백은 허용. 별개의 ASCII 식별자(HBM 3E)는 연결하지 않는다.
+    return "".join((r"\s*" if i and not (word[i - 1].isascii() and c.isascii()) else "")
+                   + re.escape(c) for i, c in enumerate(word))
+
+
+def query_conditions(q: str, particles: list[str], min_base_chars: int) -> list[re.Pattern[str]]:
+    """각 질의 단위의 원형 OR 허용 조사 변형. 단위 사이에는 matches_conditions가 AND 적용.
+
+    원형은 완전 문자열을 찾는다(복합어 안의 '자기주식'도 허용). 조사 분리 대안은 단어 경계를 요구해
+    '삼성전자가'의 기본어를 '삼성전자서비스' 일부에서 찾지 않는다. 재귀 분리·별칭·사전 조회 없음.
+    """
+    out = []
+    for word in _normalize(q).split():
+        left = r"(?<![0-9a-z])" if word[0].isascii() else ""
+        right = r"(?![0-9a-z])" if word[-1].isascii() else ""
+        forms = [left + _body(word) + right]
+        for particle in particles:
+            if particle not in _PARTICLE_FINAL or not word.endswith(particle):
+                continue
+            base = word[:-len(particle)]
+            endings = _particles(base, particles)
+            if len(base) >= min_base_chars and particle in endings:
+                suffix = "|".join(map(re.escape, endings))
+                forms.append(rf"(?<![{_WORD_CHARS}]){_body(base)}(?:{suffix})?(?![{_WORD_CHARS}])")
+        out.append(re.compile("(?:" + "|".join(forms) + ")"))
+    return out
+
+
+def matches_conditions(texts: Iterable[str | None], conditions: list[re.Pattern[str]]) -> bool:
+    """같은 문서의 허용 필드에서 모든 조건 확인. 한 조건을 필드 사이에서 조립하지 않는다."""
+    if not conditions:
+        return False
+    fields = tuple(_normalize(t) for t in texts)
+    return all(any(c.search(t) for t in fields) for c in conditions)
 
 
 def doc_text(doc: dict, fields: list[str]) -> str:
