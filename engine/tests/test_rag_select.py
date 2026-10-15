@@ -42,7 +42,36 @@ def test_deleted_is_excluded_at_any_time_and_bad_mode_rejected():
         select_as_of(docs, T0, "published")
 
 
+
+@pytest.mark.parametrize("mode,cutoff,expected", [
+    ("observed", "2026-10-07T09:00:00+09:00", [("a", 1)]),
+    ("observed", "2026-10-07T00:59:59+00:00", [("a", 1), ("b", 1)]),
+    ("observed", "2026-10-07T10:00:00+09:00", [("a", 2), ("b", 1)]),
+    ("historical_assumed", "2026-10-07T00:00:00+00:00", [("a", 1), ("late", 1)]),
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_shared_as_of_boundary_matrix(mode, cutoff, expected, reverse):
+    """engine/test_rag_select ↔ ingest/test_contract: 같은 입력·기대값, 직접 import 없이 계약 검증."""
+    docs = [
+        {"doc_id": "a", "version": 1, "first_seen_at": "2026-10-07T00:00:00+00:00", "available_at": "2026-10-07T09:00:00+09:00"},
+        {"doc_id": "a", "version": 2, "first_seen_at": "2026-10-07T01:00:00+00:00", "available_at": "2026-10-07T10:00:00+09:00"},
+        {"doc_id": "b", "version": 1, "first_seen_at": "2026-10-07T09:30:00+09:00", "available_at": "2026-10-07T00:30:00+00:00"},
+        {"doc_id": "late", "version": 1, "first_seen_at": "2026-10-07T11:00:00+09:00", "available_at": "2026-10-06T00:00:00+09:00"},
+    ]
+    if reverse:
+        docs.reverse()
+    rows = [docs[i] for i in select_as_of(docs, datetime.fromisoformat(cutoff), mode)]
+    assert [(d["doc_id"], d["version"]) for d in rows] == expected
+
+
 def test_with_tickers():
     docs = [make_doc(0, "a", "x", "005930", T0), make_doc(1, "b", "y", "", T0), make_doc(2, "c", "z", "010140", T0)]
     assert with_tickers(docs, [0, 1, 2], ["010140"]) == [2]
     assert with_tickers(docs, [0, 1, 2], []) == [0, 1, 2]
+
+
+def test_deleted_newer_row_currently_leaves_old_version_visible():
+    """현행 동작 기록만. 문서 전체 삭제 정책 승인/구현 완료를 뜻하지 않는다 (P3-11 ⑨ 미확정)."""
+    v1 = make_doc(1, "회사", "제목", "", T0)
+    v2 = make_doc(1, "회사", "제목", "", T0 + timedelta(hours=1), version=2, status="deleted")
+    assert select_as_of([v1, v2], T0 + timedelta(days=1)) == [0]

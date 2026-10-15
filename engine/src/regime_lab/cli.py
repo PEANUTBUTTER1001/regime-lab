@@ -48,7 +48,11 @@ def _rag(args, cfg, paths) -> int:
             for n, it in enumerate(res["items"], 1):
                 print(f"  {n}. {it['score']:.4f} [{it['corp_name']}] {it['title']} ({it['available_at']}) {it['url']}")
         elif args.cmd == "rag-eval":
-            gold = json.loads(args.gold.read_text(encoding="utf-8"))
+            try:
+                gold = json.loads(args.gold.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                raise retrieval.RetrievalError("validation_failed", "Check the evaluation set.",
+                                               {"fields": {"gold": "읽을 수 있는 UTF-8 JSON 평가셋이 필요합니다"}}) from None
             out = retrieval.evaluate(ei, cfg, gold, args.split, allow_test=args.split == "test", clock=time.perf_counter)
             print(json.dumps(out, ensure_ascii=False, indent=2))
     except retrieval.RetrievalError as e:

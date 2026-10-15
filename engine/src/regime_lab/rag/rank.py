@@ -14,7 +14,7 @@ import math
 import sys
 from array import array
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 
@@ -112,13 +112,17 @@ def group_similar(rows: list[int], token_sets: list[frozenset[str]], exclude: se
 
 def search(index: Index, keys: list[tuple], q_tokens: list[str], visible: set[int], *, k1: float, b: float,
            top_k: int, candidate_k: int, mmr_lambda: float | None, min_score: float,
-           group_threshold: float | None = None, group_candidate_k: int = 100) -> list[Hit]:
+           group_threshold: float | None = None, group_candidate_k: int = 100,
+           eligible: Callable[[int], bool] | None = None) -> list[Hit]:
     """BM25 순위 (+ 선택: 비슷한 제목 묶기, 또는 MMR). 상위 점수가 min_score 이하이면 근거 없음([]).
 
     동점은 keys(doc_id, version) 순. group_threshold 가 있으면 BM25 상위 group_candidate_k 개를 묶어
     묶음 대표 top_k 개를 돌려주고, 이때 MMR 은 쓰지 않는다.
+    eligible은 행의 완전 조건 검사. 통계는 visible로 유지하고 점수가 있는 행만 후보 제한·묶기/MMR 전에 검사한다.
     """
     scored = bm25(index, q_tokens, visible, k1, b)
+    if eligible is not None:
+        scored = {i: s for i, s in scored.items() if eligible(i)}
     if not scored:
         return []
     order = sorted(scored, key=lambda i: (-scored[i][0], keys[i]))

@@ -54,9 +54,19 @@ def test_search_ok_contract(client):
 
 
 def test_tickers_and_k(client):
-    r = client.get("/api/evidence/search", params={"q": "공시 계약 수주 실적", "as_of": AS_OF, "tickers": "010140", "k": 1})
+    r = client.get("/api/evidence/search", params={"q": "대양중공업 수주", "as_of": AS_OF, "tickers": "010140", "k": 1})
     items = r.json()["items"]
     assert r.status_code == 200 and len(items) == 1 and items[0]["corp_name"] == "대양중공업"
+
+
+def test_particle_query_and_missing_conditions_keep_response_contract(client):
+    r = client.get("/api/evidence/search", params={"q": "한빛반도체가 자기주식", "as_of": AS_OF})
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+    assert set(r.json()["items"][0]) == ITEM_KEYS and r.json()["index"]["index_version"] == 3
+    for q in ("한빛반도체가 자기주식 화성기지", "공시 계약 수주 실적"):
+        r = client.get("/api/evidence/search", params={"q": q, "as_of": AS_OF, "tickers": "010140" if q.startswith("공시") else ""})
+        assert r.status_code == 200 and r.json()["status"] == "no_evidence"
+        assert r.json()["items"] == [] and r.json()["disclaimer"]
 
 
 def test_no_evidence_is_200_with_empty_items(client):

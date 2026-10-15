@@ -3,6 +3,7 @@
 import math
 from datetime import timedelta
 
+import pytest
 from rag_synth import T0, make_doc, make_docs
 
 from regime_lab.rag.rank import bm25, build_index, search
@@ -121,3 +122,22 @@ def test_grouping_is_cut_invariant():
 def _run_hits(docs, q, as_of, **kw):
     index, keys = _index(docs)
     return search(index, keys, tokenize(q), set(select_as_of(docs, as_of)), **{**P, **kw})
+
+
+@pytest.mark.parametrize("options", [
+    {"group_threshold": 0.3}, {"mmr_lambda": 0.3}, {},
+])
+def test_eligibility_precedes_candidate_limit_and_keeps_visible_statistics(options):
+    docs = [make_doc(i, "", "한전", "", T0) for i in range(120)]
+    docs.append(make_doc(120, "", "대한전선 한전 공시 합성 자료 긴 제목", "", T0))
+    index, keys = _index(docs)
+    visible, eligible = set(range(len(docs))), {120}
+    q = tokenize("한전")
+    scores = bm25(index, q, visible, P["k1"], P["b"])
+    # 비적격 문서 120개가 높은 순위여도, 뒤의 적격 문서는 후보 제한·묶기/MMR 이전에 보존.
+    assert all(scores[i][0] > scores[120][0] for i in range(120))
+    got = search(index, keys, q, visible, **{**P, **options}, eligible=eligible.__contains__)
+    assert len(got) == 1 and got[0].row == 120 and got[0].members == ()
+    assert got[0].score == scores[120][0]
+    assert got[0].score != bm25(index, q, eligible, P["k1"], P["b"])[120][0]
+    assert search(index, keys, q, visible, **P, eligible=lambda i: False) == []
