@@ -16,6 +16,8 @@ const toLocal = (iso) => {
   return Number.isNaN(d.getTime()) ? '' : new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 16);
 };
 const kst = (iso) => toLocal(iso).replace('T', ' ');  // 표시용 'YYYY-MM-DD HH:MM' (KST)
+// 일봉(P2-11)은 봉 하나가 하루라 확정 시각(15:31) 없이 날짜만 보인다
+const day = (d, iso) => (d.timeframe === '1d' ? kst(iso).slice(0, 10) : kst(iso));
 const won = (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 }));
 // 방향 표시는 한국식 색(E18 ④): 상승 쪽 빨강 ▲, 하락 쪽 파랑 ▼, 불확실은 색 없는 표시
 const DIR_SIGN = { up: 1, down: -1 };
@@ -33,7 +35,7 @@ function testHit(scores, h) {
 const STATE_VIEW = {
   no_stock: () => ({ title: t('fc.noStock'), message: t('fc.noStockMsg') }),
   no_as_of: (d) => ({ title: t('fc.noAsOf'), message: d.test_as_of_range
-    ? t('fc.noAsOfMsg', { a: kst(d.test_as_of_range[0]), b: kst(d.test_as_of_range[1]) }) : t('fc.noPredMsg') }),
+    ? t('fc.noAsOfMsg', { a: day(d, d.test_as_of_range[0]), b: day(d, d.test_as_of_range[1]) }) : t('fc.noPredMsg') }),
   insufficient_history: () => ({ title: t('fc.thin'), message: t('fc.thinMsg') }),
 };
 
@@ -92,7 +94,7 @@ async function show(out, f) {
   const chartEl = h('div', { class: 'chart' });
   // 일봉(P2-11)은 봉 하나가 하루라 시각(확정 15:31)과 "다음 거래일" 표시가 뜻이 없다 — 날짜만 보이고 표시를 뺀다
   const daily = d.timeframe === '1d';
-  const at = daily ? kst(d.as_of).slice(0, 10) : kst(d.as_of);
+  const at = day(d, d.as_of);
   out.replaceChildren(
     h('article', { class: 'card' },
       h('h2', {}, `${d.code} · ${d.timeframe}`), h('p', { class: 'card-sub', text: t('fc.asOfAt', { at, p: won(d.base_close) }) }),
