@@ -101,6 +101,91 @@ export function helpTip(text, term, { up = false } = {}) {
   return wrap;
 }
 
+// 용어 설명 (X15, design.md §7.9): "?" 단추 대신 용어 글자에 옅은 점선을 긋고, 올리기·초점·누르기로 설명 카드 하나를 연다.
+// info = 문자열(쉬운 한 줄) 또는 { say, rule, now: { label, value, text, tone }, viz(SVG 문자열) }.
+// 카드는 화면에 하나만 두고 위치는 고정(fixed)으로 계산해, 스크롤 열 안에서도 잘리지 않는다. 600px 미만은 아래에서 올라온다.
+let pop = null;
+let popOwner = null;
+let popPinned = false;
+let popTimer = 0;
+function popEl() {
+  if (pop) return pop;
+  pop = h('div', { class: 'term-pop', id: 'term-pop', role: 'tooltip', hidden: true });
+  pop.addEventListener('mouseenter', () => clearTimeout(popTimer));
+  pop.addEventListener('mouseleave', () => { if (!popPinned) popTimer = setTimeout(closeTerm, 160); });
+  pop.addEventListener('click', (e) => e.stopPropagation());
+  document.body.append(pop);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && popOwner) { const o = popOwner; closeTerm(); o.focus(); } });
+  document.addEventListener('click', () => { if (popOwner) closeTerm(); });
+  addEventListener('scroll', () => { if (popOwner && !popPinned) closeTerm(); else if (popOwner) placeTerm(popOwner); }, true);
+  window.addEventListener('hashchange', () => closeTerm());
+  return pop;
+}
+function closeTerm() {
+  clearTimeout(popTimer);
+  if (!pop) return;
+  pop.classList.remove('on');
+  pop.hidden = true;
+  popPinned = false;
+  popOwner?.setAttribute('aria-expanded', 'false');
+  popOwner = null;
+}
+// 설명하는 숫자를 가리지 않게 그 칸(지표 칸·표 행·판정 줄) 아래에 연다. 아래가 모자라면 위로
+function placeTerm(el) {
+  if (!el.isConnected) { closeTerm(); return; }
+  const narrow = innerWidth < 600;
+  pop.classList.toggle('sheet', narrow);
+  if (narrow) { pop.style.left = ''; pop.style.top = ''; return; }
+  const r = el.getBoundingClientRect();
+  const box = (el.closest('.metric, tr, .verdict-row, .label-row, .goal-row > div') || el).getBoundingClientRect();
+  const pw = pop.offsetWidth;
+  const ph = pop.offsetHeight;
+  const x = Math.min(Math.max(16, r.left - 12), innerWidth - pw - 16);
+  let y = box.bottom + 8;
+  if (y + ph > innerHeight - 16) y = box.top - ph - 8;
+  pop.style.left = `${x}px`;
+  pop.style.top = `${Math.max(16, y)}px`;
+}
+function openTerm(el, label, info) {
+  const card = popEl();
+  clearTimeout(popTimer);
+  if (popOwner && popOwner !== el) popOwner.setAttribute('aria-expanded', 'false');
+  popOwner = el;
+  const i = typeof info === 'string' ? { say: info } : info;
+  const viz = i.viz ? h('div', { class: 'term-viz' }) : null;
+  if (viz) viz.innerHTML = i.viz;
+  // replaceChildren 은 null 을 글자 "null" 로 넣으므로 없는 칸은 걸러 낸다
+  card.replaceChildren(...[h('span', { class: 'term-name' }, label), h('p', { class: 'term-say' }, i.say), viz,
+    i.now && h('div', { class: 'term-now' }, h('span', {}, i.now.label || t('tm.now')), h('b', { class: i.now.tone || '' }, i.now.value), i.now.text && h('em', {}, i.now.text)),
+    i.rule && h('p', { class: 'term-rule' }, i.rule)].filter(Boolean));
+  card.hidden = false;
+  placeTerm(el);
+  el.setAttribute('aria-expanded', 'true');
+  requestAnimationFrame(() => card.classList.add('on'));
+}
+export function term(label, info, { tag = 'span' } = {}) {
+  const el = h(tag, { class: 'term', tabindex: '0', role: 'button', 'aria-expanded': 'false', 'aria-describedby': 'term-pop' }, label);
+  let showTimer = 0;
+  el.addEventListener('mouseenter', () => { clearTimeout(showTimer); showTimer = setTimeout(() => openTerm(el, label, info), 120); });
+  el.addEventListener('mouseleave', () => { clearTimeout(showTimer); if (!popPinned) popTimer = setTimeout(closeTerm, 160); });
+  el.addEventListener('focus', () => openTerm(el, label, info));
+  el.addEventListener('blur', () => { if (!popPinned) popTimer = setTimeout(closeTerm, 160); });
+  // 이름표(label) 안에 있어도 입력칸으로 초점이 넘어가지 않게 기본 동작을 막는다
+  el.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (popOwner === el && popPinned) closeTerm(); else { openTerm(el, label, info); popPinned = true; }
+  });
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } });
+  return el;
+}
+
+// 문장 속 값만 굵게: 문구 사전 문장을 그대로 쓰고 {값} 자리만 <strong> 으로 바꾼다
+export function strongT(key, vars = {}) {
+  const marks = Object.fromEntries(Object.keys(vars).map((k, i) => [k, `\u0001${i}\u0001`]));
+  const vals = Object.values(vars);
+  return t(key, marks).split('\u0001').map((part, i) => (i % 2 ? h('strong', {}, vals[Number(part)]) : part));
+}
+
 export function linkButton(text, href, primary = false) {
   return h('a', { class: primary ? 'primary' : 'secondary', href }, text);
 }

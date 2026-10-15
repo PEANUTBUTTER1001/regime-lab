@@ -1,13 +1,15 @@
 // Strategy Builder (FR-U1, FR-X5, design.md §6.2). 기본값·허용 범위는 모두 /api/meta 에서 받는다.
 // 입력 검증은 전송 전(여기)과 서버(422) 양쪽에서 한다. 서버 오류 필드는 같은 입력칸 아래에 표시한다.
 import { api } from '../api.js';
-import { errorView, fmt, h, helpTip, loading, toast } from '../components/ui.js';
+import { buySentence, patternCards, sayBox, sellSentence } from '../components/easy.js';
+import { errorView, fmt, h, loading, term, toast } from '../components/ui.js';
 import { has, t } from '../i18n.js';
 import { state } from '../state.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const patLabel = (p) => (has(`pat.${p.name}`) ? t(`pat.${p.name}`) : p.label);
 const patRule = (p) => (has(`rule.${p.name}`) ? t(`rule.${p.name}`) : p.rule);
+const tip = (id) => ({ say: t(`tm.${id}.say`), rule: t(`tm.${id}.rule`) });
 
 // 저장한 조합(기본값을 채운 전략) → 빌더 입력값 (P1-10)
 export function fromStrategy(st, meta) {
@@ -30,6 +32,12 @@ export function isDirty() {
   const lp = state.loadedPreset;
   if (!state.draft) return false;
   return !lp || JSON.stringify(toBody(state.draft)) !== lp.body;
+}
+
+// 예시로 시작하기 (X15 ②): 예시의 패턴·청산만 바꾸고 나머지는 기본값 그대로
+export function exampleDraft(meta, ex) {
+  return { ...defaults(meta), name: `example_${ex.key}`, patterns: [...ex.patterns], combine: 'or',
+    useStop: true, stop: ex.stop, useProfit: true, profit: ex.profit, hold: ex.hold, useTrail: false, useBe: false, useMa: false, pp: {} };
 }
 
 function defaults(meta) {
@@ -154,7 +162,8 @@ export async function renderBuilder(pane, query = new URLSearchParams(), opts = 
   // ---------------------------------------------------------------- Buy conditions
   const seg = h('div', { class: 'segment', role: 'group', 'aria-label': t('b.logic') },
     ['and', 'or'].map((c) => h('button', { type: 'button', 'aria-pressed': String(f.combine === c), 'data-c': c,
-      onclick: () => { f.combine = c; seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.c === c))); save(); } }, c.toUpperCase())));
+      onclick: () => { f.combine = c; seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.c === c))); save(); } },
+    t(`b.${c}`), h('small', { class: 'seg-code' }, c.toUpperCase()))));
   // 세부 조건 (P1-4): 고른 패턴 중 조합별로 바꿀 수 있는 수치. 범위·기본값은 /api/meta 의 pattern_params
   f.pp = f.pp || {};
   const ppBox = h('div', {});
@@ -173,18 +182,15 @@ export async function renderBuilder(pane, query = new URLSearchParams(), opts = 
       })));
   }
   renderPP();
-  const patternChecks = meta.patterns.map((p) => {
-    const box = h('input', { type: 'checkbox', checked: f.patterns.includes(p.name), 'aria-label': patLabel(p), 'aria-describedby': described('patterns') });
-    const rule = meta.pattern_params?.[p.name] ? t('pp.baseRule', { r: patRule(p) }) : patRule(p);
-    const lab = h('label', { class: `check${f.patterns.includes(p.name) ? ' selected' : ''}` }, box,
-      h('span', {}, patLabel(p), has(`pd.${p.name}`) && h('small', { class: 'pd-text' }, t(`pd.${p.name}`)), h('small', { class: 'rule-text' }, rule)));
-    box.addEventListener('change', () => {
-      f.patterns = meta.patterns.map((q) => q.name).filter((n) => (n === p.name ? box.checked : f.patterns.includes(n)));
-      lab.classList.toggle('selected', box.checked); renderPP(); save();
-    });
-    return lab;
+  // 패턴 카드 (X15 ④): 언제 사는지 세 묶음 · 모양 그림 · 쉬운 이름, 원래 이름과 계산식은 작게. 체크박스는 그대로
+  const patternList = patternCards({
+    items: meta.patterns.map((p) => ({ name: p.name, label: patLabel(p), rule: meta.pattern_params?.[p.name] ? t('pp.baseRule', { r: patRule(p) }) : patRule(p) })),
+    selected: f.patterns, describedBy: described('patterns'), groupLabel: t('b.patterns'),
+    onChange: (name, on) => { f.patterns = meta.patterns.map((q) => q.name).filter((n) => (n === name ? on : f.patterns.includes(n))); renderPP(); save(); },
   });
-  const patternList = h('div', { class: 'checks pattern-list', role: 'group', 'aria-label': t('b.patterns') }, patternChecks);
+  // 입력값을 문장으로 옮겨 적는다 (계산·판단 없음)
+  const buySay = sayBox('say.buyTitle');
+  const sellSay = sayBox('say.sellTitle');
   const rulesBtn = h('button', { type: 'button', class: 'secondary small', 'aria-pressed': 'false',
     onclick: () => { const on = rulesBtn.getAttribute('aria-pressed') !== 'true'; rulesBtn.setAttribute('aria-pressed', String(on)); patternList.classList.toggle('show-rules', on); } }, t('b.showRules'));
   // 3단계 흐름 (E18 2차): 언제 살까 → 언제 팔까 → 무엇을, 언제. 카드 대신 한 바탕 위에 구분선으로 나눈다
@@ -192,9 +198,9 @@ export async function renderBuilder(pane, query = new URLSearchParams(), opts = 
     h('div', { class: 'sec-h' }, h('h2', { id: `flow-step-${n}` }, h('span', { class: 'no', 'aria-hidden': 'true' }, String(n)), title), h('span', { class: 'aside' }, sub)), ...children);
   const buyStep = step(1, t('b.step1'), t('b.buy'),
     h('p', { class: 'hint', text: t('b.buySub') }),
-    h('div', { class: 'label-row' }, h('span', { class: 'label' }, t('b.logic')), helpTip(t('help.combine'), t('b.logic'))), seg,
+    h('div', { class: 'label-row' }, h('span', { class: 'label' }, term(t('b.logic'), tip('combine')))), seg,
     h('div', { class: 'pattern-head' }, h('span', { class: 'label' }, t('b.patterns')), rulesBtn),
-    patternList, errorSlot('patterns'), ppBox);
+    patternList, errorSlot('patterns'), buySay.el, ppBox);
 
   // ---------------------------------------------------------------- Exit rules
   const numInput = (id, key, value, mode = 'decimal') => h('input', { id, inputmode: mode, value: String(value ?? ''), 'aria-describedby': described(key),
@@ -222,16 +228,17 @@ export async function renderBuilder(pane, query = new URLSearchParams(), opts = 
     h('div', { class: 'field-two' },
       h('div', {}, h('label', { for: 'hold' }, t('b.hold')), holdIn,
         h('p', { class: 'hint', text: t('b.holdHint', { a: lim.max_hold_days[0], b: lim.max_hold_days[1] }) }), errorSlot('exit.max_hold_days'))),
+    sellSay.el,
     // 하나라도 켜져 있으면 펼친 채로 시작한다
     h('details', { class: 'more', open: f.useTrail || f.useBe || f.useMa ? true : null },
       h('summary', {}, t('b.moreExits')),
       h('div', { class: 'field-two' },
-        h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'trail' }, t('b.trail')), helpTip(t('help.trail'), t('b.trailWord'))), trailIn, useToggle('useTrail', trailIn, t('b.trailWord')),
+        h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'trail' }, term(t('b.trail'), tip('trail')))), trailIn, useToggle('useTrail', trailIn, t('b.trailWord')),
           h('p', { class: 'hint', text: t('b.trailHint2', { a: lim.trailing_stop_pct[0], b: lim.trailing_stop_pct[1] }) }), errorSlot('exit.trailing_stop_pct')),
-        h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'be' }, t('b.be')), helpTip(t('help.be'), t('b.beWord'))), beIn, useToggle('useBe', beIn, t('b.beWord')),
+        h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'be' }, term(t('b.be'), tip('be')))), beIn, useToggle('useBe', beIn, t('b.beWord')),
           h('p', { class: 'hint', text: t('b.beHint', { a: lim.breakeven_trigger_pct[0], b: lim.breakeven_trigger_pct[1] }) }), errorSlot('exit.breakeven_trigger_pct'))),
       h('div', { class: 'field-two' },
-        h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'maWin' }, t('b.maExit')), helpTip(t('help.maExit'), t('b.maWord'))), maIn, useToggle('useMa', maIn, t('b.maWord')),
+        h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'maWin' }, term(t('b.maExit'), tip('maExit')))), maIn, useToggle('useMa', maIn, t('b.maWord')),
           h('p', { class: 'hint', text: t('b.maHint', { a: lim.ma_exit_window[0], b: lim.ma_exit_window[1] }) }), errorSlot('exit.ma_exit_window'))),
       h('p', { class: 'hint', style: { margin: '6px 0 10px' } }, t('b.exitCallout'))));
 
@@ -255,9 +262,9 @@ export async function renderBuilder(pane, query = new URLSearchParams(), opts = 
       h('div', {}, h('label', { for: 'start' }, t('b.start')), dateIn('start', 'start'), errorSlot('period.start')),
       h('div', {}, h('label', { for: 'end' }, t('b.end')), dateIn('end', 'end'), errorSlot('period.end'))),
     errorSlot('period'),
-    h('div', { class: 'label-row' }, h('label', { for: 'value' }, t('b.value')), helpTip(t('help.minValue'), t('b.value'))), valueIn,
+    h('div', { class: 'label-row' }, h('label', { for: 'value' }, term(t('b.value'), tip('minValue')))), valueIn,
     h('p', { class: 'hint', text: t('b.valueHint', { v: fmt.int(meta.min_avg_value_krw) }) }), errorSlot('min_avg_value_krw'),
-    h('div', { class: 'label-row' }, h('span', { class: 'label' }, t('b.cap')), helpTip(t('help.cap'), t('b.cap'))), multi('caps', meta.cap_groups, (c) => t(`cap.${c}`), t('b.cap')), errorSlot('cap_groups'));
+    h('div', { class: 'label-row' }, h('span', { class: 'label' }, term(t('b.cap'), tip('cap')))), multi('caps', meta.cap_groups, (c) => t(`cap.${c}`), t('b.cap')), errorSlot('cap_groups'));
 
   // ---------------------------------------------------------------- 전략 이름 · 실행 (바닥 고정)
   const nameIn = h('input', { id: 'sname', value: f.name, 'aria-describedby': described('name'),
@@ -266,7 +273,7 @@ export async function renderBuilder(pane, query = new URLSearchParams(), opts = 
   const runFacts = h('div', { class: 'run-facts' },
     h('span', {}, h('b', {}, t('b.execution')), t('b.nextOpen')),
     h('span', {}, h('b', {}, t('b.cost')), `${cost}%`),
-    h('span', { class: 'with-tip' }, h('b', {}, t('b.validation')), t('b.validationVal'), helpTip(t('help.validation'), t('b.validation'), { up: true })));
+    h('span', {}, h('b', {}, term(t('b.validation'), tip('validation'))), t('b.validationVal')));
   const errCount = h('p', { class: 'field-error hidden', 'aria-live': 'polite' });
 
   // ---------------------------------------------------------------- 저장한 조합 (P1-10)
@@ -326,6 +333,15 @@ export async function renderBuilder(pane, query = new URLSearchParams(), opts = 
     sumSell.textContent = sell.join(' · ');
     sumScope.textContent = [f.markets.join(' + ') || '—', f.caps.map((c) => t(`cap.${c}`)).join(', ') || '—', `${f.start} ~ ${f.end}`].join(' · ');
     sumBuy.title = sumBuy.textContent; sumSell.title = sumSell.textContent; sumScope.title = sumScope.textContent;
+    renderSay();
+  }
+  function renderSay() {
+    buySay.body.textContent = buySentence(meta.patterns.map((p) => p.name).filter((n) => f.patterns.includes(n)), f.combine);
+    const num = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? null : Number(v));
+    const hold = num(f.hold);
+    sellSay.body.textContent = Number.isInteger(hold) && hold > 0 && (!f.useStop || num(f.stop) != null) && (!f.useProfit || num(f.profit) != null)
+      ? sellSentence({ stop: f.useStop ? num(f.stop) : null, profit: f.useProfit ? num(f.profit) : null, hold, extra: [f.useTrail, f.useBe, f.useMa].filter(Boolean).length })
+      : t('say.fix');
   }
   previewBox.className = 'line dim';
   previewBox.removeAttribute('style');
@@ -425,5 +441,6 @@ export async function renderBuilder(pane, query = new URLSearchParams(), opts = 
   renderPresetStatus();
   renderSummary();
   refreshPreview();
+  opts.onReady?.({ run: () => runBtn.click() });
   return () => { clearTimeout(previewTimer); document.removeEventListener('keydown', onKey); };
 }
