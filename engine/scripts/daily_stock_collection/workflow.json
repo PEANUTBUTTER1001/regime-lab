@@ -1,0 +1,330 @@
+{
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "4897556c-97f2-4dc1-9995-2a2b324adfad",
+      "name": "수동 수집",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        768,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 'store_prices' COLLATE utf8mb4_bin AS kind,JSON_OBJECT('date',DATE_FORMAT(`date`,'%Y-%m-%d'),'ticker',`ticker`,'open',CAST(`open` AS CHAR),'high',CAST(`high` AS CHAR),'low',CAST(`low` AS CHAR),'close',CAST(`close` AS CHAR),'volume',CAST(`volume` AS CHAR),'value',CAST(`value` AS CHAR)) COLLATE utf8mb4_bin AS payload FROM `store_prices` WHERE date BETWEEN $1 AND $2 UNION ALL SELECT 'store_krx_daily' COLLATE utf8mb4_bin AS kind,JSON_OBJECT('date',DATE_FORMAT(`date`,'%Y-%m-%d'),'ticker',`ticker`,'name',`name`,'market',`market`,'dept',`dept`,'open_raw',CAST(`open_raw` AS CHAR),'high_raw',CAST(`high_raw` AS CHAR),'low_raw',CAST(`low_raw` AS CHAR),'close_raw',CAST(`close_raw` AS CHAR),'volume_raw',CAST(`volume_raw` AS CHAR),'value',CAST(`value` AS CHAR),'marketcap',CAST(`marketcap` AS CHAR),'shares',CAST(`shares` AS CHAR)) COLLATE utf8mb4_bin AS payload FROM `store_krx_daily` WHERE date BETWEEN $3 AND $4 UNION ALL SELECT 'store_marketcap' COLLATE utf8mb4_bin AS kind,JSON_OBJECT('date',DATE_FORMAT(`date`,'%Y-%m-%d'),'ticker',`ticker`,'marketcap',CAST(`marketcap` AS CHAR),'shares',CAST(`shares` AS CHAR),'market',`market`) COLLATE utf8mb4_bin AS payload FROM `store_marketcap` WHERE date BETWEEN $5 AND $6 UNION ALL SELECT 'dept' COLLATE utf8mb4_bin AS kind,JSON_OBJECT('ticker',ticker,'dept',dept) COLLATE utf8mb4_bin AS payload FROM store_krx_daily WHERE date='2026-09-18'",
+        "options": {
+          "queryReplacement": "={{ [$json.beginDate, $json.endDate, $json.beginDate, $json.endDate, $json.beginDate, $json.endDate] }}"
+        }
+      },
+      "id": "13d56b45-e622-4ae9-b9fd-48e27c5f9371",
+      "name": "DB 기존 자료 확인",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1664,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// X4a: append new raw-assumed prices; preserve 2026-09-18 department.\nconst input = $('전체 건수와 일봉 검증1').first().json;\nconst baseline = '2026-09-18';\nconst cols = {\n store_prices:['date','ticker','open','high','low','close','volume','value'],\n store_krx_daily:['date','ticker','name','market','dept','open_raw','high_raw','low_raw','close_raw','volume_raw','value','marketcap','shares'],\n store_marketcap:['date','ticker','marketcap','shares','market']\n};\nconst existing = Object.fromEntries(Object.keys(cols).map(t=>[t,new Map()]));\nconst dept = new Map();\nfor(const item of $input.all()) {\n const {kind,payload}=item.json;\n const row=typeof payload==='string'?JSON.parse(payload):payload;\n if(kind==='dept') dept.set(row.ticker,row.dept);\n else if(existing[kind]) existing[kind].set(row.date+'/'+row.ticker,row);\n}\nconst pending=Object.fromEntries(Object.keys(cols).map(t=>[t,[]]));\nconst report={status:'DB_COMMITTED',source:input.source,beginDate:input.beginDate,endDate:input.endDate,latestDate:input.latestDate,apiRows:input.apiRows,selectedRows:input.selectedRows,inserted:{},unchanged:{},overlap:{checked:0,rawDifferent:0,adjustedDifferent:0},missingDepartment:0,dbWritten:true,analysisAsOf:'2026-09-18',notice:'X4a 승인: 신규 날짜 원주가를 prices에 적재. dept는 2026-09-18 값 유지. 지수·마스터·웹 분석 기준일은 변경하지 않음.'};\nfor(const t of Object.keys(cols))report.unchanged[t]=0;\nconst equal=(a,b)=>a==null||b==null?a==null&&b==null:String(a)===String(b);\nfor(const r of input.rows){\n const d=dept.get(r.ticker)??null;\n const wanted={\n  store_prices:{date:r.date,ticker:r.ticker,open:r.open_raw,high:r.high_raw,low:r.low_raw,close:r.close_raw,volume:r.volume_raw,value:r.value},\n  store_krx_daily:{...r,dept:d},\n  store_marketcap:r\n };\n const key=r.date+'/'+r.ticker;\n if(r.date<=baseline){\n  if(r.date===baseline){\n   const raw=existing.store_krx_daily.get(key),price=existing.store_prices.get(key);\n   if(raw){report.overlap.checked++;if(['open_raw','high_raw','low_raw','close_raw','volume_raw','value','marketcap','shares'].some(k=>!equal(raw[k],r[k])))report.overlap.rawDifferent++;}\n   if(price&&cols.store_prices.some(k=>!equal(price[k],wanted.store_prices[k])))report.overlap.adjustedDifferent++;\n  }\n  continue;\n }\n if(d===null)report.missingDepartment++;\n for(const [table,fields] of Object.entries(cols)){\n  const prior=existing[table].get(key),row=wanted[table];\n  if(prior){\n   const differences=fields.filter(k=>!equal(prior[k],row[k]));\n   if(differences.length)throw new Error('기존 값 충돌: '+table+' '+key+' fields='+differences.join(',')+'; 덮어쓰지 않았습니다.');\n   report.unchanged[table]++;\n  }else pending[table].push(Object.fromEntries(fields.map(k=>[k,row[k]])));\n }\n}\n// No writes to historical dates. A mismatch in the raw baseline blocks the trial.\nif(report.overlap.rawDifferent)throw new Error('9/18 원주가 대조 불일치 '+report.overlap.rawDifferent+'건: 저장 전 확인 필요');\nconst types={date:'DATE',ticker:'VARCHAR(20)',name:'VARCHAR(48)',market:'VARCHAR(20)',dept:'VARCHAR(45)'};\nconst output=[];\nfor(const [table,rows] of Object.entries(pending)){\n report.inserted[table]=rows.length;\n const fields=cols[table];\n const sql='INSERT INTO `'+table+'` ('+fields.map(k=>'`'+k+'`').join(',')+') SELECT '+fields.map(k=>'j.`'+k+'`').join(',')+\" FROM JSON_TABLE($1, '$[*]' COLUMNS (\"+fields.map(k=>'`'+k+'` '+(types[k]||'BIGINT')+\" PATH '$.\"+k+\"' ERROR ON ERROR\").join(',')+')) AS j';\n for(let i=0;i<rows.length;i+=500)output.push({json:{query:sql,params:[JSON.stringify(rows.slice(i,i+500))]}});\n}\nif(!output.length)output.push({json:{query:'SELECT 1 AS no_new_rows',params:[]}});\noutput[0].json.report=report;\nreturn output;\n"
+      },
+      "id": "accc5d09-fb20-4090-87c3-94bccf1f0b07",
+      "name": "중복 대조 및 저장 준비",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1888,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.query }}",
+        "options": {
+          "queryBatching": "transaction",
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "fa407055-5764-492f-a320-19fa5bc9d5a7",
+      "name": "일봉 3개 테이블 저장",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        2112,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const report=$('중복 대조 및 저장 준비').first().json.report; return [{json:report}];"
+      },
+      "id": "ae4a1da1-6a8c-4e19-bf16-87e9992d2d08",
+      "name": "DB 저장 결과",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2336,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 날짜를 지정하면 초기 과거 자료 확인에 사용합니다. API 키를 여기에 넣지 마세요.\nconst config = { beginDate: '', endDate: '', lookbackDays: 7, maxRangeDays: 31, pageSize: 1000 };\nconst now = $now.setZone('Asia/Seoul');\nfunction valid(s) { if (!/^\\d{8}$/.test(s)) return false; const d = new Date(s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8)+'T00:00:00Z'); return !isNaN(d) && d.toISOString().slice(0,10).replace(/-/g,'') === s; }\nif (Boolean(config.beginDate) !== Boolean(config.endDate)) throw new Error('beginDate와 endDate를 함께 지정하세요.');\nconst endDate = config.endDate || now.minus({days:1}).toFormat('yyyyMMdd');\nconst beginDate = config.beginDate || now.minus({days:config.lookbackDays}).toFormat('yyyyMMdd');\nif (!valid(beginDate) || !valid(endDate)) throw new Error('날짜 형식은 실제 존재하는 YYYYMMDD여야 합니다.');\nconst dateMs = s => Date.parse(s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8)+'T00:00:00Z');\nif (beginDate > endDate || endDate >= now.toFormat('yyyyMMdd') || (dateMs(endDate)-dateMs(beginDate))/86400000 >= config.maxRangeDays) throw new Error('조회 기간은 어제까지, 한 번에 최대 31일입니다.');\nreturn [{json:{beginDate,endDate,pageSize:config.pageSize,requestedAt:now.toISO(),source:'FSC_STOCK_V2',dbWriteEnabled:false}}];"
+      },
+      "id": "cf09e702-8252-4002-ad2f-3107cfaa3ac3",
+      "name": "조회 기간 설정1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        608
+      ],
+      "notes": "기본: 어제까지 최근 7일. 초기 과거 자료는 beginDate/endDate를 YYYYMMDD로 함께 지정(최대 31일)."
+    },
+    {
+      "parameters": {
+        "url": "https://apis.data.go.kr/1160100/GetStockSecuritiesInfoService_V2/getStockPriceInfo_V2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "resultType",
+              "value": "json"
+            },
+            {
+              "name": "numOfRows",
+              "value": "={{ $json.pageSize }}"
+            },
+            {
+              "name": "beginBasDt",
+              "value": "={{ $json.beginDate }}"
+            },
+            {
+              "name": "endBasDt",
+              "value": "={{ $json.endDate }}"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "name": "pageNo",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body?.response?.header?.resultCode !== '00' || !$response.body?.response?.body || Number($response.body.response.body.pageNo) * Number($response.body.response.body.numOfRows) >= Number($response.body.response.body.totalCount) }}",
+              "limitPagesFetched": true,
+              "requestInterval": 500
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "290bfd66-9a58-404e-b099-dde481901e3a",
+      "name": "금융위 일봉 전체 페이지1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1216,
+        608
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "공공데이터포털 serviceKey는 Query Auth Credential에 저장."
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('조회 기간 설정1').first().json;\nconst pages = $input.all().map(i => i.json);\nif (!pages.length) throw new Error('응답 없음: 정상 수집으로 처리하지 않습니다.');\nconst rows = [], seen = new Set(); let expected = null, size = null;\nconst fail = text => { throw new Error(text); };\nconst integer = (v, field, max = '9223372036854775807') => {\n  if (typeof v === 'number' && !Number.isSafeInteger(v)) fail(field+': 안전하지 않은 숫자 응답');\n  const s = String(v ?? '').trim();\n  if (!/^\\d+$/.test(s) || BigInt(s) > BigInt(max)) fail(field+': 정수 범위 오류');\n  return BigInt(s).toString();\n};\nconst validDate = s => { if (!/^\\d{8}$/.test(s)) return false; const d = new Date(s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8)+'T00:00:00Z'); return !isNaN(d) && d.toISOString().slice(0,10).replace(/-/g,'') === s; };\nfor (let i = 0; i < pages.length; i++) {\n  const response = pages[i].response;\n  if (String(response?.header?.resultCode) !== '00') fail('API 업무 오류: resultCode='+String(response?.header?.resultCode ?? 'missing')+' (키/승인/한도 확인)');\n  const b = response.body;\n  if (!b) fail('API body 없음');\n  const count = Number(integer(b.totalCount,'totalCount','1000000'));\n  const pageSize = Number(integer(b.numOfRows,'numOfRows','10000'));\n  if (pageSize < 1 || Number(b.pageNo) !== i+1) fail('페이지 순서 또는 크기 오류');\n  if (expected === null) { expected=count; size=pageSize; }\n  if (count !== expected || pageSize !== size) fail('조회 중 페이지 총건수/크기가 변경됨: 다시 실행하세요.');\n  const raw = b.items?.item;\n  const list = raw == null || raw === '' ? [] : Array.isArray(raw) ? raw : [raw];\n  if (list.length !== Math.max(0,Math.min(size,expected-i*size))) fail('페이지 일부가 누락되었습니다.');\n  for (const r of list) {\n    const day = String(r.basDt), ticker = String(r.srtnCd ?? '');\n    if (!validDate(day) || day < config.beginDate || day > config.endDate) fail('조회 범위 밖이거나 잘못된 기준일');\n    if (!/^[0-9A-Z]{6}$/.test(ticker)) fail('6자리 종목 코드 오류: '+ticker+' / '+r.itmsNm);\n    const key = ticker+':'+day;\n    if (seen.has(key)) fail('중복 키 발견: '+key);\n    seen.add(key);\n    if (!['KOSPI','KOSDAQ','KONEX'].includes(r.mrktCtg)) fail('알 수 없는 시장 구분');\n    const fields = {};\n    for (const [target,source] of Object.entries({open_raw:'mkp',high_raw:'hipr',low_raw:'lopr',close_raw:'clpr',volume_raw:'trqu',value:'trPrc',marketcap:'mrktTotAmt',shares:'lstgStCnt'})) fields[target]=integer(r[source],source);\n    const o=BigInt(fields.open_raw),h=BigInt(fields.high_raw),l=BigInt(fields.low_raw),c=BigInt(fields.close_raw),v=BigInt(fields.volume_raw);\n    // 거래 정지일은 O/H/L=0, 종가가 남을 수 있습니다.\n    const halted = o===0n && h===0n && l===0n && v===0n;\n    if (!halted && (o<=0n || c<=0n || l<=0n || h<l || h<o || h<c || l>o || l>c)) fail('OHLC 범위 오류: '+key);\n    if (typeof r.itmsNm !== 'string' || !r.itmsNm.trim()) fail('종목명 누락');\n    if (r.mrktCtg !== 'KONEX') rows.push({date:day.slice(0,4)+'-'+day.slice(4,6)+'-'+day.slice(6,8),ticker,name:r.itmsNm,market:r.mrktCtg,...fields,source:'FSC_STOCK_V2',price_basis:'raw_unadjusted',dept:null,halted});\n  }\n}\nif (pages.length !== Math.max(1,Math.ceil(expected/size)) || seen.size !== expected) fail('전체 페이지 수집 미완료: DB 저장 금지');\nif (!rows.length) fail('조회 결과 없음: 미게시/휴장/필터 여부 확인 필요. 수집 완료로 처리하지 않습니다.');\nrows.sort((a,b)=>a.date.localeCompare(b.date)||a.ticker.localeCompare(b.ticker));\nconst counts = {};\nfor (const r of rows) { const key=r.date+'/'+r.market; counts[key]=(counts[key]||0)+1; }\nconst latestDate = rows[rows.length-1].date;\nreturn [{json:{status:'VALIDATED_NOT_STORED',source:config.source,beginDate:config.beginDate,endDate:config.endDate,requestedAt:config.requestedAt,pages:pages.length,apiRows:expected,selectedRows:rows.length,latestDate,latestMatchesRequestedEnd:latestDate.replace(/-/g,'')===config.endDate,counts,dbWritten:false,missingMappings:['store_krx_daily.dept','store_prices: 수정주가 일치 검증 필요'],notice:'검증 파일 생성만 완료. DB 저장/Parquet/웹 갱신은 수행하지 않음. 최신 기준일을 확인하세요.',rows}}];"
+      },
+      "id": "4a482a33-31ac-4070-90c8-f35b2df6d47a",
+      "name": "전체 건수와 일봉 검증1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        608
+      ],
+      "notes": "페이지 총수·중복·시장·날짜·정수·OHLC 검사. 실패하면 중단. KOSPI/KOSDAQ만 선택. 금액은 문자열로 보존."
+    },
+    {
+      "parameters": {
+        "content": "## 일봉 자동 수집 · DB 연결\n한국 시간 매일 **오후 1시 30분 (13:30)**\n기본: 어제까지 최근 7일. n8n과 DB 서버가 실행 중이어야 합니다.\n기존 동일 자료는 건너뛰고 신규 자료만 저장합니다.\n공공데이터포털 금융위원회 주식시세정보 API · 공공누리 제4유형. 팀 내부 분석용.",
+        "height": 270,
+        "width": 800,
+        "color": 5
+      },
+      "id": "7508b45b-6dc3-406e-96aa-b77cc121b334",
+      "name": "설정 안내1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## X4a 승인 저장 규격\nstore_prices / store_krx_daily / store_marketcap 신규 날짜 INSERT만 수행.\n기존 동일값은 건너뛰고 충돌은 중단. 전체 쓰기는 단일 트랜잭션.\ndept는 2026-09-18 값 유지, 기준 종목이 없으면 NULL.\n신규 prices는 기업행사 없음 가정의 원주가.\n웹 분석 기준일·지수·마스터 갱신은 별도입니다.",
+        "height": 270,
+        "width": 660,
+        "color": 3
+      },
+      "id": "1f839919-4cf8-4a10-b63e-8ce3ca83b5b8",
+      "name": "DB 연결 전 확인1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1888,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 30 13 * * *"
+            }
+          ]
+        }
+      },
+      "id": "ecdf2884-7306-4281-9c41-9cb3087c9838",
+      "name": "매일 13시 30분 KST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        768,
+        704
+      ],
+      "notes": "Asia/Seoul 매일 13:30. 어제까지 최근 7일을 조회하고 검증 후 신규 일봉만 저장합니다."
+    }
+  ],
+  "connections": {
+    "수동 수집": {
+      "main": [
+        [
+          {
+            "node": "조회 기간 설정1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB 기존 자료 확인": {
+      "main": [
+        [
+          {
+            "node": "중복 대조 및 저장 준비",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "중복 대조 및 저장 준비": {
+      "main": [
+        [
+          {
+            "node": "일봉 3개 테이블 저장",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "일봉 3개 테이블 저장": {
+      "main": [
+        [
+          {
+            "node": "DB 저장 결과",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "조회 기간 설정1": {
+      "main": [
+        [
+          {
+            "node": "금융위 일봉 전체 페이지1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "금융위 일봉 전체 페이지1": {
+      "main": [
+        [
+          {
+            "node": "전체 건수와 일봉 검증1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "전체 건수와 일봉 검증1": {
+      "main": [
+        [
+          {
+            "node": "DB 기존 자료 확인",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "매일 13시 30분 KST": {
+      "main": [
+        [
+          {
+            "node": "조회 기간 설정1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Asia/Seoul",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false
+  },
+  "name": "X4 금융위 일봉 자동 수집",
+  "active": false,
+  "pinData": {}
+}

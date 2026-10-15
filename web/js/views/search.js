@@ -1,7 +1,8 @@
 // 역방향 백테스트 (P1-8, 설계 §3·§4, plan/01 작업 ②). 입력 → 진행 → 결과 세 화면.
 // 허용 값·기본값은 /api/searches/options, 후보 수·예상 시간은 /api/searches/preview 에서 받는다. 화면은 계산하지 않는다.
 import { api } from '../api.js';
-import { errorView, fmt, h, helpTip, linkButton, loading, metricDefs, pill, stateView, table, toast } from '../components/ui.js';
+import { buySentence, dots, patternCards, sayBox, sellSentence, timeline } from '../components/easy.js';
+import { errorView, fmt, h, linkButton, loading, metricDefs, pill, stateView, strongT, table, term, toast } from '../components/ui.js';
 import { paneFrame, paneHead } from '../components/workspace.js';
 import { has, t } from '../i18n.js';
 import { state } from '../state.js';
@@ -16,6 +17,7 @@ function saveDraft(f) { try { sessionStorage.setItem(DRAFT, JSON.stringify(f)); 
 const dayAfter = (d) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); };
 const duration = (sec) => (sec >= 90 ? t('sx.minutes', { m: Math.round(sec / 60) }) : t('sx.seconds', { s: Math.round(sec) }));
 const pctLabel = (v) => (v == null ? t('sx.none') : `${v > 0 ? '+' : ''}${v}%`);
+const tip = (id) => ({ say: t(`tm.${id}.say`), rule: t(`tm.${id}.rule`) });
 
 function defaults(meta, opt) {
   return {
@@ -117,11 +119,28 @@ export async function renderSearch(el, foot = null) {
     oninput: (e) => { f.name = e.target.value.trim(); changed(); } });
   const goalRow = h('section', { class: 'goal-row', 'aria-label': t('sx.goal') },
     h('div', {}, h('label', { for: 's-name' }, t('sx.name')), nameIn, errorSlot('name')),
-    h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 's-target' }, t('sx.target')), helpTip(t('sx.goalSub'), t('sx.target'))),
+    h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 's-target' }, term(t('sx.target'), { say: t('tm.target.say'), rule: t('sx.goalSub') }))),
       targetIn, errorSlot('target_win_rate')),
-    h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 's-min' }, t('sx.minTrades')), helpTip(t('help.minTrades'), t('sx.minTrades'))), minIn,
+    h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 's-min' }, term(t('sx.minTrades'), tip('minTrades')))), minIn,
       h('p', { class: 'hint', text: t('sx.minTradesHint', { a: opt.min_trades.min, b: opt.min_trades.max, d: opt.min_trades.default }) }),
       errorSlot('min_trades')));
+
+  // 목표를 말로 (X15 ⑤): 승률 → 10번 중 몇 번, 최소 거래 수의 뜻. 입력값을 옮겨 적기만 한다
+  const goalBox = h('div', { class: 'goal', 'aria-live': 'polite' });
+  function renderGoal() {
+    const w = Number(f.target);
+    const m = Number(f.minTrades);
+    goalBox.replaceChildren(...(f.target !== '' && w >= 0 && w <= 100
+      ? [dots(w / 100), h('p', {}, strongT('sx.goalSay', { x: +(w / 10).toFixed(1) }), Number.isInteger(m) && m > 0 ? ` ${t('sx.goalMin', { m: fmt.int(m) })}` : '')]
+      : [h('p', {}, t('sx.goalBad'))]));
+  }
+  renderGoal();
+  // 찾는 기간 | 확인 기간 그림 (분할일은 options 값 그대로)
+  const tlBox = h('div', {});
+  const renderTimeline = () => tlBox.replaceChildren(timeline({ start: f.start, split: opt.split_date, evalStart: dayAfter(opt.split_date), end: f.end }));
+  renderTimeline();
+  const findSay = sayBox('sx.findTitle');
+  findSay.body.textContent = t('sx.findWait');
 
   // 패턴 수치 축 (P1-4): 고른 패턴 중 탐색할 수 있는 수치마다 값 칩
   f.pax = f.pax || {};
@@ -151,30 +170,24 @@ export async function renderSearch(el, foot = null) {
   // ---------------------------------------------------------------- 탐색 범위
   const rangeCard = h('article', { class: 'card' }, h('h2', {}, t('sx.range')),
     h('p', { class: 'card-sub', text: t('sx.rangeSub') }),
-    h('span', { class: 'label' }, t('b.patterns')),
-    h('div', { class: 'checks range-patterns', role: 'group', 'aria-label': t('b.patterns') }, opt.patterns.map((p) => {
-      const box = h('input', { type: 'checkbox', checked: f.patterns.includes(p), 'aria-label': patLabel(p), 'aria-describedby': slotId('axes.patterns') });
-      const lab = h('label', { class: `check${f.patterns.includes(p) ? ' selected' : ''}` }, box, patLabel(p));
-      box.addEventListener('change', () => {
-        f.patterns = opt.patterns.filter((x) => (x === p ? box.checked : f.patterns.includes(x)));
-        lab.classList.toggle('selected', box.checked);
-        renderPax();
-        changed();
-      });
-      return lab;
-    })), errorSlot('axes.patterns'), paxBox,
+    h('span', { class: 'label' }, t('sx.patterns')),
+    // 패턴 카드 (X15 ⑤): 전략 만들기와 같은 묶음·모양 그림·쉬운 이름
+    patternCards({ items: opt.patterns.map((n) => ({ name: n, label: patLabel(n) })), selected: f.patterns, describedBy: slotId('axes.patterns'), groupLabel: t('sx.patterns'),
+      onChange: (n, on) => { f.patterns = opt.patterns.filter((x) => (x === n ? on : f.patterns.includes(x))); renderPax(); changed(); } }),
+    errorSlot('axes.patterns'), paxBox,
     h('div', { class: 'range-axes' },
-      h('div', {}, h('span', { class: 'label' }, t('sx.combine')), multi('combine', opt.axes.combine, (c) => c.toUpperCase(), t('sx.combine'), 'axes.combine'), errorSlot('axes.combine')),
+      h('div', {}, h('span', { class: 'label' }, t('sx.combine')), multi('combine', opt.axes.combine, (c) => t(`b.${c}`), t('sx.combine'), 'axes.combine'), errorSlot('axes.combine')),
       h('div', {}, h('span', { class: 'label' }, t('sx.stop')), multi('stop', opt.axes.stop_loss_pct, pctLabel, t('sx.stop'), 'axes.stop'), errorSlot('axes.stop')),
       h('div', {}, h('span', { class: 'label' }, t('sx.profit')), multi('profit', opt.axes.take_profit_pct, pctLabel, t('sx.profit'), 'axes.profit'), errorSlot('axes.profit')),
-      h('div', {}, h('span', { class: 'label' }, t('sx.hold')), multi('hold', opt.axes.max_hold_days, (d) => String(d), t('sx.hold'), 'axes.hold'), errorSlot('axes.hold'))));
+      h('div', {}, h('span', { class: 'label' }, t('sx.hold')), multi('hold', opt.axes.max_hold_days, (d) => String(d), t('sx.hold'), 'axes.hold'), errorSlot('axes.hold'))),
+    findSay.el);
 
   // ---------------------------------------------------------------- 대상·기간
   const dateIn = (id, key) => h('input', { id, type: 'date', value: f[key], min: meta.backtest_start, max: meta.data_as_of,
     'aria-describedby': slotId('filters.period'), onchange: (e) => { f[key] = e.target.value; changed(); } });
   const valueIn = h('input', { id: 's-value', inputmode: 'numeric', value: String(f.minValue), 'aria-describedby': slotId('filters.min_avg_value_krw'),
     oninput: (e) => { f.minValue = e.target.value.replace(/[,\s]/g, ''); changed(); } });
-  const scopeCard = h('article', { class: 'card' }, h('h2', { class: 'with-tip' }, t('sx.scope'), helpTip(t('help.periods'), t('sx.scope'))),
+  const scopeCard = h('article', { class: 'card' }, h('h2', {}, term(t('sx.scope'), { say: t('tm.scope.say'), rule: t('sx.scopeSub', { d: opt.split_date }) })),
     h('p', { class: 'card-sub', text: t('sx.scopeSub', { d: opt.split_date }) }),
     h('span', { class: 'label' }, t('b.market')), multi('markets', meta.markets, (m) => m, t('b.market'), 'filters.markets'), errorSlot('filters.markets'),
     h('div', { class: 'field-two' },
@@ -198,8 +211,8 @@ export async function renderSearch(el, foot = null) {
       h('div', { class: 'eyebrow' }, t('sx.eyebrow')),
       h('div', { class: 'title-row' }, h('h1', { text: t('sx.title') }), histToggle.wrap),
       h('p', { class: 'lead', text: t('sx.lead') }),
-      h('div', { class: 'notice' }, t('sx.notice', { s: opt.split_date, e: dayAfter(opt.split_date), n: opt.max_candidates }))),
-    goalRow,
+      tlBox, h('p', { class: 'hint' }, t('sx.notice', { n: opt.max_candidates }))),
+    goalRow, goalBox,
     h('div', { class: 'search-grid' }, rangeCard, scopeCard), serverBox,
     ...(foot ? [] : [h('div', { class: 'fab-spacer', 'aria-hidden': 'true' }), fab]));
   if (foot) foot.replaceChildren(fab);
@@ -219,7 +232,7 @@ export async function renderSearch(el, foot = null) {
   }
   async function refreshCount() {
     const e = validate(f, meta, opt);
-    if (Object.keys(e).length) { countBox.textContent = t('sx.fixFirst'); withinLimit = false; return; }
+    if (Object.keys(e).length) { countBox.textContent = t('sx.fixFirst'); findSay.body.textContent = t('sx.findWait'); withinLimit = false; return; }
     const my = ++seq;
     countBox.textContent = t('sx.counting');
     try {
@@ -227,14 +240,18 @@ export async function renderSearch(el, foot = null) {
       if (my !== seq) return;
       withinLimit = p.within_limit;
       countBox.replaceChildren(p.within_limit
-        ? h('span', { class: 'with-tip' }, h('b', {}, t('sx.count', { n: fmt.int(p.candidates), t: duration(p.estimated_sec) })), helpTip(t('sx.countSub'), t('sx.estimate'), { up: true }))
+        ? h('b', {}, term(t('sx.count', { n: fmt.int(p.candidates), t: duration(p.estimated_sec) }), t('sx.countSub')))
         : h('b', { class: 'warning' }, t('sx.over', { n: fmt.int(p.candidates), m: p.max_candidates })));
+      findSay.body.textContent = p.within_limit
+        ? t('sx.findSay', { k: f.patterns.length, n: fmt.int(p.candidates), t: duration(p.estimated_sec) }) : t('sx.findWait');
     } catch (err) {
       if (my === seq) { withinLimit = false; countBox.textContent = t('sx.countErr', { m: err.message }); }
     }
   }
   function changed() {
     saveDraft(f);
+    renderGoal();
+    renderTimeline();
     serverBox.classList.add('hidden');
     if (shown) showErrors(validate(f, meta, opt));
     clearTimeout(timer);
@@ -451,6 +468,39 @@ function metric(label, value, sub) {
   return h('div', { class: 'metric' }, h('span', { class: 'label' }, label), h('strong', {}, value), h('small', {}, sub || ''));
 }
 
+// 결과 맨 위 요약 (X15 ⑤): 서버 상태별 개수를 막대로, 목록 맨 위 전략(정렬 순서, 추천 아님)을 문장으로 옮긴다.
+// 초록 = 앞뒤 모두 넘은 전략 중 확인 기간 우연 검사(FDR) 통과가 있음, 노랑 = 앞뒤 모두 넘은 전략만 있음, 빨강 = 없음
+function searchSummary(res, onMore) {
+  const c = res.counts;
+  const x = +(res.request.target_win_rate * 10).toFixed(1);
+  const light = res.rows.some((r) => r.status === 'both' && r.evaluate?.fdr_pass) ? 'green' : c.both > 0 ? 'yellow' : 'red';
+  const seg = [['both', c.both], ['ex', c.explore_only + (c.not_evaluated || 0)], ['no', c.not_met], ['few', c.insufficient_trades]];
+  const top = res.rows.find((r) => r.status === 'both');
+  const more = h('a', { href: '#', class: 'sum-more' }, t('sr.sum.more'));
+  more.addEventListener('click', (e) => { e.preventDefault(); onMore(); });
+  const row = (key, part) => h('div', { class: 'pick-row' }, h('span', {}, t(key)), dots(part.win_rate),
+    h('em', {}, t('sr.pick.row', { n: fmt.int(part.trades), w: fmt.pct(part.win_rate, 1, false) })));
+  let pick = null;
+  if (top) {
+    const ex = top.strategy.exit || {};
+    const extra = [ex.trailing_stop_pct, ex.breakeven_trigger_pct, ex.ma_exit_window].filter((v) => v != null).length;
+    pick = h('div', { class: 'pick' }, h('span', { class: 'pick-h' }, t('sr.pick.title'), h('em', {}, t('sr.pick.note'))),
+      h('p', {}, buySentence(top.strategy.patterns, top.strategy.combine), ' ',
+        sellSentence({ stop: ex.stop_loss_pct, profit: ex.take_profit_pct, hold: ex.max_hold_days, extra })),
+      row('tl.explore', top.explore), top.evaluate && row('tl.evaluate', top.evaluate));
+  }
+  return h('section', { class: `sum ssum ${light}`, 'aria-label': t('sum.aria') },
+    h('div', { class: 'sum-head' }, h('span', { class: 'sum-light', 'aria-hidden': 'true' }, h('i'), h('i'), h('i')), h('b', {}, t(`sr.sum.${light}`))),
+    h('p', { class: 'sum-main' }, c.both
+      ? strongT('sr.sum.main', { n: fmt.int(c.candidates), x, b: t('sr.sum.count', { n: fmt.int(c.both) }) })
+      : strongT('sr.sum.main0', { n: fmt.int(c.candidates), x })),
+    h('div', { class: 'stack', 'aria-hidden': 'true' }, seg.filter(([, n]) => n > 0).map(([k, n]) => h('span', { class: k, style: { flex: String(n) } }))),
+    h('ul', { class: 'legend-row' }, seg.map(([k, n]) => h('li', { class: k }, h('i', { 'aria-hidden': 'true' }), t(`sr.seg.${k}`), ' ', h('b', {}, fmt.int(n))))),
+    pick,
+    light !== 'green' && c.both > 0 && h('p', { class: 'sum-warn' }, t('sr.sum.warn')),
+    h('div', { class: 'sum-foot' }, h('span', {}, t('sum.foot')), more));
+}
+
 export async function renderSearchResult(el, id) {
   el.append(h('h1', { text: t('sr.title') }), loading(t('sr.loading')));
   let res;
@@ -515,11 +565,12 @@ export async function renderSearchResult(el, id) {
   el.append(...[
     h('div', { class: 'topline' },
       h('div', {}, h('div', { class: 'eyebrow' }, t('sp.id', { id: res.search_id })), h('h1', { text: t('sr.title') }),
-        h('p', { class: 'lead', text: t('sr.tried', { n: fmt.int(c.candidates), w: winPct(req.target_win_rate), m: fmt.int(req.min_trades) }) })),
-      h('div', { class: 'notice' }, t('sr.split', { a: sp.explore.start, b: sp.explore.end, c: sp.evaluate.start, d: sp.evaluate.end }))),
+        h('p', { class: 'lead', text: t('sr.tried', { n: fmt.int(c.candidates), x: +(req.target_win_rate * 10).toFixed(1), w: winPct(req.target_win_rate), m: fmt.int(req.min_trades) }) })),
+      timeline({ start: sp.explore.start, split: sp.explore.end, evalStart: sp.evaluate.start, end: sp.evaluate.end, note: false })),
     res.status === 'cancelled'
       ? h('div', { class: 'callout', role: 'status', style: { marginBottom: '18px' } }, h('b', { class: 'warning' }, t('sr.cancelledBanner', { n: fmt.int(c.candidates), p: fmt.int(c.processed) })))
       : null,
+    res.rows.length ? searchSummary(res, () => el.querySelector('table')?.scrollIntoView({ behavior: 'smooth', block: 'start' })) : null,
     h('div', { class: 'callout info', style: { marginBottom: '18px' } }, `${res.note} ${res.disclaimer}`),
     h('div', { class: 'metrics' },
       metric(t('sr.m.candidates'), fmt.int(c.candidates), res.status === 'cancelled' ? `${fmt.int(c.processed)} / ${fmt.int(c.candidates)}` : ''),
@@ -533,7 +584,7 @@ export async function renderSearchResult(el, id) {
       : null,
     h('p', { class: 'muted', style: { fontSize: '12px' }, text: t('sr.sortRule') }),
     res.rows.length
-      ? h('article', { class: 'card' }, table({ caption: t('sr.caption'), columns, rows: res.rows }))
+      ? h('article', { class: 'card sr-table' }, table({ caption: t('sr.caption'), columns, rows: res.rows }))
       : h('p', { class: 'muted', text: t('sr.empty') }),
     res.rows.length ? saveCard : null,
     h('div', { style: { marginTop: '18px' } }, metricDefs(res.metric_definitions)),
