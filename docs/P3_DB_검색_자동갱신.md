@@ -1,10 +1,12 @@
 # 공시·뉴스 HTTP 자동 갱신 (P3-11)
 
-**실시간 뉴스 검색이 필요한 PC만 설정. 엔진·예측 작업만 하면 불필요.**
+**데이터 서버 PC의 앱에서만 설정한다. 팀원 PC에서는 자동 갱신을 켜지 않는다(F1c 개정·F1d).**
 
-팀원 PC는 공통 데이터 서버의 조회 API에서 스냅샷을 받아 검증한 뒤 로컬 Parquet으로 검색한다. DB 계정, MariaDB 클라이언트, 수집 PC의 접속 파일은 필요하지 않다. 수집 PC의 DB 쓰기 경로와는 별개다.
+데이터 서버 PC 안의 앱이 loopback 조회 API에서 스냅샷을 받아 검증한 뒤 같은 서버의 Parquet으로 검색한다. 팀원은 서버의 웹 화면만 이용하고 기사 사본을 내려받지 않는다. 앱에는 DB 계정·MariaDB 클라이언트·수집 PC의 접속 파일이 필요하지 않다. 수집 PC의 DB 쓰기 경로와는 별개다.
 
-## 팀원 PC에서 실행
+서버 앱에는 출처 대장에서 활성인 출처만 반영한다. 현재 `n8n_news`·`n8n_disclosure`는 매니페스트상 `local_fixture: true`·`coverage: unknown`이므로 [출처 대장](P3_출처_대장.md)(P3-3, 작성 예정)의 활성화 전에는 개발·평가용이다.
+
+## 데이터 서버 PC의 앱에서 실행
 
 Python 환경 관리 도구 `uv`와 Git을 설치한 뒤 PowerShell에서 실행한다. 병합 전 검증은 PR #81의 `fix/P3-11-project-news-refresh` 브랜치를 사용하고, 병합 후에는 최신 `develop`을 사용한다.
 
@@ -15,7 +17,7 @@ git switch develop
 git pull --ff-only
 uv sync --project engine
 uv sync --project api
-$env:REGIME_DATA_API_URL = "<서버 담당에게 받은 주소>" # 가격 동기화와 같은 값
+$env:REGIME_DATA_API_URL = "http://127.0.0.1:8100" # 데이터 서버 PC 내부 조회
 $env:REGIME_NEWS_REFRESH = "1"
 # 서버가 키 인증을 켠 경우만 터미널에서 설정:
 # $env:REGIME_DATA_API_TOKEN = "<서버 담당에게 받은 키>"
@@ -24,11 +26,11 @@ uv run --project api regime-api
 
 브라우저에서 `http://127.0.0.1:8000`을 연다. 기본 데모 로그인으로 테스트할 수 있다. 실제 로그인 설정은 [X3 로그인 설계](X3_로그인_설계.md)를 따른다. 포트를 바꾸려면 실행 전에 `$env:REGIME_PORT = "8001"`을 설정한다.
 
-- 접속값은 각 PC의 서버 실행 터미널 환경변수에만 설정한다. Git·PR·채널·로그에 주소나 키를 남기지 않는다.
+- 접속값은 데이터 서버 PC의 앱 실행 터미널 환경변수에만 설정한다. Git·PR·채널·로그에 주소나 키를 남기지 않는다.
 - `REGIME_NEWS_REFRESH`를 켜지 않으면 기존 `ext_store`의 로컬 Parquet 읽기를 그대로 사용한다.
 - 첫 다운로드는 백그라운드에서 실행한다. 웹은 먼저 열리며 공시·뉴스 검색은 검증 완료까지 `warming_up`을 반환한다. 가격 데이터가 없어도 뉴스 갱신은 별도로 동작한다.
 - `REGIME_SAMPLE=1`은 기존 `sample30` 파일이 있는 PC만 사용한다. 뉴스만 확인할 때는 설정하지 않는다.
-- 서버가 스냅샷 API를 제공해야 실제 다운로드가 된다. **2026-10-14 리뷰 반영 시점에는 최종 서버 응답 규격과 실서버 연동 확인이 남아 있다.** 아래 잠정 응답 규격은 서버 없이 계약 테스트로 검증했다.
+- 서버가 스냅샷 API를 제공해야 실제 다운로드가 된다. F1 §2의 #84 확정 규격과 코드 대조는 완료했다. **실서버 앱에서의 연결·새 스냅샷·장애 복구 확인은 병합 전 확인 사항으로 남아 있다.**
 
 ## 갱신 주기와 저장 위치
 
@@ -52,49 +54,20 @@ news_snapshots: ../regime-lab_news_snapshots
 - Arrow 스키마로 Parquet을 저장한 뒤 다시 읽어 모든 값과 스키마를 비교한다. 검색 인덱스의 버전 수도 일치해야 메모리의 기존 인덱스를 교체한다.
 - 기존 `as_of`의 이용 가능 시각 기준과 제목·회사명 검색 범위를 유지한다. 게시 시각을 이용 가능 시각으로 바꾸지 않는다.
 
-## 잠정 HTTP 응답 규격 (PR #81 리뷰 기반)
+## 확정 HTTP 응답 규격
 
-서버 최종 규격은 [F1 데이터 서버 API](F1_데이터_서버_API.md)에 확정될 예정이다. 아래 JSON 외곽 필드 이름을 가짜 HTTP 응답에 명시해 검증했다. 최종 규격과 다르면 읽기 어댑터와 계약 테스트를 함께 맞춰야 한다.
+[F1 데이터 서버 API §2 기사 메타데이터 스냅샷](F1_데이터_서버_API.md)의 #84 확정 규격을 따른다. 경로 3개, 커서 이름·순서, JSON 원문 문자열, UTC 마이크로초 형식, 1,000건 페이지 상한을 코드와 대조했다. 규격 예시는 F1 문서를 단일 기준으로 사용한다.
 
-모두 GET이며 `REGIME_DATA_API_TOKEN`이 있으면 `X-API-Key` 헤더로만 보낸다. 리디렉션은 거절한다.
+모두 GET이며 `REGIME_DATA_API_TOKEN`은 `X-API-Key` 헤더로만 보낸다. 리디렉션은 거절한다. 매니페스트가 있어도 멤버 적재 중일 수 있으므로 전체 건수·해시·왕복 검증을 완료해야 적용한다.
 
-1. `/v1/ext/snapshots/latest?sources=n8n_news,n8n_disclosure`
+## 운영 제한
 
-```json
-{"snapshot_id": "<64자리 소문자 SHA-256>"}
-```
+정상 사본과 검증 실패 시 남은 `pending-*` 폴더는 자동 삭제하지 않는다. 디스크 사용량을 확인하고, 현재 앱이 사용하는 경로를 확인한 뒤 사용하지 않는 사본만 운영자가 보관 정책에 따라 정리한다. 현재 사본을 추측해서 삭제하지 않는다.
 
-완성 후보가 없으면 404. 모든 출처의 매니페스트가 있어도 멤버 적재 중일 수 있어 추가 검증한다.
-
-2. `/v1/ext/snapshots/{snapshot_id}`
-
-```json
-{
-  "snapshot_id": "<동일 ID>",
-  "manifests": [
-    {"source": "n8n_news", "manifest_json": "<원문 JSON 문자열>", "arrow_schema_json": "<원문 JSON 문자열>", "document_versions": 1, "coverage_state": "unknown", "coverage_rows": 0},
-    {"source": "n8n_disclosure", "manifest_json": "<원문 JSON 문자열>", "arrow_schema_json": "<원문 JSON 문자열>", "document_versions": 1, "coverage_state": "unknown", "coverage_rows": 0}
-  ],
-  "member_counts": {"n8n_news": 1, "n8n_disclosure": 1},
-  "coverage_rows": 0
-}
-```
-
-3. `/v1/ext/snapshots/{snapshot_id}/documents?source=…&limit=1000` (다음 쪽은 `after_doc_id`, `after_version` 추가)
-
-```json
-{
-  "snapshot_id": "<동일 ID>",
-  "source": "n8n_news",
-  "rows": [{"doc_id": "n8n_news:example", "version": 1, "source": "n8n_news", "status": "active", "license_scope": "metadata_only", "first_seen_at_utc": "2026-10-14 00:00:00.000000", "available_at_utc": "2026-10-14 00:00:00.000000", "record_sha256": "<해시>", "document_json": "<원문 JSON 문자열>"}],
-  "next_cursor": null
-}
-```
-
-행은 `(doc_id, version)` 오름차순. 더 있으면 `next_cursor`는 마지막 행의 `{"doc_id": "…", "version": 1}`이고 마지막 쪽만 null이다. JSON 열 세 개는 객체로 재인코딩하지 않고 원문 문자열, 버전·개수는 JSON 정수, 파생 시각은 UTC 문자열이다.
+검증에 계속 실패하는 스냅샷도 다음 주기에 다시 내려받을 수 있다. 특히 `deleted` 행 등 지원하지 않는 자료가 있으면 이전 검색 결과가 계속 유지될 수 있으므로 `status.json`의 stale을 확인하고 수집/서버 담당이 원인을 해결한다. 실패 스냅샷 대기 간격 조정은 후속 개선이다.
 
 ## 검증과 남은 실서버 확인
 
 CI는 가짜 HTTP로 정상 페이지 처리, 해시·개수·멤버십·출처·왕복 불일치, 미완성 적재, 오류 후 이전 자료 보존과 재시도, 응답 제한·리디렉션 거절, 웹 시작 비차단을 검사한다.
 
-서버 규격 확정 후 DB 설정이 없는 PC에서 다음을 확인한다: 웹 접속 → 상태 ok/버전 수 일치 → 현재 검색 → 새 스냅샷 반영 → 과거 as_of 절단 → 서버 장애 중 이전 결과 유지와 복구 → 가격 store 없는 PC에서 뉴스 검색. 서버 주소와 토큰은 서버 담당에게 비공개로 받아 환경변수로 설정한다.
+F1c 병합 조건으로 데이터 서버 PC 안의 앱에서 다음을 확인하고 기록한다: 웹 접속 → 상태 ok/버전 수 일치 → 현재 검색 → 새 스냅샷 반영 → 과거 as_of 절단 → 서버 장애 중 이전 결과 유지와 복구 → 가격 store 없는 시험 구성에서 뉴스 검색. 서버 주소와 토큰은 서버 담당이 환경변수로 설정한다. 장애 시험은 실제 공유 서버를 중단하지 말고 시험 인스턴스 또는 통제된 연결 차단으로 수행한다. 이 확인이 끝나기 전에는 실서버 검증 완료로 표기하지 않는다.

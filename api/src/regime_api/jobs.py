@@ -1,6 +1,6 @@
 """실행 작업 관리자 (FR-X2·X3, C2, E4).
 
-- 프로세스 내 백그라운드 스레드 1개. 실행 중 새 요청은 409 busy + 현재 작업 id·종류 (대기열 없음).
+- 프로세스 내 계산 스레드 1개. 실행·탐색은 선착순 대기열을 공유한다 (X13, F1b).
 - 작업 종류: run(정방향 실행)과 search(역방향 탐색, P1-7). 두 종류가 같은 슬롯을 쓴다(동시에 1개).
   탐색 상태는 runs/searches/.status/ 에 따로 두어 실행 목록과 섞이지 않는다.
 - 탐색 취소는 그때까지 처리한 후보를 cancelled 기록으로 남긴다(실행 취소는 결과를 남기지 않음).
@@ -15,6 +15,7 @@ import json
 import threading
 import time
 import traceback
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +30,10 @@ TERMINAL = ("completed", "failed", "cancelled")
 class Busy(Exception):
     def __init__(self, run_id: str, kind: str = "run"):
         self.run_id, self.kind = run_id, kind
+
+
+class QueueFull(Exception):
+    pass
 
 
 class _JobContext(RecordingContext):
@@ -52,6 +57,8 @@ class Job:
     ctx: RecordingContext | None = None
     elapsed_final: float | None = None
     kind: str = "run"
+    requester: str = ""
+    queue_position: int | None = 0
 
     def snapshot(self) -> dict:
         stages = SEARCH_STAGES if self.kind == "search" else STAGES
@@ -62,7 +69,7 @@ class Job:
         head = ({"search_id": self.run_id, "name": self.strategies[0]} if self.kind == "search"
                 else {"run_id": self.run_id, "strategies": self.strategies})
         return {**head, "status": self.status, "created_at": self.created_at, "finished_at": self.finished_at,
-                "error": self.error, **snap}
+                "error": self.error, "queue_position": self.queue_position if self.status == "queued" else None, **snap}
 
 
 class JobManager:
@@ -78,6 +85,12 @@ class JobManager:
         self._lock = threading.Lock()
         self._jobs: dict[str, Job] = {}
         self._current: Job | None = None
+        self._pending: deque[tuple[Job, object]] = deque()
+        self.queue_max = cfg["jobs"]["queue_max"]
+        self.per_user = cfg["jobs"]["per_user"]
+        if (type(self.queue_max) is not int or self.queue_max < 0
+                or type(self.per_user) is not int or self.per_user < 1):
+            raise ValueError("jobs.queue_max must be a nonnegative integer; jobs.per_user must be a positive integer")
         self._recover()
 
     # ------------------------------------------------------------------ 상태 파일
@@ -95,6 +108,7 @@ class JobManager:
                 continue
             if snap.get("status") not in TERMINAL:
                 snap.update(status="failed", finished_at=datetime.now().isoformat(timespec="seconds"),
+                            queue_position=None,
                             error={"code": "server_restarted", "message": "The server restarted while this run was in progress."})
                 f.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
         for d in [*self.runs_dir.glob(".tmp_*"), *self.search_dir.glob(".tmp_*")]:  # 중단된 작업의 임시 폴더 정리
@@ -106,8 +120,8 @@ class JobManager:
     def get(self, run_id: str) -> dict | None:
         with self._lock:
             job = self._jobs.get(run_id)
-        if job and job.kind == "run":
-            return job.snapshot()
+            if job and job.kind == "run":
+                return job.snapshot()
         f = self.status_dir / f"{run_id}.json"
         if f.exists():
             return json.loads(f.read_text(encoding="utf-8"))
@@ -191,9 +205,52 @@ class JobManager:
             return self._current
 
     # ------------------------------------------------------------------ 실행·취소
-    def _check_free(self) -> None:
-        if self._current is not None and self._current.status not in TERMINAL:
-            raise Busy(self._current.run_id, self._current.kind)
+    def _check_capacity(self, requester: str) -> None:
+        own = [j for j in self._jobs.values() if j.requester == requester and j.status not in TERMINAL]
+        if len(own) >= self.per_user:
+            raise Busy(own[0].run_id, own[0].kind)
+        if self._current is not None and len(self._pending) >= self.queue_max:
+            raise QueueFull()
+
+    def _positions(self) -> None:
+        for i, (job, _) in enumerate(self._pending, 1):
+            job.queue_position = i
+            self._write(job)
+
+    def _enqueue(self, job: Job, payload) -> None:
+        # Caller holds _lock; persist acceptance before making the job runnable.
+        job.queue_position = len(self._pending) + 1 if self._current is not None else 0
+        self._write(job)
+        self._jobs[job.run_id] = job
+        if self._current is None:
+            self._current = job
+            threading.Thread(target=self._work, args=(job, payload), name="analysis-worker", daemon=True).start()
+        else:
+            self._pending.append((job, payload))
+
+    def _work(self, job: Job, payload) -> None:
+        while True:
+            try:
+                with self._lock:
+                    if job.status != "cancelled":
+                        job.ctx = _JobContext(job, self._write, SEARCH_STAGES if job.kind == "search" else STAGES)
+                        job.status = "running"
+                        job.queue_position = None
+                if job.status != "cancelled":
+                    if job.kind == "search":
+                        self._run_search(job, payload)
+                    else:
+                        self._run(job, payload)
+            finally:
+                with self._lock:
+                    if not self._pending:
+                        self._current = None
+                        return
+                    job, payload = self._pending.popleft()
+                    self._current = job
+                    job.queue_position = 0
+                    self._write(job)
+                    self._positions()
 
     def _data_version(self) -> str:
         """원본 + 워밍업 파일 지문 (NFR-10). 실행·탐색 id 와 기록의 data_version 과 같은 기준."""
@@ -202,25 +259,21 @@ class JobManager:
 
         return config_hash({**input_file_hashes(self.paths.store), **warmup_file_hashes(self.paths.cache)})[:8]
 
-    def submit(self, strategies: list[Strategy]) -> Job:
+    def submit(self, strategies: list[Strategy], requester: str = "") -> Job:
         with self._lock:
-            self._check_free()
+            self._check_capacity(requester)
             run_id = make_run_id(strategies, self.cfg, self._data_version())
-            while (self.runs_dir / run_id).exists() or run_id in self._jobs:
+            while ((self.runs_dir / run_id).exists() or (self.status_dir / f"{run_id}.json").exists()
+                   or run_id in self._jobs):
                 time.sleep(1.0)  # run_id 는 초 단위 시각을 포함한다
                 run_id = make_run_id(strategies, self.cfg, self._data_version())
-            job = Job(run_id, [s.name for s in strategies])
-            job.ctx = _JobContext(job, self._write)
-            self._jobs[run_id] = job
-            self._current = job
-        self._write(job)
-        threading.Thread(target=self._run, args=(job, strategies), name=f"run-{run_id}", daemon=True).start()
+            job = Job(run_id, [s.name for s in strategies], requester=requester)
+            self._enqueue(job, strategies)
         return job
 
     def _run(self, job: Job, strategies: list[Strategy]) -> None:
-        job.status = "running"
-        self._write(job)
         try:
+            self._write(job)
             run_and_save(strategies, self._prep(), self.cfg, self.paths, self.tickers, run_id=job.run_id, ctx=job.ctx)
             job.status = "completed"
         except RunCancelled:
@@ -236,26 +289,22 @@ class JobManager:
             self._write(job)
 
     # ------------------------------------------------------------------ 탐색 (P1-7)
-    def submit_search(self, req: SearchRequest) -> Job:
+    def submit_search(self, req: SearchRequest, requester: str = "") -> Job:
         with self._lock:
-            self._check_free()
+            self._check_capacity(requester)
             data_ver = self._data_version()
             sid = make_search_id(req, self.cfg, data_ver)
-            while (self.search_dir / sid).exists() or sid in self._jobs:
+            while ((self.search_dir / sid).exists() or (self.search_status_dir / f"{sid}.json").exists()
+                   or sid in self._jobs):
                 time.sleep(1.0)  # search_id 는 초 단위 시각을 포함한다
                 sid = make_search_id(req, self.cfg, data_ver)
-            job = Job(sid, [req.name], kind="search")
-            job.ctx = _JobContext(job, self._write, SEARCH_STAGES)
-            self._jobs[sid] = job
-            self._current = job
-        self._write(job)
-        threading.Thread(target=self._run_search, args=(job, req), name=f"search-{sid}", daemon=True).start()
+            job = Job(sid, [req.name], kind="search", requester=requester)
+            self._enqueue(job, req)
         return job
 
     def _run_search(self, job: Job, req: SearchRequest) -> None:
-        job.status = "running"
-        self._write(job)
         try:
+            self._write(job)
             out = run_and_save_search(req, self._prep(), self.cfg, self.paths, search_id=job.run_id, ctx=job.ctx)
             job.status = json.loads((out / "meta.json").read_text(encoding="utf-8"))["status"]  # completed·cancelled
             if job.status == "cancelled":
@@ -273,8 +322,8 @@ class JobManager:
     def get_search(self, search_id: str) -> dict | None:
         with self._lock:
             job = self._jobs.get(search_id)
-        if job and job.kind == "search":
-            return job.snapshot()
+            if job and job.kind == "search":
+                return job.snapshot()
         f = self.search_status_dir / f"{search_id}.json"
         if f.exists():
             return json.loads(f.read_text(encoding="utf-8"))
@@ -287,10 +336,19 @@ class JobManager:
     def cancel(self, run_id: str) -> bool:
         with self._lock:
             job = self._jobs.get(run_id)
-        if job is None or job.status in TERMINAL or job.ctx is None:
-            return False
-        job.ctx.cancel()
-        return True
+            if job is None or job.status in TERMINAL:
+                return False
+            if job.status == "queued":
+                self._pending = deque((j, p) for j, p in self._pending if j is not job)
+                job.status = "cancelled"
+                job.finished_at = datetime.now().isoformat(timespec="seconds")
+                job.elapsed_final = 0.0
+                job.error = {"code": "cancelled_before_start", "message": "Cancelled before execution. No result was generated."}
+                self._write(job)
+                self._positions()
+            else:
+                job.ctx.cancel()
+            return True
 
     def wait(self, run_id: str, timeout: float = 120.0) -> dict:
         """테스트·CLI 용: 종료 상태까지 기다린다."""

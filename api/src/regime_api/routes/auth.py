@@ -9,6 +9,10 @@ from regime_api.errors import ApiError, body
 router = APIRouter(tags=["auth"])
 SESSION_COOKIE = "rl_session"
 CSRF_COOKIE = "rl_csrf"
+OAUTH_COOKIE = "rl_oauth"
+
+class SocialLogin(BaseModel):
+    provider: StrictStr
 
 class Credentials(BaseModel):
     email: StrictStr
@@ -46,7 +50,40 @@ def config(request: Request, response: Response):
         return {"enabled":False, "guest_allowed":True, "password_min_length":auth.policy["demo_password_min_length"]}
     csrf = auth.csrf()
     cookie(response, auth, CSRF_COOKIE, csrf, auth.policy["csrf_ttl_seconds"])
-    return {"enabled":True, "guest_allowed":False, "providers":["email"], "password_min_length":auth.policy["password_min_length"], "csrf_token":csrf}
+    social = auth.social_providers()
+    return {"enabled":True, "guest_allowed":auth.policy["guest_enabled"], "providers":["email", *[name for name, enabled in social.items() if enabled]], "social_providers":social, "password_min_length":auth.policy["password_min_length"], "csrf_token":csrf}
+
+@router.post("/auth/guest")
+def guest(request: Request, response: Response):
+    auth = service(request)
+    sid, user = auth.guest(request.cookies.get(SESSION_COOKIE), client(request))
+    if request.cookies.get(OAUTH_COOKIE):
+        auth.store.take_flow(request.cookies[OAUTH_COOKIE])
+    response.delete_cookie(OAUTH_COOKIE, path="/", httponly=True, secure=auth.site_url.startswith("https://"), samesite="lax")
+    cookie(response, auth, SESSION_COOKIE, sid, auth.policy["session_ttl_seconds"])
+    return {"user": user}
+
+@router.post("/auth/oauth")
+def oauth(data: SocialLogin, request: Request, response: Response):
+    auth = service(request)
+    fid, url = auth.start_oauth(data.provider, request.cookies.get(OAUTH_COOKIE), client(request))
+    cookie(response, auth, OAUTH_COOKIE, fid, auth.policy["oauth_ttl_seconds"])
+    return {"url": url}
+
+@router.get("/auth/oauth/callback")
+def oauth_callback(request: Request, code: str = "", error: str = ""):
+    auth = service(request)
+    try:
+        sid, _ = auth.finish_oauth(request.cookies.get(OAUTH_COOKIE), code, error, request.cookies.get(SESSION_COOKIE))
+    except ApiError:
+        response = RedirectResponse(auth.site_url + "/#/login?auth_error=auth_oauth_failed", status_code=303)
+    else:
+        response = RedirectResponse(auth.site_url + "/#/builder", status_code=303)
+        cookie(response, auth, SESSION_COOKIE, sid, auth.policy["session_ttl_seconds"])
+    response.delete_cookie(OAUTH_COOKIE, path="/", httponly=True, secure=auth.site_url.startswith("https://"), samesite="lax")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 @router.post("/auth/signup", status_code=202)
 def signup(data: Credentials, request: Request):
@@ -71,7 +108,10 @@ def me(request: Request, response: Response):
 def logout(request: Request):
     auth = service(request)
     auth.logout(request.cookies.get(SESSION_COOKIE))
+    if request.cookies.get(OAUTH_COOKIE):
+        auth.store.take_flow(request.cookies[OAUTH_COOKIE])
     response = Response(status_code=204)
+    response.delete_cookie(OAUTH_COOKIE, path="/", httponly=True, secure=auth.site_url.startswith("https://"), samesite="lax")
     clear(response, auth)
     return response
 

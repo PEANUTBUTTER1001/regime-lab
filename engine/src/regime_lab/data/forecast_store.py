@@ -1,4 +1,5 @@
-"""예측 실행 저장소 (P2-7, 인프라). 1분봉 사본·KRX 원주가·종목 마스터를 읽고 예측 결과 폴더를 쓴다.
+"""예측 실행 저장소 (P2-7, 인프라). KRX 원주가 일봉·종목 마스터(·시간봉이면 1분봉 사본)를 읽고 예측 결과 폴더를 쓴다.
+일봉 예측(P2-11, 결정 D-2b)은 1분봉 폴더 없이 동작한다 — 1분봉은 load_minutes 를 부를 때만 읽는다.
 
 결과 형식 (공개 계약, 2026-10-12 Seonghwanaa 승인):
   runs/forecasts/<run_id>/meta.json         실행 정보·설정 해시·데이터 지문·분할 날짜
@@ -23,8 +24,9 @@ FILES = ("meta.json", "predictions.parquet", "scores.json")
 
 
 class ForecastStore:
-    def __init__(self, store: Path, minutes_dir: Path, runs: Path):
-        self.store, self.minutes_dir, self.root = Path(store), Path(minutes_dir), Path(runs) / "forecasts"
+    def __init__(self, store: Path, minutes_dir: Path | None, runs: Path):
+        self.store, self.root = Path(store), Path(runs) / "forecasts"
+        self.minutes_dir = Path(minutes_dir) if minutes_dir is not None else None
 
     # 읽기 (입력)
     def common_codes(self) -> list[str]:
@@ -35,7 +37,15 @@ class ForecastStore:
         return sorted(m.loc[m["kind"].astype(str) == "보통주", "ticker"].astype(str))
 
     def load_minutes(self, codes: list[str]) -> pd.DataFrame:
+        if self.minutes_dir is None:
+            raise FileNotFoundError("1분봉 폴더가 지정되지 않았습니다 (시간봉 예측에만 필요)")
         return load_minutes(self.minutes_dir, codes=codes)
+
+    def load_krx_raw(self, codes: list[str]) -> pd.DataFrame:
+        """(code, date, open_raw, high_raw, low_raw, close_raw, volume_raw, value) — 일봉 예측 입력 (P2-11)."""
+        from regime_lab.data.loader import load_krx_raw
+
+        return load_krx_raw(self.store, tickers=codes)
 
     def load_daily_raw(self, codes: list[str]) -> pd.DataFrame:
         """(code, date, close_raw) — KRX 원주가 종가 (N2 판정용)."""
@@ -44,12 +54,13 @@ class ForecastStore:
         d = load_daily(self.store, tickers=codes)
         return d.assign(code=d["ticker"].astype(str))[["code", "date", "close_raw"]]
 
-    def fingerprint(self) -> dict[str, str]:
+    def fingerprint(self, minutes: bool = True) -> dict[str, str]:
+        """입력 데이터 지문. 일봉 예측은 1분봉을 읽지 않으므로 minutes=False 로 1분봉 지문을 넣지 않는다."""
         from regime_lab.data.loader import input_file_hashes
 
         krx = input_file_hashes(self.store)
-        return {"minutes": minutes_fingerprint(self.minutes_dir), "raw/krx_daily": krx["raw/krx_daily"],
-                "master.parquet": krx["master.parquet"]}
+        out = {"raw/krx_daily": krx["raw/krx_daily"], "master.parquet": krx["master.parquet"]}
+        return {"minutes": minutes_fingerprint(self.minutes_dir), **out} if minutes else out
 
     # 쓰기·읽기 (결과)
     def write_run(self, run_id: str, meta: dict, predictions: pd.DataFrame, scores: dict) -> Path:

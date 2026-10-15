@@ -1,0 +1,16 @@
+{
+  "port": 8765,
+  "store_root": "/absolute/path/to/external-store/sheets",
+  "token_file": "/absolute/path/to/private/import-key.txt",
+  "spreadsheet_id": "REPLACE_WITH_YOUR_SPREADSHEET_ID",
+  "max_body_bytes": 20971520,
+  "max_rows": 25000,
+  "request_timeout_seconds": 60,
+  "remote_db": {
+    "enabled": false,
+    "env_file": "/absolute/path/to/private/collector.env",
+    "client_executable": "C:/Program Files/MariaDB 10.11/bin/mariadb.exe",
+    "state_write_attempts": 5,
+    "state_write_delay_seconds": 0.1
+  }
+}

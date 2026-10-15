@@ -5,11 +5,13 @@ from typing import Protocol, ContextManager
 @dataclass(frozen=True)
 class User:
     id: str
-    email: str
+    email: str | None
     confirmed: bool = True
+    providers: tuple[str, ...] = ()
+    is_guest: bool = False
 
     def public(self):
-        return {"id": self.id, "email": self.email, "email_confirmed": self.confirmed}
+        return {"id": self.id, "email": self.email, "email_confirmed": self.confirmed, **({"is_guest": True} if self.is_guest else {})}
 
 @dataclass
 class Tokens:
@@ -25,8 +27,18 @@ class Session:
     seen: float
     access_until: float
     purpose: str = "login"
+    provider: str | None = None
+
+@dataclass
+class OAuthFlow:
+    provider: str
+    verifier: str = field(repr=False)
+    created: float
 
 class Provider(Protocol):
+    def social_providers(self) -> dict[str, bool]: ...
+    def oauth_url(self, provider: str, challenge: str, callback: str) -> str: ...
+    def exchange(self, code: str, verifier: str) -> Tokens: ...
     def signup(self, email: str, password: str): ...
     def login(self, email: str, password: str) -> Tokens: ...
     def verify(self, token_hash: str, kind: str) -> Tokens: ...
@@ -37,6 +49,8 @@ class Provider(Protocol):
     def logout(self, token: str, scope: str = "local"): ...
 
 class Store(Protocol):
+    def put_flow(self, flow_id: str, flow: OAuthFlow, before: float, old_id: str | None): ...
+    def take_flow(self, flow_id: str) -> OAuthFlow | None: ...
     def prune(self, before: float): ...
     def put(self, session_id: str, session: Session): ...
     def get(self, session_id: str) -> Session | None: ...

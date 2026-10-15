@@ -91,7 +91,9 @@ uv run --project engine --with finance-datareader python engine/scripts/fetch_in
 uv run --project engine regime-lab prepare
 ```
 
-### 데이터 서버에서 받기 (원본 파일이 없는 PC)
+### 데이터 서버에서 받기 (데이터 서버 PC 전용)
+
+> **2026-10-14 결정 F1d:** 원본은 데이터 서버 PC 에서만 관리·보관합니다. 팀원 PC 는 원본을 받지 않고, 팀 서비스는 서버 PC 에서 띄운 웹을 브라우저로 씁니다. 아래 절차는 서버 PC 안에서 쓰는 방법입니다. 새 시세(2026-09-19~)의 출처는 공공데이터포털 "금융위원회_주식시세정보"(공공누리 제4유형: 출처 표시·상업적 이용 금지·변경 금지)입니다.
 
 팀 데이터 서버의 조회 API 에서 시세 원본을 받아 위 `data` 와 같은 형식으로 저장합니다(F1). 서버 주소는 담당자(Seonghwanaa)에게 직접 받고, 저장소·채팅에 적지 않습니다. 이 PC 의 IP 가 서버 허용 목록에 있어야 합니다. 자세한 내용은 [`docs/F1_데이터_서버_API.md`](docs/F1_데이터_서버_API.md).
 
@@ -125,24 +127,15 @@ uv run --project api regime-api
 
 | 모드 | 켜는 법 | 동작 |
 |---|---|---|
-| 데모 (기본) | 아무 설정 없이 실행 | 이 PC에서만 열립니다. **게스트 모드로 진행** 또는 데모 로그인(실제 인증 아님)으로 들어갑니다. 실행 기록·저장한 전략은 이 서버를 쓰는 모두가 함께 봅니다 |
-| Supabase | 아래 환경변수를 설정하고 실행 | 이메일·비밀번호 가입·로그인·비밀번호 재설정. 게스트 모드는 없습니다. 실행·탐색·저장한 전략은 **본인 것만** 보이고, 소유자가 기록되지 않은 과거 실행은 보이지 않습니다 |
+| 데모 (기본) | 아무 설정 없이 실행 | 이 PC에서만 열립니다. **테스트용 게스트 로그인**으로 들어갑니다(실제 인증 아님). 실행 기록·저장한 전략은 이 서버를 쓰는 모두가 함께 봅니다 |
+| Supabase | 아래 환경변수를 설정하고 실행 | 카카오·Google 로그인과 테스트용 게스트 진입을 제공합니다. `auth.guest_enabled`로 게스트 허용을 조절합니다. 게스트별 기록도 격리되며 로그아웃·세션 만료 후 다시 접근할 수 없습니다. 실행·탐색·저장한 전략은 **본인 것만** 보이고, 소유자가 기록되지 않은 과거 실행은 보이지 않습니다 |
 
-Supabase 모드 환경변수(PowerShell 예시, 값은 각자의 Supabase 프로젝트 것으로 바꿉니다):
+다른 PC에서 카카오·Google·게스트 로그인을 실행하려면 **[팀원 로컬 실행 안내](docs/X3_팀원_로컬_실행.md)**를 순서대로 따라 하세요. 저장소 받기, PR 병합 전/후 브랜치 선택, Windows·macOS/Linux 환경변수, 접속 주소, 확인 방법을 한곳에 정리했습니다.
 
-```powershell
-$env:REGIME_AUTH_MODE = "supabase"
-$env:REGIME_SUPABASE_URL = "https://<프로젝트>.supabase.co"
-$env:REGIME_SUPABASE_PUBLISHABLE_KEY = "<sb_publishable_ 로 시작하는 공개 키>"
-$env:REGIME_AUTH_SITE_URL = "http://127.0.0.1:8000"
-$env:REGIME_AUTH_STATE_DIR = "<저장소 밖의 인증 상태 폴더>"
-$env:REGIME_AUTH_ADMIN_IDS = "<AI 보고서 설정을 관리할 사용자 UUID, 쉼표 구분>"
-uv run --project api regime-api
-```
+팀에서 함께 쓰는 값은 Supabase 프로젝트 URL과 공개 publishable key 두 개입니다. 각 PC는 자기 로컬 서버를 실행하며 `127.0.0.1`은 그 PC 자신을 뜻합니다. 작성자의 PC 경로·실행 파일·로그인 세션을 복사할 필요가 없습니다. 이 Python 서버는 `REGIME_*` 환경변수를 읽으며 `NEXT_PUBLIC_*`만 설정해서는 적용되지 않습니다.
 
-- 키는 파일에 적지 말고 환경변수로만 넣습니다. 로그인 세션은 서버 프로세스 하나에만 유지되므로 서버를 다시 켜면 다시 로그인합니다.
-- `REGIME_AUTH_STATE_DIR`에는 실행·탐색의 소유자 기록이 남습니다. 서버를 다시 켜도 보존되는 저장소 밖 경로를 쓰세요.
-- 가입 확인·비밀번호 재설정 메일은 Supabase에 SMTP와 메일 템플릿을 설정해야 동작합니다. 자세한 내용과 배포(HTTPS) 시 바꿀 값은 [`docs/X3_로그인_설계.md`](docs/X3_로그인_설계.md)를 보세요.
+Supabase 로그인 연결이 시세·뉴스 자료나 실행 결과를 다른 PC로 복사하지는 않습니다. 로그인만 확인할 때는 뉴스 수집기·DB 연결이 필요하지 않습니다. 백테스트용 시세 준비는 위의 "처음 한 번", 뉴스 DB 자동 조회는 해당 기능의 PR #81 실행 안내를 따릅니다.
+
 
 ---
 
@@ -161,7 +154,7 @@ uv run --project api regime-api
 
 ### 1. 시작하기
 
-데모 모드에서는 첫 화면의 **게스트 모드로 진행**을 누르면 가입 없이 바로 사용할 수 있습니다. Supabase 모드에서는 계정을 만들고 로그인합니다.
+데모 모드에서는 **테스트용 게스트 로그인**으로 들어갑니다. Supabase 모드에서는 **카카오로 계속하기** 또는 **Google로 계속하기**를 누릅니다. 첫 이용 시 Supabase 계정이 생성되며, 허용된 경우 테스트용 게스트로도 진입할 수 있습니다.
 
 ### 2. 전략 만들기
 
@@ -179,7 +172,7 @@ uv run --project api regime-api
 
 필터 → 로드 → 지표 → 신호 → 국면 → 집계 → 저장 단계가 순서대로 표시됩니다. 전 종목 기준 약 13초 걸리며, 끝나면 결과 화면으로 자동 이동합니다. **실행 취소**를 누르면 결과를 남기지 않고 중단합니다.
 
-> 한 번에 하나의 실행(백테스트 또는 탐색)만 할 수 있습니다. 실행 중에 다시 실행하면 진행 중인 화면으로 이동합니다.
+> 계산은 한 번에 하나씩 처리합니다. 다른 사람의 실행·탐색이 진행 중이면 접수 순서대로 대기하며, 진행 화면에 대기 순번과 취소 버튼이 표시됩니다. 기본 대기 상한은 5건입니다. 본인의 대기·실행 중 작업은 1건까지이며, 다시 실행하면 해당 작업을 확인합니다(데모 모드는 접속 IP 기준).
 
 ### 4. 실행 결과 읽기
 
@@ -214,7 +207,7 @@ uv run --project api regime-api
 
 ### 7. 공시·뉴스
 
-실시간 뉴스 검색이 필요한 PC만 HTTP 자동 갱신을 켭니다. DB 설치 없이 실행하는 절차는 [`docs/P3_DB_검색_자동갱신.md`](docs/P3_DB_검색_자동갱신.md)를 참고하세요. 엔진·예측 작업만 하면 이 설정은 불필요합니다.
+HTTP 뉴스 자동 갱신은 데이터 서버 PC의 앱에서만 켭니다(F1c·F1d). 팀원 PC는 `REGIME_NEWS_REFRESH`를 켜지 않고 서버 웹 화면을 이용합니다. 서버 내부 실행 절차와 개발·평가용 출처 범위는 [`docs/P3_DB_검색_자동갱신.md`](docs/P3_DB_검색_자동갱신.md)를 참고하세요.
 
 OpenDART 공시 등 수집한 외부 자료가 있을 때 쓸 수 있습니다(수집 방법은 [`ingest/README.md`](ingest/README.md), 위치는 `engine/config/paths.local.yaml`의 `ext_store`). 자료가 없으면 "데이터 없음"으로 표시됩니다.
 
@@ -282,7 +275,7 @@ uv run --project engine regime-lab batch
 |---|---|
 | `uv run --project engine regime-lab rag-index` | 공시·뉴스 검색 색인을 만듭니다 (`ext_store` 필요) |
 | `uv run --project engine regime-lab rag-search "<검색어>" --as-of <시간대 포함 시각>` | 기준 시각에 보이던 자료만 검색합니다 |
-| `uv run --project engine regime-lab forecast-run --timeframe 1h` | 과거 시점별 봉 예측을 만들어 `runs/forecasts/`에 저장합니다 (1분봉 사본 필요, 화면은 준비 중) |
+| `uv run --project engine regime-lab forecast-run --timeframe 1d` | 과거 시점별 일봉 예측을 만들어 `runs/forecasts/`에 저장합니다 (store 의 KRX 원주가 일봉 사용, 결정 D-2b. 화면은 메뉴 '봉 예측') |
 
 ---
 

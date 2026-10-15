@@ -1,4 +1,5 @@
-"""1분봉 정규화·시간봉 집계 (P2-4, docs/분봉_데이터_설계.md §2). I/O 없음.
+"""1분봉 정규화·시간봉 집계 (P2-4, docs/분봉_데이터_설계.md §2)와 KRX 원주가 일봉 봉 (P2-11, daily_bars). I/O 없음.
+결정 D-2b(2026-10-14)로 제품의 봉 예측은 일봉만 쓴다. 1분봉 경로는 남겨 두지만 제품 설정(forecast.timeframes)에는 없다.
 
 처리 순서(종목·일 단위, §2.2): ① (code, dt) 정렬 → ② N4 value_1m 차분(장외 포함 전체 행)
 → ③ N7 이상값 제외 → ④ N1 정규장 필터 (normalize_minutes)
@@ -171,6 +172,41 @@ def price_segments(code: pd.Series, prev_close: pd.Series, first_price: pd.Serie
     # 제한폭 정확히 30% 인 상·하한가는 같은 구간 (부동소수 오차로 30.000…04% 가 되는 것을 막는 여유)
     jump = valid & ((first_price / prev_close - 1).abs() * 100 > limit_pct + 1e-9)
     return jump.astype(int).groupby(code.to_numpy()).cumsum()
+
+
+def daily_bars(krx: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, dict]:
+    """KRX 정규장 원주가 일봉 → 일봉 집계 봉 (P2-11, 결정 D-2b·NXT-1). 1분봉 정규화·시간봉 집계를 거치지 않는다.
+
+    krx: code, date, open_raw, high_raw, low_raw, close_raw, volume_raw, value(원).
+    하루 한 봉(slot 1, minutes.bar_starts.1d), bar_start = 정규장 시작, available_at = 정규장 마지막 분 + 1분(확정 시각).
+    거래 없는 날(거래량 0 또는 시가 0 이하)과 가격이 맞지 않는 행(N7 과 같은 규칙)은 봉을 만들지 않는다 — 채우지 않음(N6).
+    가격 구간(N3)은 1분봉과 같은 price_segments: 직전 거래일 종가 대비 당일 시가가 가격제한폭 밖이면 새 구간.
+    """
+    edges = slot_edges("1d", cfg)
+    if len(edges) != 2:
+        raise ValueError(f"minutes.bar_starts.1d 는 정규장 시작 하나여야 합니다: {cfg['minutes']['bar_starts']['1d']}")
+    df = krx.sort_values(["code", "date"], kind="stable").reset_index(drop=True)
+    o, h, lo, c = (df[k].astype(float) for k in ("open_raw", "high_raw", "low_raw", "close_raw"))
+    no_trade = (df["volume_raw"].fillna(0) <= 0) | (o.fillna(0) <= 0)
+    bad = ~no_trade & ((h < lo) | (o > h) | (o < lo) | (c > h) | (c < lo) | (c <= 0) | (lo <= 0) | c.isna())
+    keep = ~no_trade & ~bad
+    d = df[keep].reset_index(drop=True)
+    date = d["date"].astype("datetime64[ns]").dt.normalize()
+    bars = pd.DataFrame({
+        "code": d["code"].astype(str), "date": date, "slot": np.int64(1),
+        "bar_start": date + pd.to_timedelta(int(edges[0]), unit="min"),
+        "available_at": date + pd.to_timedelta(int(edges[1]), unit="min"),
+        "bar_minutes": np.int64(edges[1] - edges[0]), "n_minutes": np.int64(edges[1] - edges[0]),
+        "open": d["open_raw"].astype(float), "high": d["high_raw"].astype(float), "low": d["low_raw"].astype(float),
+        "close": d["close_raw"].astype(float), "volume": d["volume_raw"].astype(float),
+        # 거래대금(원). 시간봉의 value_1m(1분 거래대금 합)과 같은 자리라 열 이름을 그대로 쓴다 (특징 value_rel)
+        "value_1m": d["value"].fillna(0).astype("int64"),
+        "nxt_period": date >= pd.Timestamp(cfg["minutes"]["nxt_start"]),
+    })
+    prev_close = bars.groupby("code", sort=False)["close"].shift(1)
+    bars["segment"] = price_segments(bars["code"], prev_close, bars["open"], cfg["minutes"]["event_gap_pct"]).to_numpy()
+    stats = {"rows_in": int(len(df)), "no_trade": int(no_trade.sum()), "outliers": int(bad.sum()), "rows_out": int(len(bars))}
+    return bars[BAR_COLS + ["segment"]], stats
 
 
 def to_kst_naive(t) -> pd.Timestamp:

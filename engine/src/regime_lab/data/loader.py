@@ -75,6 +75,20 @@ def load_daily(
     return df
 
 
+def load_krx_raw(store: Path, tickers: Sequence[str] | None = None) -> pd.DataFrame:
+    """KRX 정규장 원주가 일봉 (raw/krx_daily, 결정 NXT-1·D-2b — 봉 예측 일봉 입력). 수정주가가 아니다.
+    컬럼: code, date, open_raw, high_raw, low_raw, close_raw, volume_raw, value(원)."""
+    df = _con().sql(f"""
+        SELECT ticker AS code, date, open_raw, high_raw, low_raw, close_raw, volume_raw, value
+        FROM read_parquet('{_p(store / "raw" / "krx_daily" / "*.parquet")}') k
+        WHERE 1=1 {_ticker_filter(tickers, "k")}
+        ORDER BY code, date
+    """).df()
+    df["date"] = df["date"].astype("datetime64[ns]")
+    df["code"] = df["code"].astype(str)
+    return df
+
+
 def load_master(store: Path) -> pd.DataFrame:
     return _con().sql(f"SELECT * FROM read_parquet('{_p(store / 'master.parquet')}')").df()
 
