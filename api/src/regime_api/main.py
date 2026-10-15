@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import threading
 import asyncio
+import ipaddress
 import json
 import os
 from dataclasses import replace
@@ -18,9 +19,10 @@ import secrets
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 
 from regime_api import errors
 from regime_api.errors import ApiError
@@ -219,6 +221,23 @@ def create_app(settings: Settings | None = None, prep: Prepared | None = None, s
                                    runs, searches)
 
     auth.install(app)
+    if not enabled and settings.allowed_nets:
+        allowed_nets = tuple(settings.allowed_nets)
+
+        @app.middleware("http")
+        async def lan_allowlist(request: Request, call_next):
+            try:
+                ip = ipaddress.ip_address(request.client.host if request.client else "")
+            except ValueError:
+                ip = None
+            if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+                ip = ip.ipv4_mapped
+            if ip is not None and (ip.is_loopback or (
+                    isinstance(ip, ipaddress.IPv4Address) and any(ip in net for net in allowed_nets))):
+                return await call_next(request)
+            return JSONResponse(errors.body("network_not_allowed", "Access from this network is not allowed."),
+                                status_code=403)
+
     for r in (auth.router, meta.router, runs.router, results.router, report.router, briefing.router, llm.router,
               searches.router, presets.router, evidence.router, forecasts.router, influence.router):
         app.include_router(r, prefix="/api")
@@ -231,4 +250,6 @@ def run() -> None:
     import uvicorn
 
     s = Settings.from_env()
-    uvicorn.run(create_app(s), host=s.host, port=s.port)
+    # LAN demos use direct connections. A local proxy would defeat the loopback-only LLM boundary.
+    options = {"proxy_headers": False} if s.auth_mode == "demo" else {}
+    uvicorn.run(create_app(s), host=s.host, port=s.port, **options)

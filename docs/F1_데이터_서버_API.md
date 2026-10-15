@@ -180,7 +180,7 @@ uv run --project engine python -c "from regime_lab.data.loader import input_file
 |---|---|---|
 | 팀 저장소 (공개) | 앱 코드, 설정 이름·기본값, 문서, 테스트 | 서버 주소, 팀원 IP, 키 |
 | 데이터 서버 폴더 (서버 PC 의 로컬 git) | 앱 시작 파일, 새벽 갱신 묶음, 방화벽 스크립트 — 데이터 API 운영 파일과 같은 방식 | 팀 앱 코드 사본 수정 |
-| 서버 PC 설정 (파일 밖) | 저장소 체크아웃·`uv`, `engine/config/paths.local.yaml`(Git 제외), 환경변수(`REGIME_HOST`, IP 허용 목록), 작업 스케줄러, 방화벽 | — |
+| 서버 PC 설정 (파일 밖) | 저장소 체크아웃·`uv`, `engine/config/paths.local.yaml`(Git 제외), 환경변수(`REGIME_AUTH_MODE=demo`, `REGIME_HOST`, `REGIME_ALLOWED_NETS`), 작업 스케줄러, 방화벽 | — |
 
 ### 6.3 작업 분배
 
@@ -188,13 +188,16 @@ uv run --project engine python -c "from regime_lab.data.loader import input_file
 |---|---|---|---|---|
 | X11 | 앱 서버 설치·첫 변환·자동 시작 (서버 앱에 `REGIME_NEWS_REFRESH=1` 설정 포함) | `Seonghwanaa` | 서버 폴더·서버 설정 |
 | (P3-11) PR #81 | 기사 스냅샷 받는 쪽 — #84 규격 대조·실서버 확인 뒤 병합 | `hchee99` (리뷰 `PEANUTBUTTER1001`) | 팀 저장소 | [P2-P4 로드맵](P2-P4_예측화면_통합모델_로드맵.md) S8 |
-| X12 | 같은 망 접속 + IP 허용 목록 | `hchee99` | 팀 저장소 (값은 서버 설정) | [P3-P4 로드맵](P3-P4_외부자료_브리핑_로드맵.md) B22 |
+| X12 | 같은 망 접속 + IP 허용 목록 | `PEANUTBUTTER1001` (2026-10-15 사용자 지시로 이관) | 팀 저장소 (값은 서버 설정) | [P3-P4 로드맵](P3-P4_외부자료_브리핑_로드맵.md) B22 |
 | X13 | 작업 대기열 | `PEANUTBUTTER1001` | 팀 저장소 | [구현_계획](구현_계획.md) §6.6 |
 | X14 | 새벽 자동 갱신 | `Seonghwanaa` (X4 연계 `hchee99`) | 서버 폴더 (동기화 스크립트 보완이 필요하면 그 부분만 팀 저장소) | P2-P4 로드맵 S9 |
 | P2-11 | 일봉 예측 전환 (D-2b) | `Seonghwanaa` | 팀 저장소, 실행은 서버 | P2-P4 로드맵 S7 |
 | — | `AGENTS.md` §1·§4 갱신 | `PEANUTBUTTER1001` | 팀 저장소 | 구현 뒤 `/agents-md` |
 
 ### 6.4 순서와 완료 기준
+
+- X12 설정: `REGIME_ALLOWED_NETS`는 팀원별 IPv4 `/32`를 쉼표로 구분. 코드의 CIDR 지원과 `/24` 전체 운영 허용은 구분. IPv4 RFC1918만 지원, loopback 자동 허용, Supabase에서는 변수 무시. 값은 서버 PC에만 보관. 공식 `regime-api` 데모 진입점으로 직접 접속하고 로컬 프록시·터널 제외. 실제 주소 고정·방화벽 범위·광범위 Python 허용 규칙을 확인하고, 기존 서버 재시작은 별도 승인 후 수행.
+- 비허용 PC 수용 확인: 앱까지 도달하는 요청은 403 `network_not_allowed`, 방화벽이 먼저 막으면 연결 실패가 정상. LLM 설정은 허용 PC도 `local_only` 403. 데이터 API·DB 포트의 기존 정책 변경은 이번 X12 구현 범위 밖.
 
 1. X11 — 서버 PC 에서 loopback 으로 실행·결과·근거 검색 화면 정상, 재부팅 뒤 자동 시작
 2. X12·X13 (병행) — 같은 망 팀원 PC 브라우저에서 실행·결과 확인, 허용 목록 밖 PC 는 403, 두 사람이 동시에 실행하면 둘째가 대기 뒤 완료
