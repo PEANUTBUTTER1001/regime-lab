@@ -207,6 +207,8 @@ Supabase 로그인 연결이 시세·뉴스 자료나 실행 결과를 다른 PC
 
 ### 7. 공시·뉴스
 
+HTTP 뉴스 자동 갱신은 데이터 서버 PC의 앱에서만 켭니다(F1c·F1d). 팀원 PC는 `REGIME_NEWS_REFRESH`를 켜지 않고 서버 웹 화면을 이용합니다. 서버 내부 실행 절차와 개발·평가용 출처 범위는 [`docs/P3_DB_검색_자동갱신.md`](docs/P3_DB_검색_자동갱신.md)를 참고하세요.
+
 OpenDART 공시 등 수집한 외부 자료가 있을 때 쓸 수 있습니다(수집 방법은 [`ingest/README.md`](ingest/README.md), 위치는 `engine/config/paths.local.yaml`의 `ext_store`). 자료가 없으면 "데이터 없음"으로 표시됩니다.
 
 - **공시·뉴스 검색**: 기준 시각에 이미 알 수 있었던 자료만 제목·회사명으로 찾습니다. 비슷한 제목은 하나로 묶습니다.

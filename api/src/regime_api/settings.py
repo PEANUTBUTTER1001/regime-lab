@@ -15,16 +15,39 @@
 from __future__ import annotations
 
 import os
+import math
 import ipaddress
 from urllib.parse import urlsplit
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from regime_lab.config import REPO_ROOT, Paths, load_paths
+from regime_lab.config import REPO_ROOT, Paths, load_paths, load_config
 
 
 def _flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
+def _news_api_config(paths: Paths) -> dict | None:
+    if not _flag('REGIME_NEWS_REFRESH'):
+        return None
+    config = load_config()['news_refresh'].copy()
+    for key in ('poll_seconds', 'http_timeout_seconds', 'max_response_bytes', 'page_size', 'max_versions'):
+        value = config[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise ValueError('Invalid news refresh limits')
+        if key in ('max_response_bytes', 'page_size', 'max_versions') and type(value) is not int:
+            raise ValueError('News refresh size limits must be integers')
+    runtime = paths.news_snapshots
+    if not runtime.is_absolute() or runtime.resolve().is_relative_to(REPO_ROOT.resolve()):
+        raise ValueError('News snapshots must be outside the repository')
+    if sorted(config['sources']) != ['n8n_disclosure', 'n8n_news']:
+        raise ValueError('Only the approved C3 sources are supported')
+    config.update(runtime_dir=str(runtime), url=os.environ.get('REGIME_DATA_API_URL', '').strip(),
+                  token=os.environ.get('REGIME_DATA_API_TOKEN', '').strip() or None)
+    if not config['url']:
+        raise ValueError('Set REGIME_DATA_API_URL when REGIME_NEWS_REFRESH is enabled')
+    return config
 
 
 @dataclass
@@ -46,6 +69,8 @@ class Settings:
     auth_site_url: str = "http://127.0.0.1:8000"
     auth_state_dir: Path | None = None
     auth_admin_ids: list[str] = field(default_factory=list)
+
+    news_api: dict | None = field(default=None, repr=False)
 
     def validate_auth(self):
         if self.auth_mode not in {"demo", "supabase"}:
@@ -78,11 +103,12 @@ class Settings:
         paths = load_paths()
         runs = os.environ.get("REGIME_RUNS_DIR")
         if runs:
-            paths = Paths(paths.store, paths.sql_dump, paths.cache, Path(runs), paths.ext_store)
+            paths = replace(paths, runs=Path(runs))
         provider = os.environ.get("REGIME_LLM_PROVIDER", "openai").strip().lower()
         key_env = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
         return cls(
             paths=paths,
+            news_api=_news_api_config(paths),
             sample=_flag("REGIME_SAMPLE"),
             llm_provider=provider,
             llm_model=os.environ.get("REGIME_LLM_MODEL") or None,

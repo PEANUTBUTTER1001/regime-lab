@@ -161,3 +161,12 @@ def warmup_file_hashes(cache: Path) -> dict[str, str]:
         out[f"cache/warmup/{f.name}"] = f"size={st.st_size};mtime={int(st.st_mtime)}"
     return out
 
+
+
+def read_news_api_snapshot(config: dict, current_id: str | None = None):
+    """Materialize a verified, immutable C3 metadata snapshot for DocsStore."""
+    from regime_lab.data.news_db import Client, read_latest
+
+    client = Client(config['url'], config['token'], config)
+    return read_latest(client, Path(config['runtime_dir']) / 'snapshots', config['sources'], current_id,
+                       page_size=config['page_size'], max_versions=config['max_versions'])

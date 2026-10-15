@@ -45,6 +45,8 @@ class Paths:
     runs: Path
     ext_store: Path | None = None  # 외부 자료 docs Parquet (근거 검색). paths.local.yaml 에 없으면 None
 
+    news_snapshots: Path = REPO_ROOT.parent / "regime-lab_news_snapshots"
+
 
 def load_paths() -> Paths:
     local = CONFIG_DIR / "paths.local.yaml"

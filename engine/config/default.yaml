@@ -236,3 +236,12 @@ auth:
   max_sessions: 5000                # 서버에 보관하는 세션 수 상한
   nonce_bytes: 32                   # 세션 ID·CSRF 서명 비밀값의 난수 바이트 수
   list_limit: 200                   # 로그인 시 실행·탐색 목록 최대 행 수 (본인 소유만 거른 뒤)
+
+# P3-11: 데이터 서버 PC 앱에서만 REGIME_NEWS_REFRESH=1로 HTTP 뉴스 갱신(F1d). 팀원 PC는 켜지 않음.
+news_refresh:
+  sources: [n8n_news, n8n_disclosure]
+  poll_seconds: 30
+  http_timeout_seconds: 30
+  max_response_bytes: 16777216
+  page_size: 1000
+  max_versions: 200000
