@@ -19,7 +19,7 @@ from pathlib import Path
 import pandas as pd
 
 FILES = ("meta.json", "weights.parquet", "events.parquet")
-SUPPORTED_FORMAT_VERSIONS = (1,)
+SUPPORTED_FORMAT_VERSIONS = (1, 2)
 
 
 class InfluenceStore:

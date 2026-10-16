@@ -19,17 +19,22 @@ SUPPORTED_SCHEMA_VERSIONS = (1,)  # docs/P3_수집_계약.md §3 schema_version
 
 
 class DocsStore:
-    def __init__(self, ext_store: Path | None, cache_dir: Path):
+    def __init__(self, ext_store: Path | None, cache_dir: Path, additional_roots=()):
         self.ext_store = ext_store
+        self.roots = tuple(dict.fromkeys(Path(p) for p in (ext_store, *additional_roots) if p is not None))
         self.cache_dir = cache_dir / "rag"
 
     def _sources(self) -> list[Path]:
-        if self.ext_store is None:
+        if not self.roots:
             raise FileNotFoundError("ext_store 경로가 설정되지 않음 (engine/config/paths.local.yaml)")
-        base = self.ext_store / "docs"
-        if not base.is_dir():
-            raise FileNotFoundError(f"docs 폴더 없음: {base}")
-        return sorted(p for p in base.glob("source=*") if p.is_dir())
+        selected = {}
+        for root in self.roots:
+            for p in sorted((root / "docs").glob("source=*")):
+                if p.is_dir():
+                    selected[p.name] = p  # 같은 출처는 최신 검증 snapshot 전체로 교체, 다른 출처는 유지
+        if not selected:
+            raise FileNotFoundError("docs 폴더 없음")
+        return [selected[k] for k in sorted(selected)]
 
     def manifests(self) -> dict[str, dict]:
         out = {}
@@ -52,7 +57,8 @@ class DocsStore:
     def fingerprint(self, files: list[Path]) -> str:
         h = hashlib.sha256()
         for f in files:
-            h.update(f.relative_to(self.ext_store).as_posix().encode())
+            source_dir = next(p for p in f.parents if p.name.startswith("source="))
+            h.update((source_dir.name + "/" + f.relative_to(source_dir).as_posix()).encode())
             h.update(str(f.stat().st_size).encode())
             h.update(hashlib.sha256(f.read_bytes()).digest())
         return h.hexdigest()[:16]
@@ -60,14 +66,27 @@ class DocsStore:
     def coverage(self) -> list[dict]:
         """수집 범위 이력 (P3-13 수집 상태 표시, FR-N4). 수집기가 커밋마다 내보낸
         <ext_store>/coverage/source=<s>/coverage_log.parquet 를 읽기만 한다. 파일이 없으면 빈 목록(기록 없음)."""
-        if self.ext_store is None:
+        if not self.roots:
             raise FileNotFoundError("ext_store 경로가 설정되지 않음 (engine/config/paths.local.yaml)")
-        base = self.ext_store / "coverage"
-        files = sorted(base.glob("source=*/coverage_log.parquet")) if base.is_dir() else []
-        return [r for f in files for r in pq.read_table(f).to_pylist()]
+        selected = {}
+        for root in self.roots:
+            # HTTP 출처가 정상적으로 교체되었지만 coverage=unknown이면 옛 coverage를 물려받지 않는다.
+            for source in (root / "docs").glob("source=*"):
+                selected.pop(source.name, None)
+            for path in sorted((root / "coverage").glob("source=*/coverage_log.parquet")):
+                selected[path.parent.name] = path
+        files = [selected[k] for k in sorted(selected)]
+        return [r for f in files for r in pq.ParquetFile(f).read().to_pylist()]
 
     def read(self, files: list[Path]) -> list[dict]:
-        return [r for f in files for r in pq.read_table(f).to_pylist()]
+        rows = {}
+        for f in files:
+            for r in pq.ParquetFile(f).read().to_pylist():
+                key = (r["doc_id"], r["version"])
+                if key in rows and rows[key] != r:
+                    raise ValueError("같은 문서·버전의 내용 충돌")
+                rows[key] = r
+        return [rows[k] for k in sorted(rows)]
 
     def read_cache(self, key: str) -> dict | None:
         p = self.cache_dir / f"index_{key}.json"

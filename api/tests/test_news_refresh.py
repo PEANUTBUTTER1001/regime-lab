@@ -34,6 +34,24 @@ def test_failure_retains_data_and_recovers(tmp_path, monkeypatch):
     assert state.rag is new and state.news_refresh['last_success']['snapshot_id'] == 'new'
 
 
+def test_real_composed_index_retains_opendart_after_http_refresh(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from regime_lab.config import load_config
+    from rag_synth import make_doc, write_store
+
+    cfg = settings(tmp_path)
+    old, new = cfg.paths.ext_store, tmp_path / 'new'
+    doc = make_doc(1, '합성회사', '공시', '005930', datetime(2026, 1, 1, tzinfo=timezone.utc))
+    write_store(old, [doc])
+    news = {**doc, 'doc_id': 'n8n_news:1', 'source': 'n8n_news', 'source_type': 'news'}
+    write_store(new, [news], source='n8n_news')
+    state = SimpleNamespace(settings=cfg, paths=cfg.paths, base_docs_path=old, cfg=load_config(), news_refresh={})
+    monkeypatch.setattr(main, 'read_news_api_snapshot', lambda *a: (new, {'versions': 1, 'snapshot_id': 'new'}))
+    path, report, docs, index = main._read_evidence_update(state)
+    assert len(index.docs) == 2 and {d['source'] for d in index.docs} == {'opendart', 'n8n_news'}
+    assert set(docs.manifests()) == {'opendart', 'n8n_news'}
+
+
 def test_lifespan_polls_and_stops(tmp_path, monkeypatch):
     import time
     cfg = settings(tmp_path)

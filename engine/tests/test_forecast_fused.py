@@ -114,7 +114,7 @@ def test_fused_run_records_variant_and_vs_price(cfg):
     store, c = MemoryStore(_raw()), _fcfg(cfg)
     run_id, meta = run_forecast(store, c, "1h", NOW, doc_features=_docs(store, c), docs_info=INFO)
     m, pred, scores = store.runs[run_id]
-    assert m["format_version"] == FORECAST_RUN_VERSION == 4 and m["bar_source"] == "minutes"
+    assert m["format_version"] == FORECAST_RUN_VERSION == 5 and m["bar_source"] == "minutes"
     assert m["variant"] == "fused" and m["doc_features"] == ["f_n", "f_neg", "docs_missing"]
     assert m["docs_fingerprint"] == "docs-synth-1" and m["as_of_mode"] == "historical_assumed"
     assert set(m["docs_missing_rate"]) <= {"train", "valid", "test"} and 0.1 < m["docs_missing_rate"]["train"] < 0.3

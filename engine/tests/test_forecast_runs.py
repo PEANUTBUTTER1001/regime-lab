@@ -222,7 +222,7 @@ def test_daily_run_contract(cfg):
     store, c = MemoryStore(krx=_krx()), _dcfg(cfg)
     run_id, meta = run_forecast(store, c, "1d", NOW)
     m, pred, scores = store.runs[run_id]
-    assert run_id.startswith("1d-20261012T090000-") and m["format_version"] == FORECAST_RUN_VERSION == 4
+    assert run_id.startswith("1d-20261012T090000-") and m["format_version"] == FORECAST_RUN_VERSION == 5
     assert m["bar_source"] == "krx_daily" and m["minute_prep_version"] is None
     assert "minutes" not in m["data"] and m["horizon"] == 5 and m["codes"] == 5
     assert m["prep"] == {"rows_in": 1600, "no_trade": 0, "outliers": 0}
@@ -262,6 +262,7 @@ def test_previous_format_runs_still_read(cfg, tmp_path):
     dmem = MemoryStore(krx=_krx())
     run_forecast(dmem, _dcfg(cfg), "1d", NOW)
     (rid4, (m4, p4, s4)), = dmem.runs.items()
+    m4 = {**m4, "format_version": 4}  # 실제 과거 형식 fixture; 새 실행은 형식5
     fs.write_run(rid4, m4, p4, s4)
     assert {r["run_id"]: r["format_version"] for r in list_runs(fs)} == {rid3: 3, rid4: 4}
     for rid, code in ((rid3, "005930"), (rid4, "005930")):

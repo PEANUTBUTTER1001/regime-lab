@@ -50,13 +50,14 @@ export async function renderForecast(el, query, runId, code) {
     return;
   }
   const f = {
-    run: [runId, query.get('run')].find((x) => runs.runs.some((r) => r.run_id === x)) || runs.runs[0].run_id,
+    run: [runId, query.get('run')].find((x) => runs.runs.some((r) => r.run_id === x))
+      || (runs.runs.find((r) => !r.fusion_kind || r.fusion_kind === 'none') || runs.runs[0]).run_id,
     code: (code || query.get('code') || '005930').trim(),
     asOf: toLocal(query.get('as_of')),
   };
   const runSel = h('select', { id: 'fc-run', onchange: (e) => { f.run = e.target.value; } },
     runs.runs.map((r) => h('option', { value: r.run_id, selected: r.run_id === f.run },
-      t('fc.runOpt', { tf: r.timeframe, at: kst(r.created_at), n: fmt.int(r.codes) })
+      `${t(`fc.fusion.${r.fusion_kind || 'none'}`)} · ${t('fc.runOpt', { tf: r.timeframe, at: kst(r.created_at), n: fmt.int(r.codes) })}`
       + (r.test_as_of_range ? t('fc.runRange', { a: kst(r.test_as_of_range[0]).slice(0, 10), b: kst(r.test_as_of_range[1]).slice(0, 10) }) : ''))));
   const codeIn = h('input', { id: 'fc-code', value: f.code, placeholder: t('fc.codePh'), maxlength: '6', autocomplete: 'off',
     oninput: (e) => { f.code = e.target.value.trim(); } });
@@ -95,7 +96,26 @@ async function show(out, f) {
   // 일봉(P2-11)은 봉 하나가 하루라 시각(확정 15:31)과 "다음 거래일" 표시가 뜻이 없다 — 날짜만 보이고 표시를 뺀다
   const daily = d.timeframe === '1d';
   const at = day(d, d.as_of);
+  const comparisons = [];
+  for (const [step, s] of Object.entries(sc.scores || {})) {
+    const pairs = s.comparisons || (s.vs_price ? { docs_price: s.vs_price } : {});
+    for (const [name, result] of Object.entries(pairs)) comparisons.push({ step, name, ...result });
+  }
+  const links = Object.entries(d.comparison_runs || {}).map(([kind, id]) => h('a', {
+    class: 'secondary', href: `#/forecast/${encodeURIComponent(id)}/${encodeURIComponent(d.code)}?${new URLSearchParams({ as_of: d.as_of })}`,
+  }, t(`fc.fusion.${kind === 'price' ? 'none' : kind}`)));
   out.replaceChildren(
+    h('article', { class: 'card' }, h('h2', {}, t(`fc.fusion.${d.fusion_kind || 'none'}`)),
+      h('p', { class: 'muted', text: t('fc.runVersion', { id: d.run_id }) }),
+      d.evaluation_mode ? h('p', { class: 'hint', text: t('fc.retrospective') }) : null,
+      d.as_of_mode ? h('p', {}, t(`ev.mode.${d.as_of_mode}`)) : null,
+      d.documents ? h('p', {}, d.documents.missing ? t('fc.missing') : t('fc.documents', { n: d.documents.count ?? '—' })) : null,
+      ...Object.entries(d.docs_missing_rate || {}).map(([period, rate]) => h('p', { class: 'hint', text:
+        t('fc.missingRate', { period: t(`inf.period.${period}`), rate: fmt.pct(rate, 1, false) }) })),
+      d.fusion_kind === 'weighted' && Object.values(d.documents?.influence_missing || {}).some(Boolean)
+        ? h('p', { class: 'notice', text: t('fc.influenceMissing') }) : null,
+      d.influence_versions?.model ? h('p', {}, t('fc.weightsVersion', { v: d.influence_versions.model })) : null,
+      links.length ? h('div', { class: 'actions' }, ...links) : null),
     h('article', { class: 'card' },
       h('h2', {}, `${d.code} · ${d.timeframe}`), h('p', { class: 'card-sub', text: t('fc.asOfAt', { at, p: won(d.base_close) }) }),
       chartEl, h('p', { class: 'notice', role: 'note', text: d.notice || t('fc.notice') })),  // E17 문구는 응답 값 그대로
@@ -109,6 +129,8 @@ async function show(out, f) {
         { label: t('fc.col.pUp'), num: true, render: (s) => fmt.pct(s.p_up, 0, false) },
         { label: withTip(t('fc.col.testHit'), t('help.fcHit')), num: true, render: (s) => fmt.pct(testHit(sc.scores, s.h), 1, false) },
         { label: t('fc.col.actual'), num: true, render: (s) => won(s.actual) },
+        ...(d.fusion_kind && d.fusion_kind !== 'none' ? [{ label: t('fc.verdict'), render: (s) =>
+          t(`fc.verdict.${sc.scores?.[String(s.h)]?.weighted_verdict || sc.scores?.[String(s.h)]?.vs_price?.verdict || 'insufficient'}`) }] : []),
       ],
       rows: d.steps,
     }),
@@ -116,4 +138,42 @@ async function show(out, f) {
   // x축 이름은 KST 로 바꾼 'MM-DD HH:MM'(일봉은 'MM-DD') — 차트는 받은 이름을 그대로 쓴다
   const history = d.history.map((p) => ({ ...p, label: kst(p.as_of).slice(5, daily ? 10 : 16) }));
   forecastBand(chartEl, { ...d, history }, t('fc.chart', { c: d.code, n: d.steps.length }));
+  if (comparisons.length) out.append(table({
+    caption: t('fc.compare'), rows: comparisons,
+    columns: [
+      { label: t('fc.col.h'), render: (r) => t('fc.step', { h: r.step }) },
+      { label: t('fc.compare'), render: (r) => t(`fc.comparison.${r.name}`) },
+      { label: t('fc.verdict'), render: (r) => t(`fc.verdict.${r.verdict}`) },
+      { label: t('fc.gain'), num: true, render: (r) => fmt.pct(r.rel_gain, 2, false) },
+      { label: t('fc.samples'), num: true, render: (r) => fmt.int(r.n) },
+    ],
+  }));
+  if (d.fusion_kind && d.fusion_kind !== 'none') {
+    const evidence = h('article', { class: 'card', 'aria-live': 'polite' });
+    out.append(evidence);
+    await showEvidence(evidence, d);
+  }
+}
+
+async function showEvidence(el, d, page = 1) {
+  el.replaceChildren(h('h2', {}, t('fc.evidence')), loading());
+  let res;
+  try { res = await api.forecastEvidence(d.run_id, { code: d.code, as_of: d.as_of, page }); }
+  catch (e) { el.replaceChildren(h('h2', {}, t('fc.evidence')), errorView(e, { onRetry: () => showEvidence(el, d, page) })); return; }
+  const nodes = [h('h2', {}, t('fc.evidence')), h('p', { class: 'hint', text: t('fc.evidenceNote') })];
+  if (res.latest_available_at) nodes.push(h('p', {}, t('fc.latestDocument', { at: kst(res.latest_available_at) })));
+  if (!res.items.length) nodes.push(h('p', {}, t(res.status === 'evidence_missing' ? 'fc.evidenceMissing'
+    : res.status === 'docs_missing' ? 'fc.evidenceNoInput' : 'fc.evidenceNone')));
+  else nodes.push(table({ caption: t('fc.evidencePage', { n: res.total, p: page }), rows: res.items, columns: [
+    { label: t('fc.evidenceDoc'), render: (r) => r.status === 'available' ? h('a', {
+      href: `#/archive/doc?${new URLSearchParams({ id: r.doc_id, as_of: res.as_of, mode: res.mode })}`,
+    }, `${r.title || r.doc_id} · v${r.version}`) : t(`fc.evidenceStatus.${r.status}`) },
+    { label: t('ev.col.source'), render: (r) => r.source },
+    { label: t('fc.evidenceWindow'), render: (r) => r.windows.join(', ') },
+    { label: t('ev.asOf'), render: (r) => kst(r.available_at) },
+  ] }));
+  nodes.push(h('div', { class: 'actions' },
+    page > 1 ? h('button', { type: 'button', onclick: () => showEvidence(el, d, page - 1) }, t('fc.prev')) : null,
+    page * res.page_size < res.total ? h('button', { type: 'button', onclick: () => showEvidence(el, d, page + 1) }, t('fc.next')) : null));
+  el.replaceChildren(...nodes);
 }

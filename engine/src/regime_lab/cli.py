@@ -20,7 +20,7 @@ from pathlib import Path
 from regime_lab.config import ENGINE_DIR, load_config, load_paths
 from regime_lab.context import RecordingContext
 from regime_lab import retrieval
-from regime_lab.data.loader import DocsStore, ForecastStore, load_sample_tickers
+from regime_lab.data.loader import DocsStore, ForecastStore, InfluenceStore, load_sample_tickers
 from regime_lab.pipeline import prepare
 from regime_lab.runs import Strategy, StrategyError, run_and_save
 
@@ -71,12 +71,36 @@ def _forecast(args, cfg, paths) -> int:
     codes = sorted(set(load_sample_tickers(paths.store)) & set(store.common_codes())) if args.sample else None
     t = time.time()
     try:
-        run_id, meta = forecast_runs.run_forecast(store, cfg, args.timeframe, datetime.now(), codes)
-    except ValueError as e:
+        if args.with_influence and not args.with_docs:
+            raise ValueError("--with-influence 는 --with-docs 와 함께 사용")
+        if args.with_docs:
+            if args.timeframe != "1d":
+                raise ValueError("자료 결합은 1d만 지원")
+            run_id, meta = forecast_runs.run_fusion(store, DocsStore(paths.ext_store, paths.cache), InfluenceStore(paths.runs),
+                                                  cfg, datetime.now(), codes, args.docs_mode, args.with_influence)
+        else:
+            run_id, meta = forecast_runs.run_forecast(store, cfg, args.timeframe, datetime.now(), codes)
+    except (ValueError, OSError) as e:
         print(f"[error] {e}", file=sys.stderr)
         return 2
     print(f"[forecast] {run_id}: codes={meta['codes']:,} bars={meta['bars']:,} H={meta['horizon']} "
           f"{time.time() - t:.1f}s -> {paths.runs / 'forecasts' / run_id}", flush=True)
+    return 0
+
+
+def _influence(args, cfg, paths):
+    from datetime import datetime
+    from regime_lab.influence_runs import run_training
+
+    price = ForecastStore(paths.store, None, paths.runs)
+    codes = sorted(set(load_sample_tickers(paths.store)) & set(price.common_codes())) if args.sample else None
+    try:
+        version, meta = run_training(price, DocsStore(paths.ext_store, paths.cache), InfluenceStore(paths.runs),
+                                     cfg, datetime.now(), codes, args.as_of_mode)
+    except (ValueError, OSError) as e:
+        print(f"[error] {e}", file=sys.stderr)
+        return 2
+    print(json.dumps({"model_version": version, "audit": meta["audit"], "metrics": meta["metrics"]}, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -107,9 +131,17 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--timeframe", required=True, help="봉 단위 (설정 forecast.timeframes, 제품 기본 1d — 결정 D-2b)")
     sp.add_argument("--sample", action="store_true", help="store/sample30 종목만 사용")
     sp.add_argument("--minutes", type=Path, help="1분봉 사본 폴더 — 시간봉(1h·3h)에만 쓰임 (기본: store 옆 minutes)")
+    sp.add_argument("--with-docs", action="store_true", help="가격+자료 개수/유형 결합")
+    sp.add_argument("--docs-mode", default="observed", choices=["observed", "historical_assumed"])
+    sp.add_argument("--with-influence", action="store_true", help="동일 입력의 과거 학습 가중치도 결합")
+    sp = sub.add_parser("influence-run", help="P3-12 가격 통제 Ridge 영향력 사전 학습")
+    sp.add_argument("--sample", action="store_true")
+    sp.add_argument("--as-of-mode", default="observed", choices=["observed", "historical_assumed"])
     args = ap.parse_args(argv)
 
     cfg, paths = load_config(), load_paths()
+    if args.cmd == "influence-run":
+        return _influence(args, cfg, paths)
     if args.cmd == "forecast-run":
         return _forecast(args, cfg, paths)
     if args.cmd.startswith("rag-"):

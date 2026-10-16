@@ -64,17 +64,22 @@ def _train_end(m: dict) -> date:
     return date.fromisoformat(m["periods"]["train"]["end"])
 
 
-def pick_model(store, t: datetime) -> dict | None:
+def pick_model(store, t: datetime, h: int = 1) -> dict | None:
     """학습 구간 끝 날짜 < T 의 KST 날짜 (그 날 자료가 다 모인 뒤) 인 모델 중 학습 끝이 가장 늦은 것."""
     day = t.astimezone(KST).date()
-    usable = [m for m in _models(store) if _train_end(m) < day]
+    try:
+        usable = [m for m in _models(store) if _train_end(m) < day
+                  and ((m.get("format_version", 1) == 1 and h == 1) or
+                       (m.get("format_version") == 2 and aware(m["knowledge_cutoff"]) <= t and str(h) in m.get("metrics", {})))]
+    except (KeyError, ValueError, TypeError):
+        raise InfluenceError("data_unavailable", "Influence model cutoff is invalid.") from None
     return max(usable, key=lambda m: (_train_end(m), m["model_version"])) if usable else None
 
 
 def _model_info(m: dict, t: datetime) -> dict:
     test_end = (m.get("periods") or {}).get("test", {}).get("end")
     return {**{k: m.get(k) for k in ("model_version", "created_at", "target", "as_of_mode", "periods", "baseline",
-                                    "min_eval_samples", "format_version")},
+                                    "min_eval_samples", "format_version", "knowledge_cutoff", "metrics", "audit") if k in m},
             # 최종 평가 구간이 T 뒤까지 이어지면 화면이 "평가는 기준 시각 뒤 기간 포함"을 알린다
             "eval_beyond_as_of": bool(test_end and date.fromisoformat(test_end) >= t.astimezone(KST).date())}
 
@@ -83,11 +88,11 @@ def _no_model(t: datetime) -> dict:
     return {"status": "no_model", "model": None, "as_of": t.isoformat(), "notice": NOTICE}
 
 
-def model_view(store, as_of) -> dict:
+def model_view(store, as_of, h: int = 1) -> dict:
     errors: dict = {}
     t = _parse_as_of(as_of, None, errors)
     _raise_if(errors)
-    m = pick_model(store, t)
+    m = pick_model(store, t, h)
     if m is None:
         return _no_model(t)
     return {"status": "ok", "model": _model_info(m, t), "as_of": t.isoformat(), "notice": NOTICE}
@@ -98,6 +103,76 @@ def _num(v):
     if hasattr(v, "item"):
         v = v.item()
     return None if v is None or (isinstance(v, float) and v != v) else v
+
+
+def training_inputs(price_store, docs_store, cfg, codes=None):
+    """공개 입력 조립 유스케이스. 인프라 객체는 호출자가 주입; DB/수집기 import 없음."""
+    from regime_lab.forecast_runs import build_bars
+    from regime_lab.fusion import fingerprint
+
+    manifests = docs_store.manifests()
+    sources = cfg["fusion"]["sources"]
+    if not sources or any(s not in manifests or manifests[s].get("license_scope") != "metadata_only" or
+                          manifests[s].get("active", True) is False for s in sources):
+        raise ValueError("활성 설정 출처의 metadata_only manifest가 필요합니다")
+    files = docs_store.files()
+    before_docs = docs_store.fingerprint(files)
+    before_price = price_store.fingerprint(minutes=False)
+    coverage = docs_store.coverage()
+    docs = docs_store.read(files)
+    codes = sorted(codes) if codes is not None else price_store.common_codes()
+    bars, prep = build_bars(price_store, cfg, codes, "1d", cfg["forecast"]["runs"]["batch_codes"])
+    if bars.empty:
+        raise ValueError("일봉이 없습니다")
+    if (before_docs != docs_store.fingerprint(docs_store.files()) or manifests != docs_store.manifests() or
+            fingerprint(coverage) != fingerprint(docs_store.coverage()) or
+            before_price != price_store.fingerprint(minutes=False)):
+        raise ValueError("학습 입력이 읽는 도중 변경됨: 수집 완료 후 재시도")
+    return bars, docs, coverage, {"docs": fingerprint({"files": before_docs, "coverage": coverage, "manifests": manifests}),
+                                 "docs_files": before_docs, "coverage": fingerprint(coverage),
+                                 "manifests": fingerprint(manifests), "price": before_price,
+                                 "policy": fingerprint({"fusion": cfg["fusion"], "influence": cfg["influence"],
+                                                        "forecast": cfg["forecast"], "minutes": cfg["minutes"],
+                                                        "feature_contract": 1, "codes": codes}), "prep": prep}
+
+
+def run_training(price_store, docs_store, result_store, cfg, now, codes=None, mode="observed"):
+    """P3-12b 서버 offline CLI. 완성된 세 파일만 저장소가 원자적으로 공개한다."""
+    from regime_lab.fusion import build_doc_features, fingerprint
+    from regime_lab.influence import train_influence
+    import sklearn
+    import numpy as np
+
+    bars, docs, coverage, inputs = training_inputs(price_store, docs_store, cfg, codes)
+    features, evidence, audit = build_doc_features(docs, bars, cfg, mode, coverage)
+    fitted, weights = train_influence(bars, features, evidence, cfg)
+    if evidence.empty or audit["by_split"]["train"]["usable_rows"] == 0:
+        raise ValueError("공시/가격 학습 교집합이 없습니다")
+    created = pd.Timestamp(now)
+    created = created.tz_localize(KST) if created.tzinfo is None else created.tz_convert(KST)
+    model_version = f"influence-{created:%Y%m%dT%H%M%S}-{fingerprint([inputs, mode])[:12]}"
+    sc = cfg["forecast"]["split"]
+    first, last = bars["date"].min().date().isoformat(), bars["date"].max().date().isoformat()
+    periods = {"train": {"start": first, "end": sc["train_end"]},
+               "valid": {"start": (pd.Timestamp(sc["train_end"]) + pd.Timedelta(days=1)).date().isoformat(), "end": sc["valid_end"]},
+               "test": {"start": (pd.Timestamp(sc["valid_end"]) + pd.Timedelta(days=1)).date().isoformat(), "end": last}}
+    metric = fitted["metrics"].get("1", {})
+    meta = {"format_version": 2, "model_version": model_version, "created_at": created.isoformat(),
+            "target": "next_hd_log_return", "as_of_mode": mode, "periods": periods,
+            "knowledge_cutoff": pd.Timestamp(fitted["knowledge_cutoff"]).tz_localize(KST).isoformat(),
+            "min_eval_samples": cfg["influence"]["min_eval_samples"], "inputs": inputs, "audit": audit,
+            "baseline": {"name": "ridge_price", "metric": "rmse", "value": metric.get("baseline_rmse"),
+                         "model_value": metric.get("rmse"), "higher_is_better": False},
+            "snapshots": fitted["snapshots"], "metrics": fitted["metrics"],
+            "versions": {"scikit-learn": sklearn.__version__, "numpy": np.__version__, "pandas": pd.__version__},
+            "settings": {"fusion": cfg["fusion"], "influence": cfg["influence"]},
+            "evaluation_mode": "retrospective", "notice": NOTICE}
+    events = evidence.rename(columns={"code": "ticker"}).copy()
+    events["period"] = events["linked_as_of"].map(lambda t: "train" if t.date().isoformat() <= sc["train_end"] else
+                                                "valid" if t.date().isoformat() <= sc["valid_end"] else "test")
+    events["contribution"] = None  # 시점/창에 따른 계수 합을 최종 모델 원인으로 표현하지 않는다.
+    result_store.write_model(model_version, meta, weights, events)
+    return model_version, meta
 
 
 def _shown(r: dict) -> str:
@@ -120,15 +195,17 @@ def _baseline_line(b: dict | None) -> dict | None:
     return {"name": b.get("name"), "metric": b.get("metric"), "baseline": v, "model": mv, "improved": better}
 
 
-def weights_view(store, as_of) -> dict:
+def weights_view(store, as_of, h: int = 1) -> dict:
     errors: dict = {}
     t = _parse_as_of(as_of, None, errors)
     _raise_if(errors)
-    m = pick_model(store, t)
+    m = pick_model(store, t, h)
     if m is None:
         return _no_model(t)
     try:
         w = store.read_weights(m["model_version"])
+        if "h" in w:
+            w = w[w["h"] == h]
     except (OSError, ValueError) as e:
         raise InfluenceError("data_unavailable", "Influence results could not be read.", {"error": str(e)}) from None
     rows = []
@@ -138,7 +215,10 @@ def weights_view(store, as_of) -> dict:
         r["direction_shown"] = _shown(r)
         rows.append(r)
     rows.sort(key=lambda r: (not r["sample_ok"], -abs(r.get("weight") or 0.0), str(r.get("group_type")), str(r.get("group"))))
-    return {"status": "ok", "model": _model_info(m, t), "baseline": _baseline_line(m.get("baseline")), "rows": rows,
+    metric = m.get("metrics", {}).get(str(h))
+    baseline = ({"name": "ridge_price", "metric": "rmse", "value": metric.get("baseline_rmse"),
+                 "model_value": metric.get("rmse"), "higher_is_better": False} if metric else m.get("baseline"))
+    return {"status": "ok", "model": _model_info(m, t), "baseline": _baseline_line(baseline), "rows": rows,
             "as_of": t.isoformat(), "notice": NOTICE}
 
 

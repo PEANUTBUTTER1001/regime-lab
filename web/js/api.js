@@ -84,6 +84,7 @@ export const api = {
   forecastRuns: () => request('GET', '/forecasts/runs'),
   forecastStock: (runId, code, params) => request('GET', `/forecasts/runs/${encodeURIComponent(runId)}/stocks/${encodeURIComponent(code)}?${new URLSearchParams(params)}`),
   forecastScores: (runId) => request('GET', `/forecasts/runs/${encodeURIComponent(runId)}/scores`),
+  forecastEvidence: (runId, params) => request('GET', `/forecasts/runs/${encodeURIComponent(runId)}/evidence?${new URLSearchParams(params)}`),
   // 영향 분석 (P3-13.3)
   influenceWeights: (params) => request('GET', `/influence/weights?${new URLSearchParams(params)}`),
   influenceEvents: (params) => request('GET', `/influence/events?${new URLSearchParams(params)}`),

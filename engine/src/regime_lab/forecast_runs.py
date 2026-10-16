@@ -36,7 +36,7 @@ CODE_RE = re.compile(r"^[0-9A-Za-z]{6}$")
 #    (P4-3a ③). 형식 2 run 도 그대로 읽힌다 — 읽는 쪽은 없는 키를 price 로 본다.
 # 4: meta.bar_source(krx_daily·minutes) — 일봉(1d) 예측(P2-11, 결정 D-2b). 일봉 run 은 meta.minute_prep_version 이 null 이고
 #    데이터 지문에 1분봉이 없다. 예측·채점 파일의 열은 그대로라 형식 2·3 run 도 그대로 읽힌다.
-FORECAST_RUN_VERSION = 4
+FORECAST_RUN_VERSION = 5  # P4-3b: fusion_kind/비교 실행/가중치 버전/근거 참조 (2~4 읽기 유지)
 DAILY = "1d"  # KRX 원주가 일봉에서 만드는 봉 (1분봉을 쓰지 않음)
 AS_OF_MODES = ("observed", "historical_assumed")
 
@@ -97,7 +97,8 @@ def _date_split(as_of: pd.Series, cfg: dict) -> np.ndarray:
 
 
 def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[str] | None = None,
-                 doc_features: pd.DataFrame | None = None, docs_info: dict | None = None) -> tuple[str, dict]:
+                 doc_features: pd.DataFrame | None = None, docs_info: dict | None = None,
+                 *, _prepared=None, _capture=None, _price=None, _docs=None, _evidence=None, _data_fp=None) -> tuple[str, dict]:
     """docs_info (doc_features 와 함께): fingerprint(자료 지문) · as_of_mode(observed | historical_assumed — 소급 공시는
     historical_assumed 로만, 결과를 '소급 가정'으로 따로 보고, P4-3a ④)."""
     fcfg = cfg["forecast"]
@@ -111,13 +112,15 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
         # 학습·검증 구간 예측은 모델 학습·보정에 그 시점 뒤 값까지 쓰여 '그 시점 예측'이 아니다 (FR-F4)
         raise ValueError(f"forecast.runs.store_splits 는 test 만 가능합니다: {rcfg['store_splits']}")
     codes = sorted(codes) if codes else store.common_codes()
-    bars, prep = build_bars(store, cfg, codes, timeframe, rcfg["batch_codes"])
+    bars, prep = _prepared if _prepared is not None else build_bars(store, cfg, codes, timeframe, rcfg["batch_codes"])
     if bars.empty:
         raise ValueError("집계 봉이 없습니다 — 1분봉 사본·종목을 확인하세요")
     feats = make_features(bars)
     X = feats[FEATURES]
     date_split = _date_split(bars["available_at"], cfg)
     doc_cols, XF, missing_rate, compare = [], X, {}, {}
+    kind = docs_info.get("fusion_kind", "docs") if fused else "none"
+    comparisons = {}
     if fused:
         D, doc_cols = attach_doc_features(feats, doc_features)
         XF = pd.concat([X, D], axis=1)
@@ -135,12 +138,21 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
         fm = M.fit(XF[tr], t.loc[tr, "y"], XF[cal], t.loc[cal, "y"], cfg)  # 보정은 검증 앞부분만
         pm, pb = M.predict(fm, XF), historical(t, cfg)
         if fused:  # 같은 표본·분할·설정의 가격 단독 모델 — 평가 구간에서만 비교 (FR-B2)
-            pp = M.predict(M.fit(X[tr], t.loc[tr, "y"], X[cal], t.loc[cal, "y"], cfg), X)
+            pp = _price[h] if _price is not None else M.predict(M.fit(X[tr], t.loc[tr, "y"], X[cal], t.loc[cal, "y"], cfg), X)
             te = t["split"].eq("test")
             compare[str(h)] = compare_variants(t[te], pp[te], pm[te], cfg)
+            if _docs is not None:
+                # A/B/C 모두 같은 실현 표본. 전체 3쌍×h의 p값을 한 번에 Holm 보정.
+                bp = _docs[h]
+                common = te & pp["p_up"].notna() & bp["p_up"].notna() & pm["p_up"].notna()
+                for name, a, b in (("docs_price", pp, bp), ("weighted_price", pp, pm), ("weighted_docs", bp, pm)):
+                    comparisons[f"{h}:{name}"] = compare_variants(t[common], a[common], b[common], cfg)
+        if _capture is not None:
+            _capture[h] = pm
         policy = direction_policy(t.loc[pol, "y"], pm.loc[pol, "p_up"], pb.loc[pol, "p_up"], cfg)  # 판정은 뒷부분
         ev = t[t["split"].isin(["valid", "test"])].assign(nxt=lambda d: d["nxt_period"])
         scores[str(h)] = {
+            "ignored_features": [c for c in XF if c not in fm.features],
             "conformal_widen": float(fm.widen),
             "direction_policy": policy,
             "model": _records(score(ev, pm.loc[ev.index], cfg, ["split", "nxt"])),
@@ -161,15 +173,34 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
         # 날 넘김: 실현된 표본은 실제 목표 봉 날짜로, 아직 실현 전이면 slot 으로 (하루 마지막 slot 을 넘으면 다음 거래일)
         out["y"] = t["y"]
         out["cross_day"] = t["cross_day"].where(t["realized_at"].notna(), (t["slot"] + h) > n_slots)
+        if fused:
+            out["bar_ordinal"] = bars.groupby("code", sort=False).cumcount()
+            out["docs_missing"] = D["docs_missing"].astype(bool)
+            total_col = f"f_all_all_{max(cfg['fusion']['windows'])}"
+            out["doc_count"] = doc_features.set_index(["code", "as_of"])[total_col].reindex(
+                pd.MultiIndex.from_frame(feats[["code", "as_of"]])).to_numpy() if total_col in doc_features else np.nan
+            missing_col = f"f_influence_missing_h{h}"
+            out["influence_missing"] = D[missing_col].fillna(1).astype(bool) if missing_col in D else False
         preds.append(out[keep])
     predictions = pd.concat(preds, ignore_index=True)
     if fused:
         for h, r in holm_verdicts(compare, fcfg["fusion_compare"]["alpha"]).items():
             scores[h]["vs_price"] = r
+    if comparisons:
+        for key, result in holm_verdicts(comparisons, fcfg["fusion_compare"]["alpha"]).items():
+            h, name = key.split(":")
+            scores[h].setdefault("comparisons", {})[name] = result
+        for value in scores.values():
+            c = value["comparisons"]
+            states = [c[n]["verdict"] for n in ("weighted_price", "weighted_docs")]
+            value["weighted_verdict"] = ("improved" if all(s == "improved" for s in states) else
+                                         "insufficient" if "insufficient" in states else "not_improved")
     daily = timeframe == DAILY
-    data_fp = store.fingerprint(minutes=not daily)
-    chash = _hash({k: cfg[k] for k in ("minutes", "forecast")})
+    data_fp = store.fingerprint(minutes=not daily) if _data_fp is None else _data_fp
+    chash = _hash({k: cfg[k] for k in (("minutes", "forecast", "fusion", "influence") if fused else ("minutes", "forecast"))})
     run_id = f"{timeframe}-{now:%Y%m%dT%H%M%S}-{chash[:8]}"
+    if fused:
+        run_id += f"-{kind}-{_hash(docs_info)[:8]}"
     created = pd.Timestamp(now)
     created = created.tz_localize("+09:00") if created.tzinfo is None else created.tz_convert("+09:00")  # 시각은 KST
     meta = {
@@ -181,16 +212,57 @@ def run_forecast(store, cfg: dict, timeframe: str, now: datetime, codes: list[st
         "minute_prep_version": None if daily else MINUTE_PREP_VERSION, "config_hash": chash, "data": data_fp, "codes": len(codes), "bars": int(len(bars)), "prep": prep,
         "as_of_range": [str(bars["available_at"].min()), str(bars["available_at"].max())],
         "variant": "fused" if fused else "price", "doc_features": doc_cols,
+        "fusion_kind": kind, "evaluation_mode": "retrospective",
         "docs_fingerprint": docs_info["fingerprint"] if fused else None,
         "as_of_mode": docs_info["as_of_mode"] if fused else None, "docs_missing_rate": missing_rate or None,
         # 같은 입력(설정·데이터·종목·자료) → 같은 지문. run_id 의 시각과 무관하게 재현 여부를 대조한다
         "run_fingerprint": _hash({"config": chash, "data": data_fp, "codes": codes, "timeframe": timeframe,
                                   "docs": docs_info["fingerprint"] if fused else None,
+                                  "influence": docs_info.get("influence_versions") if fused else None,
                                   "as_of_mode": docs_info["as_of_mode"] if fused else None, "doc_features": doc_cols}),
         "notice": "과거 데이터로 계산한 통계적 예상 범위이며 실제 가격 전망이나 매매 신호가 아닙니다.",
     }
-    store.write_run(run_id, meta, predictions, scores)
+    if fused:
+        meta.update({k: docs_info[k] for k in ("audit", "influence_versions", "comparison_runs", "feature_policy") if k in docs_info})
+    if _evidence is not None:
+        store.write_run(run_id, meta, predictions, scores, evidence=_evidence)
+    else:
+        store.write_run(run_id, meta, predictions, scores)
     return run_id, meta
+
+
+def run_fusion(store, docs_store, influence_store, cfg, now, codes=None, mode="observed", with_influence=False):
+    """공통 입력을 고정해 A/B(/C)를 생성. 순수 특징·학습 결과를 재사용하며 가격 모델 설정은 보존."""
+    from regime_lab.fusion import build_doc_features
+    from regime_lab.influence import weighted_features
+    from regime_lab.influence_runs import training_inputs
+
+    bars, docs, coverage, inputs = training_inputs(store, docs_store, cfg, codes)
+    features, evidence, audit = build_doc_features(docs, bars, cfg, mode, coverage)
+    if not audit["by_split"]["train"]["usable_rows"] or evidence.empty:
+        raise ValueError("외부 자료 학습 교집합 없음: 종목 연결·수집 범위·가격 기간 확인 필요")
+    weighted, used, model = None, {}, None
+    if with_influence:
+        models = [m for m in influence_store.list_models() if m.get("format_version") == 2 and
+                  m.get("inputs") == inputs and m.get("as_of_mode") == mode]
+        if not models:
+            raise ValueError("동일 입력/설정/종목의 영향력 모델 없음: influence-run 먼저 실행")
+        model = max(models, key=lambda m: m["created_at"])
+        weighted, used = weighted_features(features, model, cfg)
+    prepared = (bars, inputs["prep"])
+    pa, pb = {}, {}
+    a, _ = run_forecast(store, cfg, "1d", now, codes, _prepared=prepared, _capture=pa, _data_fp=inputs["price"])
+    info = {"fingerprint": inputs["docs"], "as_of_mode": mode, "audit": audit, "fusion_kind": "docs",
+            "feature_policy": cfg["fusion"], "comparison_runs": {"price": a}}
+    b, bm = run_forecast(store, cfg, "1d", now, codes, features, info, _prepared=prepared, _capture=pb, _price=pa,
+                         _evidence=evidence, _data_fp=inputs["price"])
+    if not with_influence:
+        return b, bm
+    info = {**info, "fusion_kind": "weighted", "influence_versions": {"model": model["model_version"], "snapshots": used},
+            "comparison_runs": {"price": a, "docs": b}}
+    # 집계/가중치/모델 설정 모두 run 지문에 포함. 모델 결과가 달라지면 기존 run을 덮어쓰지 않음.
+    return run_forecast(store, cfg, "1d", now, codes, weighted, info, _prepared=prepared, _price=pa, _docs=pb,
+                        _evidence=evidence, _data_fp=inputs["price"])
 
 
 # ── 읽기 (P2-9 API·화면용). 계산(구간 → 가격, 시점 고르기)은 엔진에 두고 API 는 전달만 한다 ──
@@ -212,6 +284,7 @@ def list_runs(store) -> list[dict]:
         m = store.read_meta(run_id)
         rng = store.as_of_range(run_id)  # 저장된 예측 = 최종 평가 구간
         out.append({**{k: m.get(k) for k in ("run_id", "timeframe", "created_at", "horizon", "codes", "format_version")},
+                    **({k: m.get(k) for k in ("fusion_kind", "as_of_mode", "comparison_runs")} if m.get("format_version", 2) >= 5 else {}),
                     "test_as_of_range": [_iso_kst(t) for t in rng] if rng else None})
     return sorted(out, key=lambda r: r["created_at"] or "", reverse=True)
 
@@ -240,6 +313,8 @@ def stock_forecast(store, cfg: dict, run_id: str, code: str, as_of: str | None =
     p = store.read_predictions(run_id, code)
     base = {"run_id": run_id, "timeframe": meta["timeframe"], "code": code,
             "horizon": meta["horizon"], "notice": meta.get("notice")}
+    if meta.get("format_version", 2) >= 5:
+        base.update({k: meta.get(k) for k in ("fusion_kind", "as_of_mode", "influence_versions", "comparison_runs", "docs_missing_rate", "evaluation_mode")})
     if p.empty:
         return {**base, "status": "no_stock"}
     # 평가 구간 밖: 그 종목 첫 예측보다 이르거나, 마지막 예측 날짜보다 늦은 날 (같은 날 장 마감 뒤는 마지막 확정 시점)
@@ -255,6 +330,10 @@ def stock_forecast(store, cfg: dict, run_id: str, code: str, as_of: str | None =
         return {**base, "status": "insufficient_history", "as_of": _iso_kst(at)}
     shown = rows["direction_shown"] if "direction_shown" in rows else pd.Series("uncertain", index=rows.index)
     bc = float(rows["base_close"].iloc[0])
+    if "docs_missing" in rows:
+        base["documents"] = {"missing": bool(rows["docs_missing"].iloc[0]),
+                             "count": None if pd.isna(rows["doc_count"].iloc[0]) else int(rows["doc_count"].iloc[0]),
+                             "influence_missing": {str(int(r.h)): bool(r.influence_missing) for r in rows.itertuples()}}
     steps = [{"h": int(r["h"]), "low": bc * float(np.exp(r[lo])), "high": bc * float(np.exp(r[hi])), "p_up": float(r["p_up"]), "direction": d,
               "actual": None if pd.isna(r["y"]) else bc * float(np.exp(r["y"])), "cross_day": bool(r["cross_day"])}
              for r, d in zip(rows.to_dict("records"), shown)]
@@ -268,3 +347,50 @@ def run_scores(store, run_id: str) -> dict:
     meta = _require_run(store, run_id)
     return {"run_id": run_id, "timeframe": meta["timeframe"], "horizon": meta["horizon"], "split": meta["split"],
             "scores": store.read_scores(run_id), "notice": meta.get("notice")}
+
+
+def evidence_view(store, cfg, run_id, code, as_of, docs, now, page=1, page_size=None, manifests=None):
+    """확정 예측의 실제 입력 문서 참조. 검색어/top-k와 독립, 현재 삭제/권한 제한 우선."""
+    from regime_lab.rag.select import aware, select_as_of
+
+    fc = cfg["fusion"]
+    size = fc["evidence_page_size"] if page_size is None else page_size
+    if page < 1 or size < 1 or size > fc["evidence_max_page_size"]:
+        raise ForecastError("invalid_page", "근거 페이지 범위 오류")
+    meta = _require_run(store, run_id)
+    stock = stock_forecast(store, cfg, run_id, code, as_of)
+    base = {"run_id": run_id, "code": code, "as_of": stock.get("as_of"), "mode": meta.get("as_of_mode"),
+            "page": page, "page_size": size, "notice": meta.get("notice"), "influence_versions": meta.get("influence_versions")}
+    if meta.get("fusion_kind", "none") == "none" or stock["status"] != "ok":
+        return {**base, "status": "no_evidence", "items": [], "total": 0}
+    if stock.get("documents", {}).get("missing"):
+        return {**base, "status": "docs_missing", "items": [], "total": 0}
+    try:
+        e = store.read_evidence(run_id, code)
+    except (OSError, ValueError):
+        return {**base, "status": "evidence_missing", "items": [], "total": 0}
+    t = to_kst_naive(stock["as_of"])
+    predictions = store.read_predictions(run_id, code)
+    ordinal = int(predictions.loc[predictions["as_of"] == t, "bar_ordinal"].iloc[0])
+    policy = meta.get("feature_policy", fc)
+    delta = ordinal - e["linked_ordinal"]
+    e = e[(e["linked_as_of"] <= t) & (e["until"] > t) & (delta >= 0) & (delta < max(policy["windows"]))]
+    mode = meta.get("as_of_mode") or "observed"
+    selected = { (docs[i]["doc_id"], int(docs[i]["version"])): docs[i]
+                 for i in select_as_of(docs, aware(stock["as_of"]), mode)}
+    blocked = {d["doc_id"] for d in docs if d.get("status") in ("deleted", "expired") or
+               (d.get("expires_at") and aware(d["expires_at"]) <= aware(now))}
+    rows = []
+    for r in e.sort_values(["linked_as_of", "doc_id"], ascending=[False, True]).to_dict("records"):
+        d = selected.get((r["doc_id"], int(r["version"])))
+        manifest = (manifests or {}).get(r["source"], {})
+        source_allowed = manifest.get("active", True) is not False and manifest.get("license_scope", "metadata_only") == "metadata_only"
+        available = d is not None and r["doc_id"] not in blocked and d.get("license_scope") == "metadata_only" and source_allowed
+        rows.append({"doc_id": r["doc_id"], "version": int(r["version"]), "source": r["source"], "group": r["group"],
+                     "linked_as_of": _iso_kst(r["linked_as_of"]), "available_at": r["available_at"],
+                     "windows": [w for w in policy["windows"] if ordinal - r["linked_ordinal"] < w],
+                     "status": "available" if available else "restricted" if r["doc_id"] in blocked or not source_allowed else "missing",
+                     "title": d.get("title") if available else None, "url": d.get("url") if available else None})
+    latest = max((r["available_at"] for r in rows if r["status"] == "available"), key=aware, default=None)
+    return {**base, "status": "ok" if rows else "no_evidence", "items": rows[(page - 1) * size:page * size],
+            "total": len(rows), "latest_available_at": latest}

@@ -51,6 +51,7 @@ class AppState:
     def __init__(self, settings: Settings, prep: Prepared | None = None, rag: retrieval.EvidenceIndex | None = None):
         self.settings = settings
         self.cfg = load_config()
+        self.clock = lambda: datetime.now(timezone.utc)
         self.paths = settings.paths
         self.paths.runs.mkdir(parents=True, exist_ok=True)
         self.prep: Prepared | None = prep
@@ -70,6 +71,7 @@ class AppState:
         # 근거 검색 색인 (P3-11). 준비 프레임과 따로 불러오며, 실패해도 다른 기능에는 영향이 없다.
         self.rag = rag
         self.docs = DocsStore(self.paths.ext_store, self.paths.cache)  # 근거 검색 색인·보관함 수집 상태가 같이 쓴다 (R3)
+        self.base_docs_path = self.paths.ext_store
         # 봉 예측 실행 결과 (P2-9). 1분봉 사본은 store 옆 minutes 폴더 (forecast-run 명령과 같은 기본값)
         self.forecasts = ForecastStore(self.paths.store, self.paths.store.parent / "minutes", self.paths.runs)
         # 영향력 가중치 결과 (P3-12 가 쓰고 P3-13.3 이 읽음). runs/influence/<model_version>/
@@ -116,9 +118,11 @@ def _read_evidence_update(state):
     if result is None:
         return None
     path, report = result
-    docs = DocsStore(path, state.paths.cache)
+    docs = DocsStore(getattr(state, "base_docs_path", state.paths.ext_store), state.paths.cache, (path,))
     index = retrieval.open_index(docs, state.cfg, use_cache=False)
-    if len(index.docs) != report['versions']:
+    # HTTP snapshot 출처만 비교. 로컬 OpenDART가 추가되어도 snapshot 검증 수치와 혼동하지 않는다.
+    snapshot_sources = DocsStore(path, state.paths.cache).manifests()
+    if sum(d.get("source") in snapshot_sources for d in index.docs) != report['versions']:
         raise ValueError('Index version count mismatch')
     return path, report, docs, index
 

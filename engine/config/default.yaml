@@ -154,6 +154,31 @@ rag:                                # P3-11 근거 검색 (역방향 탐색 sear
   query_particles: [이, 가, 은, 는, 을, 를, 과, 와]  # 받침이 맞는 조사 1회만 분리. 약칭·동의어 확장 아님
   particle_min_base_chars: 2        # 조사 분리 후 최소 기본어 길이. 더 짧으면 원형만 검색
 
+fusion:                             # 2026-10-16 승인: P4-2 / P4-3a 후속 확장
+  windows: [1, 5, 20]               # 실제 거래일 집계 창
+  sources: [opendart]               # 기존 승인 공시만. 뉴스 소급·출처 확대 제외
+  markets: [Y, K]                   # coverage 에 두 시장 모두 있어야 정상 0건
+  classification_version: 1
+  report_rules:                    # 위에서 먼저 맞는 한 유형; 방향을 수작업 부여하지 않음
+    earnings: '실적|사업보고서|반기보고서|분기보고서'
+    dividend: '배당'
+    capital: '증자|감자|전환사채|신주인수권'
+    treasury: '자기주식|자사주'
+    merger: '합병|분할'
+    other: '.*'
+  evidence_page_size: 50
+  evidence_max_page_size: 200
+
+influence:                          # P3-12: 가격 통제 Ridge, h 별 학습
+  alphas: [0.1, 1.0, 10.0]
+  min_train_days: 252
+  fold_days: 63
+  min_events: 30
+  min_eval_samples: 30
+  bootstrap: 1000
+  alpha: 0.05
+  seed: 0
+
 archive:                            # P3-13 자료 보관함 (SRS FR-N7). PREP_SECTIONS 밖 — 준비 캐시와 무관
   page_size: 50                     # 목록 한 쪽 기본 건수
   max_page_size: 200                # 요청 page_size 상한

@@ -31,18 +31,18 @@ def _raise(e: influence_runs.InfluenceError):
 
 
 @router.get("/influence/model")
-def model(request: Request, as_of: str = ""):
+def model(request: Request, as_of: str = "", h: int = Query(1, ge=1, le=20)):
     try:
-        res = influence_runs.model_view(request.app.state.rl.influence, as_of)
+        res = influence_runs.model_view(request.app.state.rl.influence, as_of, h)
     except influence_runs.InfluenceError as e:
         _raise(e)
     return {**res, "disclaimer": DISCLAIMER}
 
 
 @router.get("/influence/weights")
-def weights(request: Request, as_of: str = ""):
+def weights(request: Request, as_of: str = "", h: int = Query(1, ge=1, le=20)):
     try:
-        res = influence_runs.weights_view(request.app.state.rl.influence, as_of)
+        res = influence_runs.weights_view(request.app.state.rl.influence, as_of, h)
     except influence_runs.InfluenceError as e:
         _raise(e)
     return {**res, "disclaimer": DISCLAIMER}

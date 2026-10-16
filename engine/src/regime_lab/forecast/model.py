@@ -45,7 +45,11 @@ def fit(X_train: pd.DataFrame, y_train: pd.Series, X_valid: pd.DataFrame, y_vali
     mcfg = fcfg["model"]
     qs = list(fcfg["quantiles"])
     Xt, yt = _subsample(X_train, y_train, mcfg["max_train_rows"], mcfg["random_state"])
-    m = FittedModel(quantiles=qs, features=list(X_train.columns))
+    # 새 자료/가중 특징은 학습 구간 전체가 결측일 수 있다. 이 열은 학습 자료만으로 제외한다.
+    # 일부 sklearn bin mapper는 all-NaN 열에서 실패하며, valid/test로 채우면 미래정보가 된다.
+    cols = [c for c in Xt if Xt[c].notna().any()]
+    Xt = Xt[cols]
+    m = FittedModel(quantiles=qs, features=cols)
     for q in qs:
         m.regressors[q] = HistGradientBoostingRegressor(loss="quantile", quantile=q, **_params(mcfg)).fit(Xt, yt)
     m.classifier = HistGradientBoostingClassifier(**_params(mcfg)).fit(Xt, (yt > 0).astype(int))

@@ -5,6 +5,9 @@
   runs/forecasts/<run_id>/meta.json         실행 정보·설정 해시·데이터 지문·분할 날짜
   runs/forecasts/<run_id>/predictions.parquet code·as_of·h·split·base_close·q…·p_up·direction·reason·y·cross_day
   runs/forecasts/<run_id>/scores.json       split×h 별 모델·기준선 지표
+  자료 결합 형식5: evidence.parquet (문서 식별자/버전/종목/봉/유효 구간; 원문 없음).
+  meta.fusion_kind·comparison_runs·influence_versions; 예측에 bar_ordinal/결측/자료 건수.
+  기존 형식2~4는 원래 세 파일만으로 읽는다 (P4-3b, 2026-10-16 사용자 승인).
 저장은 runs/forecasts/.tmp_<run_id>/ 에 쓴 뒤 완료 시 한 번에 옮긴다 (runs.py 와 같은 방식).
 유스케이스(forecast_runs.py)는 이 객체를 인자로 받아 계산만 한다 (R1·R2).
 """
@@ -63,7 +66,7 @@ class ForecastStore:
         return {"minutes": minutes_fingerprint(self.minutes_dir), **out} if minutes else out
 
     # 쓰기·읽기 (결과)
-    def write_run(self, run_id: str, meta: dict, predictions: pd.DataFrame, scores: dict) -> Path:
+    def write_run(self, run_id: str, meta: dict, predictions: pd.DataFrame, scores: dict, evidence=None) -> Path:
         out, tmp = self.root / run_id, self.root / f".tmp_{run_id}"
         if out.exists():
             raise FileExistsError(f"이미 있는 예측 실행입니다: {out}")
@@ -73,6 +76,8 @@ class ForecastStore:
             (tmp / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
             predictions.to_parquet(tmp / "predictions.parquet", index=False)
             (tmp / "scores.json").write_text(json.dumps(scores, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+            if evidence is not None:
+                evidence.to_parquet(tmp / "evidence.parquet", index=False)
             tmp.rename(out)
         except BaseException:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -93,6 +98,9 @@ class ForecastStore:
 
     def read_scores(self, run_id: str) -> dict:
         return json.loads((self.root / run_id / "scores.json").read_text(encoding="utf-8"))
+
+    def read_evidence(self, run_id: str, code: str) -> pd.DataFrame:
+        return pd.read_parquet(self.root / run_id / "evidence.parquet", filters=[("code", "==", code)])
 
     def read_predictions(self, run_id: str, code: str) -> pd.DataFrame:
         """한 종목의 예측 행만 (Parquet 필터로 읽음)."""

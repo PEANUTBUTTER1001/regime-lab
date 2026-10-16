@@ -293,6 +293,8 @@ uv run --project engine regime-lab batch
 | `uv run --project engine regime-lab rag-index` | 공시·뉴스 검색 색인을 만듭니다 (`ext_store` 필요) |
 | `uv run --project engine regime-lab rag-search "<검색어>" --as-of <시간대 포함 시각>` | 기준 시각에 보이던 자료만 검색합니다 |
 | `uv run --project engine regime-lab forecast-run --timeframe 1d` | 과거 시점별 일봉 예측을 만들어 `runs/forecasts/`에 저장합니다 (store 의 KRX 원주가 일봉 사용, 결정 D-2b. 화면은 메뉴 '봉 예측') |
+| `uv run --project engine regime-lab influence-run --as-of-mode historical_assumed` | 서버 PC에서 소급 공시 기반 가격 통제 Ridge·시간 순서 가중치를 사전 학습합니다. 형식2, 실제 자료/coverage 교집합 필요 |
+| `uv run --project engine regime-lab forecast-run --timeframe 1d --with-docs --docs-mode historical_assumed --with-influence` | 같은 입력의 영향력 결과로 A가격/B자료/C가중치를 비교·저장합니다. [승인 명세](docs/P4_자료가중_예측_요구사항.md)·[서버 실행/검증](docs/P4_자료가중_예측_운영.md), 순방향 자료는 두 명령 모두 observed 사용 |
 
 ---
 

@@ -59,16 +59,19 @@ function baselineLine(b) {
 
 function weightsTable(res) {
   const rows = res.rows;
+  const digits = res.model?.format_version >= 2 ? 6 : 3;
   if (!rows.length) return h('p', { class: 'muted', text: t('inf.w.empty') });
   return table({
     caption: t('inf.w.caption', { n: fmt.int(rows.length), s: fmt.int(rows.filter((r) => r.sample_ok).length) }),
     rowClass: (r) => (r.sample_ok ? '' : 'dim'),
     rows,
     columns: [
-      { label: t('inf.w.group'), render: (r) => h('span', {}, h('small', { class: 'muted' }, `${has(`inf.gt.${r.group_type}`) ? t(`inf.gt.${r.group_type}`) : r.group_type} · `), r.group) },
-      { label: t('inf.w.weight'), num: true, render: (r) => fmt.num(r.weight, 3) },
+      { label: t('inf.w.group'), render: (r) => h('span', {}, h('small', { class: 'muted' }, `${has(`inf.gt.${r.group_type}`) ? t(`inf.gt.${r.group_type}`) : r.group_type} · `),
+        has(`inf.group.${r.group}`) ? t(`inf.group.${r.group}`) : r.group,
+        r.window ? h('small', { class: 'muted' }, ` · ${t('inf.window', { n: r.window })}`) : null) },
+      { label: t('inf.w.weight'), num: true, render: (r) => fmt.num(r.weight, digits) },
       { label: t('inf.w.dir'), render: (r) => DIR[r.direction_shown]?.() ?? '—' },
-      { label: t('inf.w.ci'), num: true, render: (r) => (r.ci_low == null ? '—' : `${fmt.num(r.ci_low, 3)} ~ ${fmt.num(r.ci_high, 3)}`) },
+      { label: t('inf.w.ci'), num: true, render: (r) => (r.ci_low == null ? '—' : `${fmt.num(r.ci_low, digits)} ~ ${fmt.num(r.ci_high, digits)}`) },
       { label: t('inf.w.nEvents'), num: true, render: (r) => fmt.int(r.n_events) },
       { label: t('inf.w.nEval'), num: true, render: (r) => fmt.int(r.n_eval) },
       { label: t('inf.w.metric'), num: true, render: (r) => fmt.num(r.eval_metric, 3) },
@@ -137,12 +140,14 @@ export async function renderInfluence(root, query) {
     ticker: query.get('ticker') || '',
     start: query.get('from') || '', end: query.get('to') || '',
     mode: MODES.includes(query.get('mode') || '') ? (query.get('mode') || '') : '',
+    horizon: query.get('h') || '1',
   };
   const errEls = {};
   const errorSlot = (k) => (errEls[k] = h('p', { class: 'field-error hidden', id: `inferr-${k}` }));
   const inp = (id, key, err, attrs = {}) => h('input', { id, value: f[key], 'aria-describedby': `inferr-${err}`,
     oninput: (e) => { f[key] = e.target.value; }, ...attrs });
   const inputs = {
+    h: inp('inf-horizon', 'horizon', 'h', { type: 'number', min: '1', max: '20', step: '1' }),
     as_of: inp('inf-asof', 'asOf', 'as_of', { type: 'datetime-local', step: '60' }),
     ticker: inp('inf-ticker', 'ticker', 'ticker', { placeholder: t('inf.tickerPh'), autocomplete: 'off', maxlength: '6' }),
     from: inp('inf-from', 'start', 'from', { type: 'date' }),
@@ -164,6 +169,7 @@ export async function renderInfluence(root, query) {
     const p = new URLSearchParams({ as_of: toIso(f.asOf) });
     const add = (k, v) => { if (v) p.set(k, v); };
     add('ticker', f.ticker.trim()); add('from', f.start); add('to', f.end); add('mode', f.mode);
+    add('h', f.horizon);
     const next = `#/influence?${p}`;
     if (location.hash === next) { root.replaceChildren(); renderInfluence(root, p); } else location.hash = next;
   };
@@ -173,7 +179,7 @@ export async function renderInfluence(root, query) {
   const form = h('form', { class: 'card', novalidate: true },
     h('h2', {}, t('inf.formTitle')), h('p', { class: 'card-sub', text: t('inf.formSub') }),
     h('div', { class: 'field-two' }, field('inf-asof', 'as_of', t('ev.asOf'), t('inf.asOfHint')), field('inf-mode', 'mode', t('ev.mode'), null, t('inf.modeHint'))),
-    h('div', { class: 'field-two' }, field('inf-ticker', 'ticker', t('inf.ticker'), t('inf.tickerHint')), h('div', {})),
+    h('div', { class: 'field-two' }, field('inf-ticker', 'ticker', t('inf.ticker'), t('inf.tickerHint')), field('inf-horizon', 'h', t('inf.horizon'))),
     h('div', { class: 'field-two' }, field('inf-from', 'from', t('inf.from')), field('inf-to', 'to', t('inf.to'), t('inf.periodHint'))),
     h('div', { class: 'actions', style: { justifyContent: 'flex-start' } },
       h('button', { class: 'primary', type: 'submit' }, `${t('inf.run')} `, h('span', { 'aria-hidden': 'true' }, '→'))));
@@ -200,7 +206,7 @@ export async function renderInfluence(root, query) {
 
   let w;
   try {
-    w = await api.influenceWeights({ as_of: asOf });
+    w = await api.influenceWeights({ as_of: asOf, h: f.horizon });
   } catch (err) {
     const node = fail(err, retry);
     single(t('ws.col.analysis'), node || h('p', { class: 'muted', style: { padding: '14px 16px' }, text: t('inf.fixFields') }));
@@ -212,6 +218,7 @@ export async function renderInfluence(root, query) {
   }
   box.append(modelCard(w.model));
   const wBox = h('div', {}, h('article', { class: 'card' }, h('h2', {}, t('inf.w.title')),
+    w.model.format_version >= 2 ? h('p', { class: 'hint', text: t('inf.auxiliary') }) : null,
     h('p', { class: 'notice', text: t('inf.fixedNotice') }), baselineLine(w.baseline), weightsTable(w)));
   const evBox = h('article', { class: 'card' }, h('h2', {}, t('inf.e.title')));
   const eBox = h('div', {}, evBox);

@@ -13,7 +13,7 @@ GET /api/forecasts/runs/{run_id}/scores
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from regime_api.errors import ApiError
 from regime_lab import forecast_runs
@@ -46,6 +46,19 @@ def stock(run_id: str, code: str, request: Request, as_of: str = ""):
 def scores(run_id: str, request: Request):
     try:
         res = forecast_runs.run_scores(request.app.state.rl.forecasts, run_id)
+    except forecast_runs.ForecastError as e:
+        _raise(e)
+    return {**res, "disclaimer": DISCLAIMER}
+
+
+@router.get("/forecasts/runs/{run_id}/evidence")
+def evidence(run_id: str, request: Request, code: str, as_of: str = "", page: int = Query(1, ge=1),
+             page_size: int | None = Query(None, ge=1)):
+    state = request.app.state.rl
+    try:
+        index = state.require_rag()
+        res = forecast_runs.evidence_view(state.forecasts, state.cfg, run_id, code, as_of or None,
+                                          index.docs, state.clock(), page, page_size, getattr(index, "manifests", None))
     except forecast_runs.ForecastError as e:
         _raise(e)
     return {**res, "disclaimer": DISCLAIMER}
