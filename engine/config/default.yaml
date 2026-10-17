@@ -247,3 +247,64 @@ news_refresh:
   max_response_bytes: 16777216
   page_size: 1000
   max_versions: 200000
+
+# X4 Python 수집 전용. 분석/준비 캐시 설정과 독립. 접속값·키는 환경변수만 사용.
+fsc_collection:
+  database: regime_lab
+  db_port: 3306
+  db_timeout_seconds: 30
+  page_size: 10000
+  max_page_size: 10000
+  max_rows_per_day: 100000
+  max_response_bytes: 33554432
+  http_timeout_seconds: 60
+  request_interval_seconds: 0.5
+  http_retries: 3
+  retry_backoff_seconds: 2
+  max_requests_per_run: 8000
+  lookback_days: 7
+  pending_days_per_update: 30
+  earliest_probe_date: '1900-01-01'
+  markets: [KOSPI, KOSDAQ]
+  index_names: [코스피, 코스닥]
+  schedule_hour: 13
+  schedule_minute: 30
+  delayed_retry_minutes: 30
+  delayed_retries: 3
+
+# DART·ECOS 독립 수집. 승인 SRS(2026-10-17), 모델·주가 수집 설정과 독립.
+fundamental_collection:
+  database: regime_lab
+  db_port: 3306
+  db_timeout_seconds: 30
+  http_timeout_seconds: 60
+  max_response_bytes: 33554432
+  max_zip_bytes: 134217728
+  max_zip_members: 4
+  max_rows_per_unit: 300000
+  page_size: 100
+  request_interval_seconds: 0.5
+  http_retries: 3
+  retry_backoff_seconds: 2
+  max_requests_per_run: 8000
+  dart_daily_requests: 8000
+  ecos_daily_requests: 8000
+  lookback_days: 7
+  pending_units_per_update: 30
+  profile_refresh_days: 7
+  dart_start: '2015-01-01'
+  financial_start_year: 2015
+  markets: [Y, K]
+  report_codes: ['11013', '11012', '11014', '11011']
+  events: [piicDecsn, fricDecsn, pifricDecsn, crDecsn, tsstkAqDecsn, tsstkDpDecsn,
+           tsstkAqTrctrCnsDecsn, tsstkAqTrctrCcDecsn, cvbdIsDecsn, cmpMgDecsn, cmpDvDecsn, cmpDvmgDecsn]
+  ecos_series:
+    - {id: base_rate, stat_code: 722Y001, cycle: D, names: [한국은행 기준금리], units: ['연%','%']}
+    - {id: treasury_3y, stat_code: 817Y002, cycle: D, names: ['국고채(3년)', '국고채수익률(3년)'], units: ['연%','%']}
+    - {id: treasury_10y, stat_code: 817Y002, cycle: D, names: ['국고채(10년)', '국고채수익률(10년)'], units: ['연%','%']}
+    - {id: corporate_aa_3y, stat_code: 817Y002, cycle: D, names: ['회사채(3년, AA-)', '회사채수익률(3년, AA-)'], units: ['연%','%']}
+    - {id: usd_krw, stat_code: 731Y001, cycle: D, names: ['원/미국달러(매매기준율)'], units: [원]}
+  schedule_hour: 13
+  schedule_minute: 30
+  delayed_retry_minutes: 30
+  delayed_retries: 3
