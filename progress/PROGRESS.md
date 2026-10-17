@@ -1,5 +1,61 @@
 # PROGRESS
 
+## 2026-10-17 14:33:56 KST (+09:00) — DART·ECOS 독립 Python 수집기
+
+- 시작 시각: 2026-10-17 14:33:56 KST (+09:00).
+- 승인: 사용자 SRS 구현계획 후 $execute. 동일 MariaDB·신규 표8개·서버 전달 DDL·공통 DB 환경·DART/ECOS 키·13:30 예약.
+- 목표: DART 회사/목록/사건12종/재무·ECOS 메타/금리환율5종의 원본·변경·시각·재개 이력 축적. 모델/콘텐츠 연결 제외.
+
+### 단계 상태
+
+| 단계 | 상태 | 비고 |
+|---|---|---|
+| 1. 계약·DDL·설정 | 🟢 완료 | 승인 전달 DDL 8개 표·독립 설정·보관 범위 계약 |
+| 2. 수집·DB·복구·검사 | 🟢 완료 | 회사/목록/사건12/재무·ECOS5·원본/변경/예산/재개, 합성42검사 |
+| 3. 키 설정·예약·운영 안내 | 🟢 완료 | 기존 DB 재사용·독립 예약·DDL/실행/복구 안내 작성 |
+| 4. 합성·회귀 검증 | 🟢 완료 | engine777/API289/ingest147, 후속 신규60+기존57=117, 실패0 |
+| 5. 실서버 적재·예약 수용 | 🟠 연기 | 실행 환경의 API키·DB 연결·서버 권한 미확인 |
+
+- 최종 확인: 2026-10-17 16:00:51 KST (+09:00). 구현·로컬 검증 완료. 실서버 접속 환경 없음으로 적재/예약 수용 연기.
+- 산출물: fundamental_collection 독립 수집기·전달 DDL8표·PEP723 잠금·기존 DB 재사용 설정·별도 KST 예약·실행 안내. 승인 계약·출처 대장·DART-ECOS-1 기록.
+- 검증: 전체 engine777 passed/8 skipped(550.33초), API289 passed/기존 경고1(79.69초), ingest147 passed(9.28초). 후속 최종 수집기60+기존FSC57=117 passed(5.13초). 전체 실행 뒤 수집기 경계 수정은 후속117로 재검증.
+- 최종 사례 기준: 전체 실행의 옛 수집기 사례를 후속 최종 사례로 교체·중복 제거한1219 passed/8 skipped/실패0. cache/qa/fund/verification.json·JUnit 근거.
+- 추가 경계: 비상장 종목코드 공백의 대상 폭증 방지·과거 공개회사 보존·명시적 회사 범위 재개·비활성 사건 재개 제외·CFS 오류에서 OFS 미대체·JSON 중복키/ZIP/XML·금리환율 메타/단위·관측시계 역행·정정 A→B→A·원본/로그 롤백·요청 선예약/KST 예산 검증.
+- 실행 환경: uv offline locked 전용 실행/2의존성 확인, check missing_db_environment 예상종료2. 키/DB 값은 환경 존재 여부만 확인(모두없음), 실제 API/DB 호출 없음.
+- 예약 검증: PowerShell AST·기본 Python/uv XML·Windows PowerShell5 XML·별도 설정/공백 경로 XML 통과. 예약 실제 등록/서버 재시작 없음.
+- DB 한계: SQLite 어댑터에서 실제 저장 SQL/원자성 실행, MariaDB information_schema/GET_LOCK은 계약 대역. 실제 MariaDB DDL·쓰기·잠금·무인 예약 성공은 서버에서 별도 확인.
+- 보존: 기존 금융위 수집 코드/DDL/키/예약·ingest·모델·웹·AGENTS/WBS 원문 유지. default.yaml은 독립 절만 추가. 기존 미커밋 변경 보존, 커밋/푸시 없음. 출처 대장은 승인된 신규 API 보관 범위만 활성화(AGENTS §7 선행), 뉴스/LLM 범위 확대 없음.
+- 다음: 서버 담당자 전달 DDL8표/SELECT·INSERT → configure.ps1 → check → 출처별 소량 backfill/inspect/재실행 → 전체 backfill 재개 → install_task.ps1 → 실제13:30 기록. AGENTS 신규 명령/경로 등록은 /agents-md 후속.
+
+
+---
+
+## 2026-10-16 20:51:29 KST (+09:00) — X4 Python 금융위 API 3종 수집
+
+- 시작 시각: 2026-10-16 20:51:29 KST (+09:00).
+- 승인: 수집 명세 및 Python/PyMySQL·공통 키·신규 테이블·13:30 예약 실행 구성 제시 뒤 사용자 $execute. n8n 제외.
+- 목표: API 3종 접근 점검, 신규 DB 초기화, 전체 과거/증분 수집·중단 재개·버전 보존·0값 조사, Windows 예약 실행 안내/설정 도구.
+
+### 단계 상태
+
+| 단계 | 상태 | 비고 |
+|---|---|---|
+| 1. 계약·설정·원본 보존 | 🟢 완료 | feat/X4-python-fsc-collector, X4c·수집 계약·전용 설정 |
+| 2. Python 수집·DB·복구·품질 보고 | 🟢 완료 | 3종·날짜별 트랜잭션·버전·중단 재개·0값 보존 |
+| 3. 설정·예약 실행·운영 안내 | 🟢 완료 | 마스킹 설정·Windows 예약·PEP723 의존성 잠금 |
+| 4. 합성/회귀 검증·최종 기록 | 🟢 완료 | 전체 engine719/API289/ingest147, 후속 대상58 통과·원본 의존8 skip |
+| 5. 실서버 적재·예약 수용 | 🟠 연기 | 현재 실행 환경에 키·DB 접속값 없음, 운영 서버 설정 필요 |
+
+- 최종 확인: 2026-10-16 21:46:05 KST (+09:00). Python 수집기·설정·신규 표·예약 도구·문서 구현 완료. 실제 서버 적재/예약 수용은 환경 설정 대기.
+- 검증: 전체 engine719 passed/8 skipped(570.66초), API289 passed/기존 deprecation1(82.70초), ingest147 passed(10.56초). 후속 변경 후 신규57+기존 수집1=58 passed(3.72초). 중복 합산 제외한 JUnit 고유 사례1159 passed/8 skipped/실패0. 근거 cache/qa/fsc/verification.json 및 JUnit.
+- 반례: 페이지 누락/중복/필터/기준일/건수 변경·큰 정수/소수·0값 보존·정정 A→B→A·원본/완료 로그 롤백·DB 잠금·과거 빈/실패 날짜 재검사·설정 변경 재조회·미래 행 개입 불변·오류 비밀 비노출·기본/사용자 설정 예약 XML 통과.
+- 실행 환경: PEP723 lock(PyMySQL1.2.3/PyYAML6.0.3) 설치·독립 CLI help/schedule-info 확인. check는 접속값이 없어 missing_environment로 종료, 외부 API/DB 호출 없음. Windows 예약은 PrintOnly로만 검증했으며 실제 등록하지 않음.
+- DB 검증 한계: 동일 원본/로그 SQL의 트랜잭션은 SQLite로 실행. MariaDB 고유 메타데이터·명명 잠금은 대역 검사이며 실제 서버 원자성·권한·DDL·13:30 수용을 증명하지 않음.
+- 보존: 기존 확정 설정 의미·이전 진행 기록·기존 결정 행·AGENTS.md·legacy workflow 원문 보존 확인. git diff --check 통과. 웹·엔진 계산·원본·서버·키·방화벽·WBS 담당/실적·커밋/푸시 변경 없음.
+- 다음: 서버에서 configure.ps1 → check → init-db → 소량 backfill → 전체 backfill → status/inspect → install_task.ps1 순서. 신규 명령·설정·수집 의존성의 AGENTS 등록은 /agents-md 후속.
+
+---
+
 ## 2026-10-15 20:40:08 KST (+09:00) — PEANUTBUTTER1001 AGENTS.md X12 지침·WBS 갱신
 
 - 승인 근거: 사용자 $agents-md 점검·제안 뒤 “1~8 그리고 wbs도 갱신바람”. 선택 1~8 반영, 9번 압축안 보류.
