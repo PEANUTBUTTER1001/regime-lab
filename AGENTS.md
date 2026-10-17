@@ -1,6 +1,6 @@
 # regime-lab — 에이전트 작업 규칙
 코스피·코스닥 일봉 패턴 백테스트·국면별 성과·3중 검증에 더해 역방향 조건 탐색, 봉 단위 예측·과거 검증, 공시·뉴스 근거 검색과 오프닝 브리핑을 제공하는 과거 데이터 분석 도구(투자 권유 아님) · 범위: `docs/SRS.md`(v2.0) · 설계 이유와 결정 기록: `docs/구현_계획.md`, `docs/구현_전_결정사항.md`
-Source of Truth: `engine/pyproject.toml`, `api/pyproject.toml`, `engine/config/default.yaml` · 이 문서는 사용자 승인을 받아서만 개정한다.
+Source of Truth: `engine/pyproject.toml`, `api/pyproject.toml`, `engine/config/default.yaml` · 독립 수집 의존성은 두 수집 스크립트의 PEP 723 메타데이터·잠금 파일(§4) 기준 · 이 문서는 사용자 승인을 받아서만 개정한다.
 
 ## 1. 명령
 - 설치: `uv sync --project engine`, `uv sync --project api`, `uv sync --project ingest`, 데이터 준비는 README "처음 한 번"의 SQL 덤프 추출(또는 §4 데이터 서버 동기화) 뒤 `uv run --project engine regime-lab prepare`
@@ -8,6 +8,8 @@ Source of Truth: `engine/pyproject.toml`, `api/pyproject.toml`, `engine/config/d
 - HTTP 뉴스 갱신: 데이터 서버 PC의 앱 실행 환경에만 `REGIME_NEWS_REFRESH=1` 설정 후 위 API 명령 실행(F1c·F1d). 접속값·운영 절차는 `docs/P3_DB_검색_자동갱신.md`. 팀원 PC에서는 켜지 않는다
 - 로그인: 기본은 loopback 전용 데모 모드. 같은 망 데모는 `REGIME_ALLOWED_NETS` 설정 후 비 loopback 바인딩 허용(X12, §4). 실제 인증은 `REGIME_AUTH_MODE=supabase`와 §4의 인증 환경변수를 설정한 뒤 같은 실행 명령 (README "로그인 모드", `docs/X3_로그인_설계.md`)
 - 외부 자료 수집: `uv run --project ingest regime-ingest run|backfill|status` (`--source opendart|naver_news`, RSS는 `--source rss --rss-config <yaml>`(예정, P3-8.1). 키는 환경변수 `DART_API_KEY`·`NAVER_CLIENT_ID`·`NAVER_CLIENT_SECRET`로만, `ingest/README.md`)
+- 금융위 독립 수집: 서버 PC의 Python 3.12·uv로 `uv run --script engine/scripts/daily_stock_collection/collect_fsc.py --server-pc <명령>` 실행. 명령 check·init-db·backfill·update·status·inspect, 접속 없는 예약 설정 조회는 schedule-info. 운영: `engine/scripts/daily_stock_collection/PYTHON.md`(X4c). n8n 사용 불필요.
+- DART·ECOS 독립 수집: 같은 환경에서 `uv run --script engine/scripts/fundamental_collection/collect_fundamentals.py --server-pc <명령>` 실행. 명령은 금융위와 같은 이름이며 인자는 별도 CLI 계약. 운영: `engine/scripts/fundamental_collection/README.md`(DART-ECOS-1). 실제 수신·DB 접근은 서버 PC에서만 실행.
 - 테스트: `uv run --project engine python -m pytest engine`, `uv run --project api python -m pytest api`, `uv run --project ingest python -m pytest ingest` (스크립트 실행기 방식 uv run pytest는 저장소 이동 후 실패한다)
 - 정적 검사: (미정). 웹 모듈 문법만 `node --check web/js/<파일>.js`로 확인한다
 
@@ -22,10 +24,10 @@ Source of Truth: `engine/pyproject.toml`, `api/pyproject.toml`, `engine/config/d
 | 도메인 | `engine/src/regime_lab/indicators.py`, `engine/src/regime_lab/regime.py`, `engine/src/regime_lab/universe.py`, `engine/src/regime_lab/patterns/`, `engine/src/regime_lab/backtest/`, `engine/src/regime_lab/analysis/`, `api/src/regime_api/llm/prompt.py`, `api/src/regime_api/llm/verify.py`, `api/src/regime_api/llm/template.py`, `ingest/src/regime_ingest/timing.py`, `ingest/src/regime_ingest/normalize.py`, `ingest/src/regime_ingest/dedup.py`, `ingest/src/regime_ingest/news.py`, `engine/src/regime_lab/rag/` | 지표·국면·유니버스·패턴·체결·집계·검증 계산, 보고서 근거 수치·숫자 대조·템플릿, 수집 시각·정규화·중복 판정, 뉴스 URL 식별·관측 버전·요청 계획·마감 시각 선택, 근거 검색 토큰화·순위·시점 선택·비슷한 제목 묶기·평가 지표 |
 | 도메인 | `engine/src/regime_lab/bars.py`, `engine/src/regime_lab/forecast/`, `engine/src/regime_lab/briefing/` (예정), `engine/src/regime_lab/influence/` (예정), `engine/src/regime_lab/fusion/` (예정) | KRX 원주가 일봉 생성·예측 모델·채점 (P2·D-2b, 제품 1d), 분봉 정규화·시간봉 집계는 코드·시험 유지, 브리핑 집계 창·문서 선택·묶기·집계 (P4-5), 영향력 가중치 학습·채점 (P3-12), 가격·자료 특징 결합 `doc_features` (P4-2) |
 | 포트 | `engine/src/regime_lab/context.py`, `api/src/regime_api/llm/provider.py`, `ingest/src/regime_ingest/ports.py`, `api/src/regime_api/auth/contracts.py` | 진행·취소 문맥, LLM 공급사 인터페이스, 수집 목록·저장소 경계, 인증 공급사·세션 저장소 인터페이스 |
-| 인프라 | `engine/src/regime_lab/data/`(HTTP 뉴스는 `engine/src/regime_lab/data/news_db.py`, 공개 경계 `engine/src/regime_lab/data/loader.py`), `engine/src/regime_lab/config.py`, `engine/scripts/`, `api/src/regime_api/settings.py`, `api/src/regime_api/llm/openai.py`, `api/src/regime_api/llm/gemini.py`, `api/src/regime_api/llm/anthropic.py`, `api/src/regime_api/llm/cache.py`, `web/js/api.js`, `web/js/state.js`, `engine/src/regime_lab/presets.py`, `ingest/src/regime_ingest/sources/`, `ingest/src/regime_ingest/store.py`, `ingest/src/regime_ingest/config.py`, `api/src/regime_api/auth/store.py`, `api/src/regime_api/auth/supabase.py` | Parquet·SQL 덤프 읽기(외부 자료 docs Parquet·근거 검색 색인 캐시 포함), 데이터 서버 API → store Parquet 동기화, 뉴스 스냅샷 HTTP 수신·검증·Parquet 저장, 설정·환경변수(X12 데모 LAN 허용 목록 파싱·검증 포함), LLM 공급사 호출(OpenAI만 구현), 보고서 캐시, fetch·브라우저 저장소, 찾은 조합 저장소, OpenDART·네이버 뉴스·RSS HTTP·수집 저장소, 인증 세션·소유자 기록(SQLite)·Supabase 인증 HTTP(api 런타임 의존성 `httpx`) |
-| 조립 | `api/src/regime_api/main.py`, `web/js/app.js`, `ingest/src/regime_ingest/app.py` | 앱 상태·라우터 연결·뉴스 백그라운드 갱신과 검증 완료 색인 교체·X12 데모 LAN HTTP 필터 연결, 웹 해시 라우터·공통 프레임, 수집기 시계·키·구현체 연결 |
+| 인프라 | `engine/src/regime_lab/data/`(HTTP 뉴스는 `engine/src/regime_lab/data/news_db.py`, 공개 경계 `engine/src/regime_lab/data/loader.py`), `engine/src/regime_lab/config.py`, `engine/scripts/`(독립 수집 `engine/scripts/daily_stock_collection/`·`engine/scripts/fundamental_collection/`), `api/src/regime_api/settings.py`, `api/src/regime_api/llm/openai.py`, `api/src/regime_api/llm/gemini.py`, `api/src/regime_api/llm/anthropic.py`, `api/src/regime_api/llm/cache.py`, `web/js/api.js`, `web/js/state.js`, `engine/src/regime_lab/presets.py`, `ingest/src/regime_ingest/sources/`, `ingest/src/regime_ingest/store.py`, `ingest/src/regime_ingest/config.py`, `api/src/regime_api/auth/store.py`, `api/src/regime_api/auth/supabase.py` | Parquet·SQL 덤프 읽기(외부 자료 docs Parquet·근거 검색 색인 캐시 포함), 데이터 서버 API → store Parquet 동기화, 뉴스 스냅샷 HTTP 수신·검증·Parquet 저장, 설정·환경변수(X12 데모 LAN 허용 목록 파싱·검증 포함), LLM 공급사 호출(OpenAI만 구현), 보고서 캐시, fetch·브라우저 저장소, 찾은 조합 저장소, OpenDART·네이버 뉴스·RSS HTTP·수집 저장소, 인증 세션·소유자 기록(SQLite)·Supabase 인증 HTTP(api 런타임 의존성 `httpx`), 금융위 3종·DART·ECOS HTTP 수집·MariaDB 원본/로그 저장·설정/예약 도구(독립 실행, 엔진·API·ingest import 없음) |
+| 조립 | `api/src/regime_api/main.py`, `web/js/app.js`, `ingest/src/regime_ingest/app.py`, `engine/scripts/daily_stock_collection/collect_fsc.py`·`engine/scripts/fundamental_collection/collect_fundamentals.py`의 `main()` | 앱 상태·라우터 연결·뉴스 백그라운드 갱신과 검증 완료 색인 교체·X12 데모 LAN HTTP 필터 연결, 웹 해시 라우터·공통 프레임, 수집기 시계·키·구현체 연결, 두 독립 수집기 main의 설정·DB·HTTP 구현체 조립 |
 | 공유 | `api/src/regime_api/errors.py`, `web/js/components/`, `web/js/i18n.js`, `web/js/charts.js`, `web/js/config.js` | 공통 오류 형식, UI 부품, 화면 문구, 차트 래퍼 |
-| 테스트 | `engine/tests/`, `api/tests/`, `ingest/tests/` | 합성 데이터 `engine/tests/synth.py`. 원본이 필요한 테스트는 `data` 마커(없으면 skip). 인증 계약·소유자 `api/tests/test_auth_contract.py`·`api/tests/test_auth_ownership.py`는 실제 계정·키 없이 돈다(CI 필수) |
+| 테스트 | `engine/tests/`, `api/tests/`, `ingest/tests/` | 합성 데이터 `engine/tests/synth.py`. 원본이 필요한 테스트는 `data` 마커(없으면 skip). 인증 계약·소유자 `api/tests/test_auth_contract.py`·`api/tests/test_auth_ownership.py`는 실제 계정·키 없이 돈다(CI 필수). 독립 수집 합성·대역 검사 `engine/tests/test_fsc_collector.py`·`engine/tests/test_fundamental_collector.py`, 실제 API·MariaDB 수용과 구분 |
 
 ## 3. 의존 규칙
 규칙은 §2의 역할 이름으로 적는다. 경로는 §2에만 둔다.
@@ -46,7 +48,9 @@ Source of Truth: `engine/pyproject.toml`, `api/pyproject.toml`, `engine/config/d
 | 인증 수치·설정 | `engine/config/default.yaml`의 `auth:` 절. 모드·비밀값은 환경변수 `REGIME_AUTH_MODE`·`REGIME_SUPABASE_URL`·`REGIME_SUPABASE_PUBLISHABLE_KEY`·`REGIME_AUTH_SITE_URL`·`REGIME_AUTH_STATE_DIR`·`REGIME_AUTH_ADMIN_IDS`로만 (파일에 쓰지 않음, 인증 상태 폴더는 저장소 밖) |
 | 데모 LAN 접속 설정 | 환경변수 `REGIME_AUTH_MODE=demo`·`REGIME_HOST`·`REGIME_ALLOWED_NETS`로만. 운영 허용 목록은 팀원별 IPv4 /32(CIDR 입력 지원과 구분), 실제 주소는 서버 PC의 실행 환경·방화벽에만 두고 저장소에 기록하지 않는다. 계약: `docs/X12_구현_요구사항_명세.md` |
 | 외부 자료 수집 설정·경로 | `ingest/config/default.yaml`, 뉴스·RSS 예시 `ingest/config/news.example.yaml`·`rss.example.yaml`(예정, 출처 기본 비활성), 로컬 경로는 예시 `ingest/config/paths.example.yaml`을 복사한 paths.local.yaml (Git 제외, 수집 결과 `ext_store`는 저장소 밖, 종목 연결용 엔진 `master.parquet` 경로 `master_parquet`(예정)는 파일로만 읽음) |
-| 출처 대장 | `docs/P3_출처_대장.md` (예정) — 출처별 이용 조건·보관·표시·LLM 전송 범위·활성 여부. 수집 활성화의 기준 |
+| 독립 Python 수집 설정·DDL·의존성 | `engine/config/default.yaml`의 `fsc_collection:`·`fundamental_collection:`. 금융위 `engine/scripts/daily_stock_collection/schema.sql`(원본3·로그1표)·DART/ECOS `engine/scripts/fundamental_collection/schema.sql`(원본7·로그1표), 설정/예약 도구 `engine/scripts/daily_stock_collection/configure.ps1`·`engine/scripts/daily_stock_collection/install_task.ps1`·`engine/scripts/fundamental_collection/configure.ps1`·`engine/scripts/fundamental_collection/install_task.ps1`. 의존성은 `engine/scripts/daily_stock_collection/collect_fsc.py`·`engine/scripts/daily_stock_collection/collect_fsc.py.lock`, `engine/scripts/fundamental_collection/collect_fundamentals.py`·`engine/scripts/fundamental_collection/collect_fundamentals.py.lock`의 PEP 723 메타데이터·잠금 기준, PyMySQL·PyYAML 전용 환경(엔진·API 런타임에 추가하지 않음). 수집 범위·저장 계약 `docs/X4_Python_수집_명세.md`·`docs/DART_ECOS_수집_명세.md` |
+| 독립 수집 접속·키·예약 | 금융위 공통 키 `REGIME_FSC_SERVICE_KEY`, 별도 `DART_API_KEY`·`ECOS_API_KEY`, 공유 DB `REGIME_FSC_DB_HOST`·`REGIME_FSC_DB_USER`·`REGIME_FSC_DB_PASSWORD`·`REGIME_FSC_DB_NAME`·`REGIME_FSC_DB_PORT`·선택 `REGIME_FSC_DB_SSL_CA`, 값은 환경변수만. 두 configure 도구는 현재 프로세스/Windows 사용자 환경에 등록하며 `-SessionOnly`는 예약 실행에 지속되지 않음. 예약은 같은 Windows 계정으로 각각 `regime-lab-fsc-daily`·`regime-lab-fundamentals-daily`, 기본 13:30 KST 및 14:00/14:30/15:00 재확인, 수치는 각 수집 설정 기준 |
+| 출처 대장 | `docs/P3_출처_대장.md` — 출처별 이용 조건·보관·표시·LLM 전송 범위·활성 여부. 수집 활성화의 기준. DART 기업개황·사건 상세·재무와 ECOS는 DART-ECOS-1의 승인 API 업무 데이터 서버 DB 보관 범위에서 활성. 뉴스·LLM 전송·제3자 재배포까지 확대하는 승인 아님 |
 | 브리핑 수치 | `engine/config/default.yaml`의 `briefing:` 절(예정, 기준 시각·집계 창·휴장일·필수 출처, 결정 D-5) |
 | 통합 모델 수치 | 결합·가격 단독 비교 판정은 `engine/config/default.yaml`의 `forecast.fusion_compare`, 자료 특징은 `fusion:` 절(예정, 특징 목록·창 길이) — 결정 P4-3a |
 | 예측 결과 형식 버전 | `engine/src/regime_lab/forecast_runs.py`의 `FORECAST_RUN_VERSION` (열·형식을 바꾸면 올리고 이전 형식 읽기를 유지한다) |
@@ -98,12 +102,12 @@ Source of Truth: `engine/pyproject.toml`, `api/pyproject.toml`, `engine/config/d
 - "나중을 위한" 인터페이스·기반 클래스·범용 헬퍼를 만들지 않는다.
 - 이벤트 버스·CQRS·DI 프레임워크를 도입하지 않는다.
 - 벡터 DB·임베딩 모델 의존성을 engine·api에 넣지 않는다. 비교 실험은 저장소 밖에서 한다.
-- t일 계산에 t+1일 이후 값을 쓰지 않는다. 국면·그룹은 신호일 값을 쓴다. 예측·영향력·통합 모델과 외부 자료 결합은 as_of 시점에 이용 가능했던 입력만 쓰고(게시 시각이 아님), 학습·검증·평가를 시간 순서로 나눈다. 근거 검색은 순위 통계(IDF·평균 길이)도 as_of에 보이는 문서로만 계산한다.
+- t일 계산에 t+1일 이후 값을 쓰지 않는다. 국면·그룹은 신호일 값을 쓴다. 예측·영향력·통합 모델과 외부 자료 결합은 as_of 시점에 이용 가능했던 입력만 쓰고(게시 시각이 아님), 학습·검증·평가를 시간 순서로 나눈다. 근거 검색은 순위 통계(IDF·평균 길이)도 as_of에 보이는 문서로만 계산한다. 독립 수집의 available_at은 실제 관측 시각이며 과거 접수일·기준일로 소급하지 않는다. 과거 조회가 반환한 최신 정정값을 당시 최초 발표본으로 간주하지 않고 당시 이용 가능 여부 미확인은 품질에 표시한다.
 - 수치 파라미터를 코드 상수로 넣지 않는다. 조합별 패턴 수치는 허용 범위를 검증한 뒤 실행 메타데이터에 기록하고, 기본값은 `engine/config/default.yaml`에 둔다.
 - 역방향 백테스트는 평가 구간을 후보 선택·재탐색에 쓰지 않고, 결과에 시도 후보 수·두 구간 성과·3중 검증을 함께 둔다. 승률만으로 '추천' 순위를 만들지 않는다.
 - SRS v2.0 §1.4 R1(체결 규칙·승률 정의·3중 검증 기준·실행 결과 형식)의 의미는 R2를 구현하면서 바꾸지 않는다.
-- 원본 데이터 (`data`, `multi_tables_db/`)를 수정·이동·커밋하지 않는다. `regime.duckdb`는 열지 않고 Parquet만 읽는다. 1분봉 원본·외부 자료 원문과 그것을 담은 평가셋·실험 데이터도 커밋하지 않는다 (공개 저장소). 원본·뉴스 사본의 수신·보관은 데이터 서버 PC만, 팀원 PC 자동 다운로드 제외(F1c·F1d). 팀원은 서버 웹·합성 데이터로 확인하며 기존 로컬 데모 사본 사용과 새 배포를 구분한다.
-- 외부 자료는 출처 대장에서 활성인 출처만 수집하고, 원문은 권한 범위 안에서만 보관·표시·색인한다(지금 제품 근거 검색은 제목·회사명만). 수집 실패를 빈 정상 데이터로 남기지 않는다.
+- 원본 데이터 (`data`, `multi_tables_db/`)를 수정·이동·커밋하지 않는다. `regime.duckdb`는 열지 않고 Parquet만 읽는다. 1분봉 원본·외부 자료 원문과 그것을 담은 평가셋·실험 데이터도 커밋하지 않는다 (공개 저장소). 원본·뉴스 사본의 수신·보관은 데이터 서버 PC만, 팀원 PC 자동 다운로드 제외(F1c·F1d). 팀원은 서버 웹·합성 데이터로 확인하며 기존 로컬 데모 사본 사용과 새 배포를 구분한다. 금융위·DART·ECOS 독립 수집은 원본 DB 축적 담당이며 분석 입력 전환·Parquet 연결·가중치 학습·제품 반영은 별도 승인 범위다.
+- 외부 자료는 출처 대장에서 활성인 출처만 수집하고, 원문은 권한 범위 안에서만 보관·표시·색인한다(지금 제품 근거 검색은 제목·회사명만). 수집 실패를 빈 정상 데이터로 남기지 않는다. 독립 수집은 원본 0·결측·비정상 OHLC를 보존하고 품질 표시하며 0값을 거래정지·상장폐지·0원 청산으로 단정하지 않는다. 동일 최신값의 중복 적재 없이 변경은 새 revision으로 보존하고 A→B→A도 새 버전으로 기록한다. 실패·정상 빈 응답·부분 수집을 구분한다.
 - `kor_price`는 워밍업 보정에만, `kor_indicators`는 테스트 참조값에만 쓴다.
 - 분석 계산을 API·웹에 두지 않는다. 계산은 엔진에만 두고 웹은 API JSON만 표시한다.
 - 목표가·투자 비중·종목 추천·매매 신호 문구를 만들지 않는다. 결과 응답에는 비권유 고지를 넣는다. 예측은 회색 구간과 방향으로만 표시하고 예상 OHLC 캔들은 그리지 않으며, 고정 문구 '과거 데이터로 계산한 통계적 예상 범위이며 실제 가격 전망이나 매매 신호가 아닙니다.'를 함께 표시한다(E17).
@@ -125,7 +129,7 @@ Source of Truth: `engine/pyproject.toml`, `api/pyproject.toml`, `engine/config/d
 - 함정: WBS CSV(`docs/plan/regime-lab-wbs-20261001.csv`) 실적은 대상 행만 바꾸고 나머지 줄은 원문을 유지한다(BOM·CRLF 포함). csv 라이브러리로 통째로 다시 쓰면 따옴표가 바뀌어 상관없는 줄까지 diff가 생긴다.
 
 ## 8. 완료 조건
-- §1의 명령이 모두 통과한다.
+- §1의 명령이 모두 통과한다. 독립 수집기 운영 완료는 실제 API 접근·신규 표 쓰기·동일 요청 재실행의 중복 방지·MariaDB 잠금/원자성·무인 예약 로그를 서버 PC에서 확인한 뒤 판정한다. 합성/SQLite 저장 검사·MariaDB 계약 대역·예약 XML 검사는 실서버 수용과 구분한다.
 - 웹 모듈을 바꿨으면 develop 최신과 합친 상태에서 앱을 열어 콘솔 오류가 0인지 확인한다(§1의 웹 문법 검사는 정의되지 않은 이름을 못 잡는다).
 - 새 도메인 규칙에는 I/O 없는 단위 테스트가 있다. 새 지표·패턴·국면·체결 로직, 예측·영향력·통합 모델, 외부 자료 결합·근거 검색은 절단 불변 검사를 받는다(지표·패턴·국면·체결은 `engine/tests/test_lookahead.py`).
 - 데모 LAN 접속을 바꿨으면 실제 서버·팀원 PC에서 허용/비허용 기기 접속·원격 LLM 설정 변경 거부·두 PC 실행/탐색의 X13 대기→완료를 확인한 뒤 X12 전체 완료로 판정한다(명세 AC12).
@@ -139,7 +143,7 @@ Source of Truth: `engine/pyproject.toml`, `api/pyproject.toml`, `engine/config/d
 - 새 외부 의존성(라이브러리, 서비스)을 추가할 때. 웹은 빌드 없는 정적 ES 모듈이므로(구현_계획 §7.2) 번들러·프레임워크 도입도 여기에 해당한다
 - 저장 형식(실행 결과 폴더·result.json 구조)·API·CLI 인자 같은 공개 계약을 바꿀 때
 - `engine/config/default.yaml`의 확정 값(V1·V2·A2-2·U3-1, 2026-10-01 확정)을 바꿀 때
-- 보류된 결정(E7 Should 기능, E8 Unity 전환, T-9 키 입력 방식)과 미결정 D-4·D-7(출처·권한, LLM 입력 확대)에 닿는 구현이 필요할 때 — 결정 전 구현하지 않는다
+- 보류된 결정(E7 Should 기능, E8 Unity 전환, T-9 키 입력 방식)과 D-4·D-7의 미확정 범위(출처·권한, LLM 입력 확대)에 닿는 구현이 필요할 때 — 결정 전 구현하지 않는다. X4c·DART-ECOS-1로 승인된 수집·서버 DB 보관은 해당 계약 범위에서 진행하되 새 출처·추가 보관·LLM 전송 확대는 별도 확인한다
 - AI 보고서 확인에 API 키가 필요할 때 — 사용자가 ⚙ 설정에 직접 입력한다(Supabase 모드에서는 `REGIME_AUTH_ADMIN_IDS`에 등록된 관리자만 가능). 서버를 재시작하면 화면 입력 키가 지워지므로 재시작 뒤에는 다시 요청한다
 - 사용자가 실행 중인 서버를 끄거나 재시작해야 할 때
 - §6 예외를 추가할 때
