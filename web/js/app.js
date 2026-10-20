@@ -1,7 +1,7 @@
 // 공통 프레임과 해시 라우터 (FR-X1). 화면 데이터는 모두 API JSON 에서만 읽는다 (FR-X2).
 // 틀 (design.md §5, UI 개혁 B안 2026-10-13): 상단바(칸 = 아래 열 경계) · 고정 메뉴(E18 4묶음) · 본문 · 비권유 고지 줄.
 import { api } from './api.js';
-import { disposeAll } from './charts.js';
+import { disposeAll, refreshTheme } from './charts.js';
 import { h } from './components/ui.js';
 import { applyWidths, setLayoutKind, setRouteGuard, takeRoute } from './components/workspace.js';
 import { BRAND } from './config.js';
@@ -12,6 +12,7 @@ import { renderArchive, renderArchivePage } from './views/archive.js';
 import { renderEvidence } from './views/evidence.js';
 import { renderForecast } from './views/forecast.js';
 import { renderInfluence } from './views/influence.js';
+import { renderHome } from './views/home.js';
 import { renderLogin } from './views/login.js';
 import { renderPassword } from './views/password.js';
 import { renderRunWorkspace } from './views/results.js';
@@ -24,6 +25,7 @@ import { renderSettings } from './views/settings.js';
 // soon: 화면 자리만 있고 내용이 아직 없는 메뉴 ("준비 중" 표시). 화면을 붙일 때 지운다.
 const NAV_GROUPS = ['test', 'results', 'docs', 'market'];
 const NAV = [
+  { id: 'home', icon: '⌂', label: 'nav.home', href: () => '#/home' },
   { id: 'builder', group: 'test', icon: '⌘', label: 'nav.builder', href: () => '#/builder' },
   { id: 'search', group: 'test', icon: '⟲', label: 'nav.search', href: () => '#/search' },
   { id: 'presets', group: 'test', icon: '☆', label: 'nav.presets', href: () => '#/presets' },
@@ -40,6 +42,7 @@ const NAV_BY_ID = Object.fromEntries(NAV.map((n) => [n.id, n]));
 
 // kind: ws(조건·결과·근거 3열 — 전략 만들기·실행 결과, 조건 열은 늘 보임, E21) · two(2열) · alignr(2열, 오른쪽 = col3) · page(1열) · bare(틀 없음)
 const ROUTES = [
+  [/^#\/home$/, () => ({ nav: 'home', kind: 'page', view: renderHome })],
   [/^#\/password$/, () => ({ kind: 'bare', view: renderPassword })],
   [/^#\/login$/, () => ({ kind: 'bare', view: renderLogin })],
   [/^#\/builder$/, () => ({ nav: 'builder', kind: 'ws', view: (el, q) => renderRunWorkspace(el, { mode: 'ws', query: q }) })],
@@ -68,7 +71,9 @@ const theme = () => document.documentElement.dataset.theme || 'dark';
 function setTheme(v, save) {
   document.documentElement.dataset.theme = v;
   if (save) state.theme = v;
-  route(); // 차트 색은 그릴 때 토큰에서 읽으므로 화면을 다시 그린다
+  const button = document.getElementById('theme-switch');
+  if (button) button.setAttribute('aria-checked', String(v === 'dark'));
+  refreshTheme(); // 폼·필터·작업면은 유지하고 차트 색만 갱신
 }
 try {
   matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => { if (!state.theme) setTheme(e.matches ? 'light' : 'dark', false); });
@@ -107,12 +112,11 @@ function navGroups(navId) {
 
 function statusCell() {
   const light = theme() === 'light';
-  const toLabel = t(light ? 'theme.toDark' : 'theme.toLight');
-  const asOf = state.meta?.data_as_of;
   return h('div', { class: 'cell' },
-    h('button', { class: 'ibtn', type: 'button', 'aria-label': toLabel, title: toLabel, onclick: () => setTheme(light ? 'dark' : 'light', true) },
-      h('span', { 'aria-hidden': 'true' }, light ? '☾' : '☀︎')),
-    h('span', { class: 'chip hide-narrow', title: t('header.asOfTitle') }, h('span', { class: 'hide-mid' }, t('header.data')), h('b', {}, asOf || '…')),
+    h('span', { class: 'theme-switch-wrap' }, h('span', { 'aria-hidden': 'true' }, '☀'),
+      h('button', { id: 'theme-switch', class: 'theme-switch', type: 'button', role: 'switch', 'aria-checked': String(!light),
+        'aria-label': t('theme.dark'), title: t('theme.dark'), onclick: () => setTheme(theme() === 'light' ? 'dark' : 'light', true) }),
+      h('span', { 'aria-hidden': 'true' }, '☾')),
     state.meta?.scope === 'sample30' ? h('span', { class: 'chip warn hide-narrow', title: 'REGIME_SAMPLE=1' }, t('header.sample')) : null,
     state.guest ? h('span', { class: 'chip warn hide-narrow' }, t('header.guest')) : null,
     h('a', { class: 'ibtn', href: '#/settings', 'aria-label': t('nav.settings'), title: t('nav.settings') }, h('span', { 'aria-hidden': 'true' }, '⚙')));
@@ -124,7 +128,7 @@ function headerBar(navId, kind) {
       onclick: (e) => toggleDrawer('nav-open', e.currentTarget, '#nav-panel a.nav') }, h('span', { 'aria-hidden': 'true' }, '☰')),
     h('div', { class: 'brand' }, h('span', { class: 'brand-mark', 'aria-hidden': 'true' }), BRAND));
   const n = NAV_BY_ID[navId];
-  const pageTitle = h('div', { class: 'page-title' }, h('b', {}, t(n ? n.label : 'nav.settings')), n && h('span', {}, t(`nav.g.${n.group}`)));
+  const pageTitle = h('div', { class: 'page-title' }, h('b', {}, t(n ? n.label : 'nav.settings')), n && h('span', {}, n.group ? t(`nav.g.${n.group}`) : t('home.workspace')));
   // 작업면: 가운데 칸(#bar-ctx)은 실행 맥락을 작업면이 채운다
   const ctx = h('div', { class: 'cell ctx' });
   if (kind === 'ws') {
@@ -152,7 +156,7 @@ function shell(navId, kind) {
     } }, state.guest ? t('header.signIn') : t('header.signOut')));
   root.append(h('div', { class: `app k-${kind}` },
     headerBar(navId, kind),
-    h('aside', { class: 'nav-panel', id: 'nav-panel', 'aria-label': t('nav.main') }, navGroups(navId), h('div', { class: 'nav-bottom' }, account)),
+    h('aside', { class: 'nav-panel', id: 'nav-panel', 'aria-label': t('nav.main') }, h('div', { class: 'home-nav-home' }, navLink(NAV_BY_ID.home, navId)), navGroups(navId), h('div', { class: 'nav-bottom' }, account)),
     main),
   h('div', { class: 'scrim', onclick: closeDrawers }));
   setLayoutKind(kind);
@@ -166,12 +170,12 @@ async function route(fromHistory = false) {
   if (cleanup) { try { cleanup(); } catch { /* ignore */ } cleanup = null; }
   disposeAll();
   document.body.classList.remove('nav-open', 'drawer-open');
-  const [path, qs] = (location.hash || '#/builder').split('?');
+  const [path, qs] = (location.hash || '#/home').split('?');
   const query = new URLSearchParams(qs || '');
   if (!state.signedIn && !['#/login', '#/password'].includes(path)) { location.replace('#/login'); return; }
   let match = null;
   for (const [re, make] of ROUTES) { const m = path.match(re); if (m) { match = make(m); break; } }
-  if (!match) { location.replace('#/builder'); return; }
+  if (!match) { location.replace('#/home'); return; }
   // 실행 없이 결과 메뉴로 들어오면 최근 실행으로 보낸다
   const bare = path.match(/^#\/(results|stock|report)$/);
   if (bare && state.lastRun) { location.replace(`#/runs/${state.lastRun}/${bare[1]}`); return; }

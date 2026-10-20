@@ -78,7 +78,7 @@ def oauth_callback(request: Request, code: str = "", error: str = ""):
     except ApiError:
         response = RedirectResponse(auth.site_url + "/#/login?auth_error=auth_oauth_failed", status_code=303)
     else:
-        response = RedirectResponse(auth.site_url + "/#/builder", status_code=303)
+        response = RedirectResponse(auth.site_url + "/#/home", status_code=303)
         cookie(response, auth, SESSION_COOKIE, sid, auth.policy["session_ttl_seconds"])
     response.delete_cookie(OAUTH_COOKIE, path="/", httponly=True, secure=auth.site_url.startswith("https://"), samesite="lax")
     response.headers["Cache-Control"] = "no-store"

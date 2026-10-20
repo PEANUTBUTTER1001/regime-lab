@@ -37,7 +37,7 @@ export function renderLogin(el, query = new URLSearchParams()) {
         const result = await api.guest(); state.setUser(result.user);
       } else { state.clearAuth(); state.guest = true; state.signedIn = true; }
       try { state.meta = await api.meta(); } catch { state.meta = null; }
-      location.hash = '#/builder';
+      location.hash = '#/home';
     } catch (error) {
       show(t(error.code === 'auth_rate_limited' ? 'login.limited' : 'login.unavailable'));
       setBusy(false);

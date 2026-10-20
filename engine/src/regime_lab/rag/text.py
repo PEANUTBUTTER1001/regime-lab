@@ -80,3 +80,23 @@ def matches_conditions(texts: Iterable[str | None], conditions: list[re.Pattern[
 def doc_text(doc: dict, fields: list[str]) -> str:
     """색인할 필드만 이어 붙인다. 없는 필드·None 은 빈 글자."""
     return " ".join(str(doc.get(f) or "") for f in fields)
+
+
+def name_mention_pattern(name: str, particles: list[str]) -> re.Pattern[str] | None:
+    """현재 이름 전체의 텍스트 언급. 별칭/관계 추론 없이 회사명 경계와 조사만 허용.
+
+    삼성전자서비스/삼성전자우는 삼성전자의 언급으로 판정하지 않는다.
+    기존 질의 조건/토큰화는 변경하지 않는다.
+    """
+    name = _normalize(name).strip()
+    if not name:
+        return None
+    body = r"\s*".join(_body(word) for word in name.split())
+    # 고정 한국어 문법 어미: 검색 수치나 별칭 목록이 아니다.
+    endings = _particles(name, particles) + ["의", "도", "만", "에서", "에게", "으로", "로", "까지", "부터"]
+    suffix = "|".join(re.escape(x) for x in sorted(set(endings), key=len, reverse=True))
+    return re.compile(rf"(?<![{_WORD_CHARS}]){body}(?:{suffix})?(?![{_WORD_CHARS}])")
+
+
+def name_mentioned(text: str | None, pattern: re.Pattern[str]) -> bool:
+    return bool(pattern.search(_normalize(text)))
