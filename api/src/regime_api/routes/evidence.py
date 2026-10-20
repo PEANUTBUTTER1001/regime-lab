@@ -24,11 +24,12 @@ router = APIRouter(tags=["evidence"])
 
 @router.get("/evidence/search")
 def search(request: Request, q: str = "", as_of: str = "", mode: str = "observed", tickers: str = "",
-           k: int | None = None):
+           k: int | None = None, include_name_mentions: bool = False):
     state = request.app.state.rl
     ei = state.require_rag()
     try:
-        res = retrieval.search(ei, state.cfg, q, as_of, mode, tickers.split(",") if tickers else None, k)
+        res = retrieval.search(ei, state.cfg, q, as_of, mode, tickers.split(",") if tickers else None, k,
+                               **({"ticker_names": state.require_prep().names} if include_name_mentions and tickers else {}))
     except retrieval.RetrievalError as e:
         raise ApiError(422, e.code, e.message, e.detail) from None
     return {**res, "disclaimer": DISCLAIMER}
@@ -45,12 +46,13 @@ def _raise(e: retrieval.RetrievalError):
 
 @router.get("/evidence/documents")
 def documents(request: Request, as_of: str = "", mode: str = "observed", source_type: str = "", start: str = "",
-              end: str = "", tickers: str = "", status: str = "all", page: int = 1, page_size: int | None = None):
+              end: str = "", tickers: str = "", status: str = "all", page: int = 1, page_size: int | None = None, include_name_mentions: bool = False):
     state = request.app.state.rl
     ei = state.require_rag()
     try:
         res = retrieval.browse(ei, state.cfg, as_of, mode, source_type or None, start or None, end or None,
-                               tickers.split(",") if tickers else None, status, page, page_size)
+                               tickers.split(",") if tickers else None, status, page, page_size,
+                               **({"ticker_names": state.require_prep().names} if include_name_mentions and tickers else {}))
     except retrieval.RetrievalError as e:
         _raise(e)
     return {**res, "disclaimer": DISCLAIMER}

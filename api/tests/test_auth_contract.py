@@ -240,7 +240,7 @@ def test_oauth_cookie_exchange_refresh_logout(auth_app, provider):
         assert 'HttpOnly' in start.headers['set-cookie'] and 'SameSite=lax' in start.headers['set-cookie']
         assert set(start.json()) == {'url'}
         res = c.get('/api/auth/oauth/callback?code=fake-code&redirect_to=https://evil.test', follow_redirects=False)
-        assert res.status_code == 303 and res.headers['location'] == 'http://testserver/#/builder'
+        assert res.status_code == 303 and res.headers['location'] == 'http://testserver/#/home'
         assert c.cookies.get('rl_oauth') is None
         assert res.headers['referrer-policy'] == 'no-referrer'
         assert c.get('/api/auth/me').json()['user'] == {'id':A, 'email':None, 'email_confirmed':False}
@@ -302,7 +302,7 @@ def test_oauth_bound_verifier_and_replacement(auth_app, monkeypatch):
         assert 'auth_oauth_failed' in bad.headers['location']
         assert c.cookies.get('rl_session') is None
         good = other.get('/api/auth/oauth/callback?code=fake-code', follow_redirects=False)
-        assert good.headers['location'].endswith('/#/builder')
+        assert good.headers['location'].endswith('/#/home')
 
 
 def test_oauth_start_requires_csrf_and_enabled_allowlisted_provider(auth_app, monkeypatch):

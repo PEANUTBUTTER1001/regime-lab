@@ -1,6 +1,7 @@
 // 근거 검색 (P3-11, SRS FR-N5). 그 시점(as_of)에 이용 가능했던 공시·뉴스 중 질의와 맞는 근거를 보여 준다.
 // 순위·시점 판정은 모두 엔진(/api/evidence/search)이 하고, 화면은 입력을 넘기고 응답을 표시만 한다 (FR-X6).
 // 검색 조건은 주소(#/evidence?q=…)에 남겨 새로고침·뒤로 가기에도 같은 결과를 다시 연다.
+import { securityPicker, tickerMatchBadge } from '../components/security-picker.js';
 import { api } from '../api.js';
 import { errorView, fmt, h, helpTip, loading, pill, stateView, table } from '../components/ui.js';
 import { paneFrame, paneHead } from '../components/workspace.js';
@@ -50,7 +51,8 @@ export async function renderEvidence(root, query) {
 
   const qIn = input('ev-q', 'q', { placeholder: t('ev.qPh'), maxlength: '200', autocomplete: 'off' });
   const asOfIn = input('ev-asof', 'asOf', { type: 'datetime-local', step: '60' });
-  const tickIn = input('ev-tickers', 'tickers', { placeholder: t('ev.tickersPh'), inputmode: 'text', autocomplete: 'off' });
+  const picker = securityPicker({ id: 'ev-tickers', value: f.tickers, describedBy: 'everr-tickers', onChange: value => { f.tickers = value; } });
+  const tickIn = picker.input;
   const modeSel = h('select', { id: 'ev-mode', 'aria-describedby': 'everr-mode', onchange: (e) => { f.mode = e.target.value; } },
     MODES.map((m) => h('option', { value: m, selected: m === f.mode }, t(`ev.mode.${m}`))));
   const kSel = h('select', { id: 'ev-k', 'aria-describedby': 'everr-k', onchange: (e) => { f.k = Number(e.target.value); } },
@@ -76,15 +78,16 @@ export async function renderEvidence(root, query) {
       h('div', {}, h('label', { for: 'ev-asof' }, t('ev.asOf')), asOfIn, h('p', { class: 'hint', text: t('ev.asOfHint') }), errorSlot('as_of')),
       h('div', {}, h('div', { class: 'label-row' }, h('label', { for: 'ev-mode' }, t('ev.mode')), helpTip(t('ev.modeHint'), t('ev.mode'))), modeSel, errorSlot('mode'))),
     h('div', { class: 'field-two' },
-      h('div', {}, h('label', { for: 'ev-tickers' }, t('ev.tickers')), tickIn, h('p', { class: 'hint', text: t('ev.tickersHint') }), errorSlot('tickers')),
+      h('div', {}, h('label', { for: 'ev-tickers' }, t('ev.tickers')), picker.root, h('p', { class: 'hint', text: t('ev.tickersHint') }), errorSlot('tickers')),
       h('div', {}, h('label', { for: 'ev-k' }, t('ev.k')), kSel, errorSlot('k'))),
     h('div', { class: 'actions', style: { justifyContent: 'flex-start' } }, runBtn));
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
+    if (!picker.commit()) return;
     if (!f.q.trim()) { showErrors({ q: t('ev.v.q') }); return; }
     const p = new URLSearchParams({ q: f.q.trim(), as_of: toIso(f.asOf), mode: f.mode, k: String(f.k) });
-    if (f.tickers.trim()) p.set('tickers', f.tickers.replace(/\s/g, ''));
+    if (f.tickers.trim()) { p.set('tickers', f.tickers.replace(/\s/g, '')); p.set('include_name_mentions', 'true'); }
     const next = `#/evidence?${p}`;
     if (location.hash === next) { root.replaceChildren(); renderEvidence(root, p); } else location.hash = next;
   });
@@ -103,7 +106,7 @@ export async function renderEvidence(root, query) {
   resultBox.append(loading(t('ev.searching')));
   let res;
   try {
-    res = await api.evidence(Object.fromEntries(query));
+    res = await api.evidence({ ...Object.fromEntries(query), ...(query.get('tickers') ? { include_name_mentions: true } : {}) });
   } catch (err) {
     resultBox.replaceChildren();
     if (err.code === 'validation_failed') { showErrors(err.detail?.fields || {}); return; }
@@ -117,6 +120,9 @@ export async function renderEvidence(root, query) {
   }
   resultBox.replaceChildren();
   const ix = res.index;
+  if (query.get('tickers') && ix.ticker_filter !== 'code_or_name_mention') {
+    resultBox.append(stateView({ kind: 'error', title: t('security.serverOldTitle'), message: t('security.serverOld') })); return;
+  }
   const summary = h('p', { class: 'muted', style: { margin: '18px 0 10px' } },
     t('ev.summary', { v: fmt.int(ix.visible_docs), n: fmt.int(ix.total_docs), a: when(ix.as_of), m: t(`ev.mode.${ix.mode}`) }),
     ix.grouping != null ? ` · ${t('ev.grouped')}` : '');
@@ -126,18 +132,14 @@ export async function renderEvidence(root, query) {
   }
   // 제목이 비슷한 기사는 대표 아래에 접어 둔다 (엔진이 그 시점 후보만으로 묶음, 같은 사건이라는 판정은 아님)
   const link = (r) => h('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer' }, r.title);
-  const titleCell = (r) => h('div', {}, link(r), r.similar_count ? h('details', { class: 'ev-similar' },
+  const titleCell = (r) => h('div', {}, link(r), tickerMatchBadge(r.ticker_match), r.similar_count ? h('details', { class: 'ev-similar' },
     h('summary', {}, t('ev.similar', { n: r.similar_count })),
     h('ul', {}, r.similar.map((s) => h('li', {}, link(s),
-      h('small', { class: 'muted' }, ` · ${srcLabel(s.source)} · ${t('ev.col.available')} ${when(s.available_at)}`))))) : null);
+      tickerMatchBadge(s.ticker_match), h('small', { class: 'muted' }, ` · ${srcLabel(s.source)} · ${when(s.published_at)}`))))) : null);
   const columns = [
-    { label: t('ev.col.rank'), num: true, render: (r) => String(res.items.indexOf(r) + 1) },
-    { label: t('ev.col.title'), render: titleCell },
+    { label: t('ar.col.title'), render: titleCell },
     { label: t('ev.col.source'), render: (r) => h('span', {}, srcLabel(r.source), r.corp_name ? h('small', { class: 'muted', style: { display: 'block' } }, r.corp_name) : null) },
-    { label: t('ev.col.published'), render: (r) => h('span', {}, when(r.published_at), r.time_precision === 'date_only' ? h('span', {}, ' ', pill(t('ev.dateOnly'), 'neutral')) : null) },
-    { label: t('ev.col.available'), render: (r) => when(r.available_at) },
-    { label: t('ev.col.score'), num: true, render: (r) => fmt.num(r.score, 2) },
-    { label: t('ev.col.matched'), render: (r) => h('small', { class: 'muted' }, r.matched_tokens.join(' · ')) },
+    { label: t('ev.col.publishedDate'), render: (r) => h('span', {}, when(r.published_at), r.time_precision === 'date_only' ? h('span', {}, ' ', pill(t('ev.dateOnly'), 'neutral')) : null) },
   ];
   // 비권유 고지는 모든 화면 하단의 고정 고지(화면 언어)로 표시한다
   resultBox.append(summary,

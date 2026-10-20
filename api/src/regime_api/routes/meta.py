@@ -37,6 +37,13 @@ def health(request: Request):
     return {"status": s.status, "error": s.load_error}
 
 
+@router.get("/securities")
+def securities(request: Request):
+    """Display-only current name/code catalog; existing analysis readiness/errors apply."""
+    names = request.app.state.rl.require_prep().names
+    return {"items": [{"ticker": ticker, "name": name} for ticker, name in sorted(names.items())]}
+
+
 @router.get("/meta")
 def meta(request: Request):
     s = request.app.state.rl

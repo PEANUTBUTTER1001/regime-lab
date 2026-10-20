@@ -2,6 +2,7 @@
 // 거른 목록과, 한 자료의 버전 이력·정정 후보·표시 범위를 보여 준다. 시점 판정·필터·개수는 모두 엔진
 // (/api/evidence/documents)이 하고, 화면은 조건을 넘기고 응답을 표시만 한다 (FR-X6).
 // 조건은 주소(#/archive?…, #/archive/doc?id=…)에 남겨 새로고침·뒤로 가기에도 같은 화면을 다시 연다.
+import { securityPicker, tickerMatchBadge } from '../components/security-picker.js';
 import { api } from '../api.js';
 import { errorView, fmt, h, helpTip, loading, pill, stateView, table } from '../components/ui.js';
 import { paneFrame, paneHead } from '../components/workspace.js';
@@ -103,13 +104,14 @@ async function renderArchiveList(el, query, openDoc) {
   const sel = (id, key, err, values, label) => h('select', { id, 'aria-describedby': `arerr-${err}`, onchange: (e) => { f[key] = e.target.value; } },
     values.map((v) => h('option', { value: v, selected: v === f[key] }, label(v))));
 
+  const picker = securityPicker({ id: 'ar-tickers', value: f.tickers, describedBy: 'arerr-tickers', onChange: value => { f.tickers = value; } });
   const inputs = {
     as_of: inp('ar-asof', 'asOf', 'as_of', { type: 'datetime-local', step: '60' }),
     mode: sel('ar-mode', 'mode', 'mode', MODES, (m) => t(`ev.mode.${m}`)),
     source_type: sel('ar-type', 'sourceType', 'source_type', TYPES, (v) => t(`ar.type.${v || 'all'}`)),
     start: inp('ar-start', 'start', 'start', { type: 'date' }),
     end: inp('ar-end', 'end', 'end', { type: 'date' }),
-    tickers: inp('ar-tickers', 'tickers', 'tickers', { placeholder: t('ev.tickersPh'), autocomplete: 'off' }),
+    tickers: picker.input,
     status: sel('ar-status', 'status', 'status', STATUSES, (s) => t(`ar.status.${s}`)),
   };
   const showErrors = (fields = {}) => {
@@ -123,10 +125,11 @@ async function renderArchiveList(el, query, openDoc) {
     if (first) inputs[first].focus();
   };
   const go = (overrides = {}) => {
+    if (!picker.commit()) return;
     const p = new URLSearchParams({ as_of: toIso(f.asOf), mode: f.mode });
     const add = (k, v) => { if (v) p.set(k, v); };
     add('source_type', f.sourceType); add('start', f.start); add('end', f.end);
-    add('tickers', f.tickers.replace(/\s/g, '')); if (f.status !== 'all') p.set('status', f.status);
+    add('tickers', f.tickers.replace(/\s/g, '')); if (f.tickers.trim()) p.set('include_name_mentions', 'true'); if (f.status !== 'all') p.set('status', f.status);
     for (const [k, v] of Object.entries(overrides)) { if (v == null) p.delete(k); else p.set(k, String(v)); }
     const next = `#/archive?${p}`;
     if (location.hash === next) { el.replaceChildren(); renderArchiveList(el, p, openDoc); } else location.hash = next;
@@ -134,7 +137,7 @@ async function renderArchiveList(el, query, openDoc) {
   // tip: 늘 보이는 안내 대신 ? 도움말로 보여 줄 문구 (E18)
   const field = (id, key, label, hint, tip) => h('div', {},
     tip ? h('div', { class: 'label-row' }, h('label', { for: id }, label), helpTip(tip, label)) : h('label', { for: id }, label),
-    inputs[key], hint ? h('p', { class: 'hint', text: hint }) : null, errorSlot(key));
+    key === 'tickers' ? picker.root : inputs[key], hint ? h('p', { class: 'hint', text: hint }) : null, errorSlot(key));
   const form = h('form', { class: 'card', novalidate: true },
     h('h2', {}, t('ar.formTitle')), h('p', { class: 'card-sub', text: t('ar.formSub') }),
     h('div', { class: 'field-two' }, field('ar-asof', 'as_of', t('ev.asOf'), t('ev.asOfHint')), field('ar-mode', 'mode', t('ev.mode'), null, t('ev.modeHint'))),
@@ -154,6 +157,7 @@ async function renderArchiveList(el, query, openDoc) {
 
   box.append(loading(t('ar.loading')));
   const params = Object.fromEntries(query);
+  if (params.tickers) params.include_name_mentions = true;
   if (!params.as_of) params.as_of = toIso(f.asOf);
   let res;
   try {
@@ -167,6 +171,9 @@ async function renderArchiveList(el, query, openDoc) {
   }
   box.replaceChildren();
   const ix = res.index;
+  if (query.get('tickers') && ix.ticker_filter !== 'code_or_name_mention') {
+    box.append(stateView({ kind: 'error', title: t('security.serverOldTitle'), message: t('security.serverOld') })); return;
+  }
   // 상태 개수 (유형·상태 필터 전, 시점·기간·종목만 적용) — 누르면 그 상태로 거른다
   const chips = h('div', { class: 'ar-chips', role: 'group', 'aria-label': t('ar.status') },
     STATUSES.map((s) => {
@@ -187,6 +194,7 @@ async function renderArchiveList(el, query, openDoc) {
       onclick: (e) => { e.preventDefault(); e.stopPropagation(); openDoc(r.doc_id, ix.as_of, ix.mode); } }, r.title),
       r.url ? h('a', { class: 'ar-ext', href: r.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': t('ar.openSource') }, ' ↗') : null) },
     { label: t('ev.col.source'), render: (r) => h('span', {}, srcLabel(r.source), r.corp_name ? h('small', { class: 'muted', style: { display: 'block' } }, r.corp_name) : null) },
+    ...(query.get('tickers') ? [{ label: t('security.matchBasis'), render: r => tickerMatchBadge(r.ticker_match) }] : []),
     { label: t('ar.col.tickers'), render: (r) => (r.tickers.length ? r.tickers.join(', ') : '—') },
     { label: t('ar.col.status'), render: (r) => h('span', { class: 'ar-pills' }, statusPills(r.statuses)) },
     { label: t('ar.col.versions'), num: true, render: (r) => fmt.int(r.versions_visible) },

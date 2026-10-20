@@ -21,7 +21,7 @@ from typing import Callable
 from regime_lab.rag.metrics import abstention, ndcg_at_k, percentile, reciprocal_rank, unique_clusters_at_k
 from regime_lab.rag.rank import Index, build_index, title_sets
 from regime_lab.rag.rank import search as rank_search
-from regime_lab.rag.select import AS_OF_MODES, aware, select_as_of, with_tickers
+from regime_lab.rag.select import AS_OF_MODES, aware, select_as_of, ticker_matches, with_tickers
 from regime_lab.rag.text import doc_text, matches_conditions, query_conditions, tokenize
 
 INDEX_VERSION = 3  # 3: 문자 구간별 토큰화·조사 변형·완전 조건 후보 검사. 2: postings 정수 배열
@@ -120,14 +120,17 @@ def _validate(cfg: dict, q, as_of, mode, tickers, k) -> tuple[str, datetime, str
     return q, t, mode, tickers, k
 
 
-def search(ei: EvidenceIndex, cfg: dict, q: str, as_of, mode: str = "observed", tickers=None, k: int | None = None) -> dict:
+def search(ei: EvidenceIndex, cfg: dict, q: str, as_of, mode: str = "observed", tickers=None, k: int | None = None, *,
+           ticker_names: dict[str, str] | None = None) -> dict:
     """as_of 에 이용 가능했던 문서 중 관련 근거. 근거가 없으면 status=no_evidence 와 빈 목록.
 
     묶기를 켜면(rag.group_threshold) 결과는 묶음 대표이고, 제목이 비슷한 다른 기사는 similar 에 담는다.
     """
     q, t, mode, tickers, k = _validate(cfg, q, as_of, mode, tickers, k)
     r = cfg["rag"]
-    rows = with_tickers(ei.docs, select_as_of(ei.docs, t, mode), tickers)
+    visible = select_as_of(ei.docs, t, mode)
+    matches = ticker_matches(ei.docs, visible, tickers, ticker_names, cfg["rag"]["query_particles"]) if ticker_names is not None and tickers else None
+    rows = list(matches) if matches is not None else with_tickers(ei.docs, visible, tickers)
     conditions = query_conditions(q, r["query_particles"], r["particle_min_base_chars"])
     hits = rank_search(ei.index, ei.keys, tokenize(q), set(rows), k1=r["k1"], b=r["b"], top_k=k,
                        candidate_k=r["candidate_k"], mmr_lambda=r["mmr_lambda"], min_score=r["min_score"],
@@ -136,14 +139,17 @@ def search(ei: EvidenceIndex, cfg: dict, q: str, as_of, mode: str = "observed", 
     items = []
     for h in hits:
         d = ei.docs[h.row]
-        similar = [{f: ei.docs[m].get(f) for f in _SIMILAR_FIELDS} for m in h.members]
+        similar = [{f: ei.docs[m].get(f) for f in _SIMILAR_FIELDS}
+                   | ({"ticker_match": matches[m]} if matches is not None else {}) for m in h.members]
         items.append({f: d.get(f) for f in _DOC_FIELDS}
                      | {"score": round(h.score, 6), "matched_tokens": list(h.matched),
-                        "similar_count": len(similar), "similar": similar})
+                        "similar_count": len(similar), "similar": similar}
+                     | ({"ticker_match": matches[h.row]} if matches is not None else {}))
     return {"status": "ok" if items else "no_evidence", "items": items,
             "index": {"index_version": INDEX_VERSION, "docs_fingerprint": ei.docs_fingerprint, "fields": list(ei.fields),
                       "total_docs": len(ei.docs), "visible_docs": len(rows), "mode": mode, "as_of": t.isoformat(),
-                      "grouping": r["group_threshold"]}}
+                      "grouping": r["group_threshold"]}
+            | ({"ticker_filter": "code_or_name_mention"} if ticker_names is not None else {})}
 
 
 def _mean(xs: list[float]) -> float | None:
@@ -367,7 +373,7 @@ def _validate_browse(cfg: dict, as_of, mode, source_type, start, end, tickers, s
 
 def browse(ei: EvidenceIndex, cfg: dict, as_of, mode: str = "observed", source_type: str | None = None,
            start: str | None = None, end: str | None = None, tickers=None, status: str = "all", page: int = 1,
-           page_size: int | None = None) -> dict:
+           page_size: int | None = None, *, ticker_names: dict[str, str] | None = None) -> dict:
     """자료 보관함 목록. as_of 에 보이는 문서(doc_id 마다 최신 허용 버전)를 게시일·종목·출처 유형·상태로 거른다.
 
     facets 는 출처 유형·상태 필터를 걸기 전(시점·기간·종목만 적용) 개수 — 필터 버튼 옆 숫자용.
@@ -375,7 +381,9 @@ def browse(ei: EvidenceIndex, cfg: dict, as_of, mode: str = "observed", source_t
     """
     t, source_type, start, end, tickers, status, page, page_size = _validate_browse(
         cfg, as_of, mode, source_type, start, end, tickers, status, page, page_size)
-    rows = with_tickers(ei.docs, select_as_of(ei.docs, t, mode), tickers)
+    visible = select_as_of(ei.docs, t, mode)
+    matches = ticker_matches(ei.docs, visible, tickers, ticker_names, cfg["rag"]["query_particles"]) if ticker_names is not None and tickers else None
+    rows = list(matches) if matches is not None else with_tickers(ei.docs, visible, tickers)
     if start or end:
         rows = [i for i in rows if (not start or _pub_date(ei.docs[i]) >= start) and (not end or _pub_date(ei.docs[i]) <= end)]
     sts = {i: _statuses(ei.docs[i]) for i in rows}  # 행마다 한 번만 (facets·상태 필터·항목이 같이 쓴다)
@@ -395,11 +403,13 @@ def browse(ei: EvidenceIndex, cfg: dict, as_of, mode: str = "observed", source_t
              | {"tickers": _codes(ei.docs[i]), "statuses": sts[i],
                 "versions_visible": counts[ei.docs[i]["doc_id"]],
                 "has_amendment_candidate": bool(ei.docs[i].get("amends_candidate_doc_id"))}
+             | ({"ticker_match": matches[i]} if matches is not None else {})
              for i in shown]
     return {"status": "ok" if items else "no_documents", "items": items, "total": len(rows), "page": page,
             "page_size": page_size, "pages": max(1, -(-len(rows) // page_size)), "facets": facets,
             "index": {"docs_fingerprint": ei.docs_fingerprint, "total_docs": len(ei.docs), "mode": mode,
-                      "as_of": t.isoformat()}}
+                      "as_of": t.isoformat()}
+            | ({"ticker_filter": "code_or_name_mention"} if ticker_names is not None else {})}
 
 
 def document(ei: EvidenceIndex, cfg: dict, doc_id: str, as_of, mode: str = "observed") -> dict:

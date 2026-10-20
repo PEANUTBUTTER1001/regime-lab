@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from regime_lab.rag.text import name_mention_pattern, name_mentioned
+
 AS_OF_MODES = ("observed", "historical_assumed")
 
 
@@ -45,3 +47,21 @@ def with_tickers(docs: list[dict], rows: list[int], tickers: list[str]) -> list[
         return rows
     want = set(tickers)
     return [i for i in rows if any(x.get("code") in want for x in docs[i].get("tickers") or [])]
+
+
+def ticker_matches(docs: list[dict], rows: list[int], tickers: list[str], names: dict[str, str],
+                   particles: list[str]) -> dict[int, dict]:
+    """이미 as_of로 선택한 행의 코드 연결 OR 현재 이름 텍스트 언급. 원본 연결은 수정하지 않는다."""
+    want = set(tickers)
+    patterns = {code: pattern for code in sorted(want)
+                if (pattern := name_mention_pattern(names.get(code, ""), particles)) is not None}
+    found = {}
+    for i in rows:
+        doc = docs[i]
+        codes = sorted({x.get("code") for x in doc.get("tickers") or []} & want)
+        mentions = [{"code": code, "name": names[code], "field": field}
+                    for code, pattern in patterns.items() for field in ("title", "corp_name")
+                    if name_mentioned(doc.get(field), pattern)]
+        if codes or mentions:
+            found[i] = {"codes": codes, "name_mentions": mentions}
+    return found

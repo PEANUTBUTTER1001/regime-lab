@@ -45,6 +45,7 @@ export const api = {
   recover: (email) => request('POST', '/auth/recover', {email}),
   password: (password) => request('POST', '/auth/password', {password}),
   meta: () => request('GET', '/meta'),
+  securities: () => request('GET', '/securities'),
   preview: (filters) => request('POST', '/universe/preview', filters),
   submit: (strategies) => request('POST', '/runs', { strategies }),
   runs: () => request('GET', '/runs'),
